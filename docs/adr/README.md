@@ -38,7 +38,11 @@
   The scheduled job re-runs expansion and show search on an interval.
 - [0007: Geographic scope, runtime-configurable](0007-geographic-scope-runtime-configurable.md)
   Initial scope was "anywhere in Texas," later narrowed to "near Austin only — even San Antonio is too far," with an explicit requirement that the scope be easy to change without redeploying.
-- [0008: Hosting on Render](0008-hosting-on-render.md)
+- [0008: Hosting on Render](0008-hosting-on-render.md) — _Superseded by 0016_
   The app needs to run continuously (for the scheduler and the always-available web page) without relying on the developer's own machine, since development and operation are currently phone-only.
+  Related: [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md)
 - [0009: Single-user auth via Google OAuth](0009-google-oauth-single-user.md)
   The repo and deployed app are public.
+- [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md) — _Accepted_
+  [0008](0008-hosting-on-render.md) assumed Render's build would auto-detect a JVM/Maven project the way it auto-detects Node, Python, Ruby, Go, Rust, and Elixir.
+  Related: [0008: Hosting on Render](0008-hosting-on-render.md), [15. Build JVM projects with Gradle](0015-jvm-build-with-gradle.md)
