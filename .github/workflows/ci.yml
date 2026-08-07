@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Compiles and runs the test suite. Coverage-threshold enforcement
+      # (line > 80% / branch > 65%, per the ci-is-the-merge-gate ADR) is added
+      # once a test suite exists -- see issue #5.
+      - name: Build
+        run: ./gradlew --no-daemon build
+
+  adr-compliance:
+    name: ADR compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Numbering contiguous, no unresolved template tokens, index up to date.
+      - name: Check ADRs
+        run: python3 scripts/check_adrs.py
