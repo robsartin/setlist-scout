@@ -1,3 +1,12 @@
+---
+status: "Superseded by 0016"
+date: ""
+topic: hosting-on-render
+tags: []
+supersedes: []
+superseded-by: [hosting-on-render-requires-a-dockerfile-not-native-java-support]
+related: [hosting-on-render-requires-a-dockerfile-not-native-java-support]
+---
 # 0008: Hosting on Render
 
 Date: 2026-08-06

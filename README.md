@@ -44,9 +44,11 @@ in the meantime.
 ### 3. Deploy to Render
 - Push this repo to GitHub (via github.dev in your mobile browser — no clone needed)
 - render.com → New → Web Service → connect the repo
-- Environment: **Docker** is not required — Render auto-detects Gradle/Java.
-  Build command: `./gradlew clean bootJar`
-  Start command: `java -jar build/libs/setlist-scout.jar`
+- Environment: **Docker** — Render has no native Java/JVM runtime, so this repo's
+  root `Dockerfile` (multi-stage Gradle build → JRE runtime) is what Render builds
+  and runs. Leave Build Command / Start Command blank; the Dockerfile's
+  `ENTRYPOINT` handles the start.
+- Health check path: `/actuator/health`
 - Add a **Render Postgres** database (free tier) and copy its Internal Database URL
 - Set these environment variables in Render's dashboard:
   ```
