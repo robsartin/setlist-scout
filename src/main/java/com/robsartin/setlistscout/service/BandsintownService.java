@@ -51,14 +51,27 @@ public class BandsintownService {
             Show show = parseEvent(artistName, event);
             if (show == null || show.getEventDateTime() == null) continue;
             if (show.getEventDateTime().isBefore(start) || show.getEventDateTime().isAfter(end)) continue;
-            // client-side city/state filter -- Bandsintown venue data includes city/region text
+            // client-side city/state filter -- Bandsintown has no server-side radius/geo
+            // filter (see ADR-0003), so its results, which are the artist's shows worldwide,
+            // must be cut down to the saved location here.
             if (cityFilter != null && show.getVenueCity() != null
                     && !show.getVenueCity().equalsIgnoreCase(cityFilter)) {
                 continue; // caller can loosen this by passing cityFilter=null for a wider net
             }
+            String region = venueRegion(event); // Bandsintown's per-event state/province
+            if (stateFilter != null && region != null
+                    && !region.equalsIgnoreCase(stateFilter)) {
+                continue; // wrong state -- without this, out-of-state shows are persisted too
+            }
             shows.add(show);
         }
         return shows;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String venueRegion(Map<String, Object> event) {
+        Map<String, Object> venue = (Map<String, Object>) event.get("venue");
+        return venue != null ? (String) venue.get("region") : null;
     }
 
     @SuppressWarnings("unchecked")
