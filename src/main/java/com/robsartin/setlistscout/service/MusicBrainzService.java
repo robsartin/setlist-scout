@@ -21,12 +21,19 @@ import java.util.Map;
 public class MusicBrainzService {
 
     private final WebClient webClient;
+    private final long rateLimitMillis;
 
     public MusicBrainzService(AppProperties props) {
+        this(props, "https://musicbrainz.org/ws/2", 1100);
+    }
+
+    /** Test seam: local stub server and a near-zero rate-limit delay. */
+    MusicBrainzService(AppProperties props, String baseUrl, long rateLimitMillis) {
         this.webClient = WebClient.builder()
-                .baseUrl("https://musicbrainz.org/ws/2")
+                .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.USER_AGENT, props.apis().musicBrainzUserAgent())
                 .build();
+        this.rateLimitMillis = rateLimitMillis;
     }
 
     /** Returns related artist/band names (members, ex-members, collaborators, solo projects). */
@@ -82,7 +89,7 @@ public class MusicBrainzService {
 
     private void sleepForRateLimit() {
         try {
-            Thread.sleep(1100); // stay under MusicBrainz's ~1 req/sec limit
+            Thread.sleep(rateLimitMillis); // stay under MusicBrainz's ~1 req/sec limit
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

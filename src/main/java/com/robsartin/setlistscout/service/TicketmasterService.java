@@ -25,9 +25,12 @@ public class TicketmasterService {
     private final String apiKey;
 
     public TicketmasterService(AppProperties props) {
-        this.webClient = WebClient.builder()
-                .baseUrl("https://app.ticketmaster.com/discovery/v2")
-                .build();
+        this(props, "https://app.ticketmaster.com/discovery/v2");
+    }
+
+    /** Test seam: points at a local stub server instead of the real Ticketmaster API. */
+    TicketmasterService(AppProperties props, String baseUrl) {
+        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.apiKey = props.apis().ticketmasterApiKey();
     }
 

@@ -4,9 +4,7 @@ import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.util.UriUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -26,9 +24,12 @@ public class BandsintownService {
     private final String appId;
 
     public BandsintownService(AppProperties props) {
-        this.webClient = WebClient.builder()
-                .baseUrl("https://rest.bandsintown.com")
-                .build();
+        this(props, "https://rest.bandsintown.com");
+    }
+
+    /** Test seam: points at a local stub server instead of the real Bandsintown API. */
+    BandsintownService(AppProperties props, String baseUrl) {
+        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.appId = props.apis().bandsintownAppId();
     }
 
@@ -36,10 +37,16 @@ public class BandsintownService {
     public List<Show> searchShows(String artistName, String cityFilter, String stateFilter,
                                    LocalDateTime start, LocalDateTime end) {
         List<Show> shows = new ArrayList<>();
-        String encodedName = UriUtils.encodePathSegment(artistName, StandardCharsets.UTF_8);
 
+        // Build via a URI template variable rather than pre-encoding + string
+        // concatenation -- letting WebClient encode artistName itself avoids
+        // double-encoding (e.g. a pre-encoded "%20" becoming "%2520").
         List<Map<String, Object>> events = webClient.get()
-                .uri("/artists/" + encodedName + "/events?app_id=" + appId + "&date=upcoming")
+                .uri(uriBuilder -> uriBuilder
+                        .path("/artists/{artistName}/events")
+                        .queryParam("app_id", appId)
+                        .queryParam("date", "upcoming")
+                        .build(artistName))
                 .retrieve()
                 .bodyToMono(List.class)
                 .onErrorReturn(List.of())
