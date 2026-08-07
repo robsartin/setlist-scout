@@ -3,18 +3,22 @@ package com.robsartin.setlistscout.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
-import org.springframework.security.oauth2.core.user.OAuth2User;
-import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
-import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
-import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
  * Single-user gate: anyone can hit "Sign in with Google", but only the allow-listed
- * email actually gets past the check. Everyone else is rejected during the OAuth2
+ * email actually gets past the check. Everyone else is rejected during the OIDC
  * user-info exchange, before any session is established.
+ *
+ * Google login is an OIDC flow (the "openid" scope is requested in application.yml),
+ * so the gate has to hook the OIDC user service -- a plain OAuth2UserService is never
+ * invoked when an id_token is present, which would let the allow-list be bypassed.
  */
 @Configuration
 public class SecurityConfig {
@@ -33,19 +37,19 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .oauth2Login(oauth2 -> oauth2
-                .userInfoEndpoint(userInfo -> userInfo.oauth2UserService(allowListedUserService()))
+                .userInfoEndpoint(userInfo -> userInfo.oidcUserService(allowListedOidcUserService()))
             );
         return http.build();
     }
 
-    private OAuth2UserService<OAuth2UserRequest, OAuth2User> allowListedUserService() {
-        DefaultOAuth2UserService delegate = new DefaultOAuth2UserService();
+    private OAuth2UserService<OidcUserRequest, OidcUser> allowListedOidcUserService() {
+        OidcUserService delegate = new OidcUserService();
         String allowedEmail = appProperties.auth().allowedEmail();
 
         return (userRequest) -> {
-            OAuth2User user = delegate.loadUser(userRequest);
-            String email = user.getAttribute("email");
-            Boolean emailVerified = user.getAttribute("email_verified");
+            OidcUser user = delegate.loadUser(userRequest);
+            String email = user.getEmail();
+            Boolean emailVerified = user.getEmailVerified();
 
             if (email == null
                     || !email.equalsIgnoreCase(allowedEmail)
