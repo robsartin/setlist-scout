@@ -24,8 +24,13 @@ public class SimilarArtistLlmService {
     private static final Pattern LINE_ITEM = Pattern.compile("^\\s*[-\\d.]+\\s*[).]?\\s*(.+)$");
 
     public SimilarArtistLlmService(AppProperties props) {
+        this(props, "https://api.anthropic.com/v1");
+    }
+
+    /** Test seam: points at a local stub server instead of the real Anthropic API. */
+    SimilarArtistLlmService(AppProperties props, String baseUrl) {
         this.webClient = WebClient.builder()
-                .baseUrl("https://api.anthropic.com/v1")
+                .baseUrl(baseUrl)
                 .defaultHeader("anthropic-version", "2023-06-01")
                 .build();
         this.apiKey = props.apis().anthropicApiKey();

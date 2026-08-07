@@ -20,8 +20,13 @@ public class DiscogsService {
     private final WebClient webClient;
 
     public DiscogsService(AppProperties props) {
+        this(props, "https://api.discogs.com");
+    }
+
+    /** Test seam: points at a local stub server instead of the real Discogs API. */
+    DiscogsService(AppProperties props, String baseUrl) {
         this.webClient = WebClient.builder()
-                .baseUrl("https://api.discogs.com")
+                .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.USER_AGENT, "SetlistScout/0.1 (+personal use)")
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Discogs token=" + props.apis().discogsToken())
                 .build();

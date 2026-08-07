@@ -18,9 +18,12 @@ public class LastFmService {
     private final WebClient webClient;
 
     public LastFmService(AppProperties props) {
-        this.webClient = WebClient.builder()
-                .baseUrl("https://ws.audioscrobbler.com/2.0")
-                .build();
+        this(props, "https://ws.audioscrobbler.com/2.0");
+    }
+
+    /** Test seam: points at a local stub server instead of the real Last.fm API. */
+    LastFmService(AppProperties props, String baseUrl) {
+        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.apiKey = props.apis().lastFmApiKey();
     }
 
