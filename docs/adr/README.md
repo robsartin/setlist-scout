@@ -1,15 +1,39 @@
 # Architecture Decision Records
 
-Records of the significant design decisions for Setlist Scout, in the order
-they were made. Format follows Michael Nygard's ADR template (Context /
-Decision / Consequences).
+## Universal
 
-- [0001](0001-member-lineup-expansion-sources.md) — Member/lineup expansion sources
-- [0002](0002-similar-artist-expansion-sources.md) — Similar-artist expansion sources
-- [0003](0003-show-search-sources.md) — Show search sources
-- [0004](0004-human-review-gate-for-expansion.md) — Human review gate for artist expansion
-- [0005](0005-output-as-web-page.md) — Output as a live web page, not file/email
-- [0006](0006-scan-frequency.md) — Scan frequency
-- [0007](0007-geographic-scope-runtime-configurable.md) — Geographic scope, runtime-configurable
-- [0008](0008-hosting-on-render.md) — Hosting on Render
-- [0009](0009-google-oauth-single-user.md) — Single-user auth via Google OAuth
+- [10. Record architecture decisions with ADRs](0010-record-architecture-decisions.md) — _Accepted_
+  Architecturally significant decisions — choices that shape structure, dependencies, interfaces, or the way the team works — need a durable record.
+  Related: [13. Keep developer and user documentation current](0013-keep-documentation-current.md)
+- [11. Integrate via a PR-based trunk workflow](0011-pr-based-trunk-workflow.md) — _Accepted_
+  We want `main` to stay releasable at all times, changes to be reviewable in coherent units, and history to be legible.
+  Related: [12. Use the Mikado Method to keep the build green](0012-mikado-method-for-changes.md), [13. Keep developer and user documentation current](0013-keep-documentation-current.md)
+- [12. Use the Mikado Method to keep the build green](0012-mikado-method-for-changes.md) — _Accepted_
+  Large refactorings, and changes that ripple across a codebase, tempt us into long stretches where nothing compiles and nothing is committable.
+  Related: [11. Integrate via a PR-based trunk workflow](0011-pr-based-trunk-workflow.md)
+- [13. Keep developer and user documentation current](0013-keep-documentation-current.md) — _Accepted_
+  Documentation that lags the code is worse than none — it misleads.
+  Related: [10. Record architecture decisions with ADRs](0010-record-architecture-decisions.md), [11. Integrate via a PR-based trunk workflow](0011-pr-based-trunk-workflow.md)
+- [14. Declare an explicit license and copyright](0014-license-and-copyright.md) — _Accepted_
+  A repository with no license is "all rights reserved" by default — others (and future us) have no clear terms for use, and intent is ambiguous.
+
+## Uncategorized
+
+- [0001: Member/lineup expansion sources](0001-member-lineup-expansion-sources.md)
+  The seed band list needs to expand to include individual members' other projects and side bands (e.g., a Tom Petty fan should also see Mike Campbell & the Dirty Knobs).
+- [0002: Similar-artist expansion sources](0002-similar-artist-expansion-sources.md)
+  Beyond lineup relationships, the list should expand with taste-based "similar artists" — bands that sound alike but share no members (e.g.
+- [0003: Show search sources](0003-show-search-sources.md)
+  Once the artist list is finalized, the service needs to find their upcoming shows near Austin.
+- [0004: Human review gate for artist expansion](0004-human-review-gate-for-expansion.md)
+  Automated expansion (ADRs 0001, 0002) will produce false positives — loosely related artists, name collisions, or LLM suggestions that don't actually fit.
+- [0005: Output as a live web page, not file/email](0005-output-as-web-page.md)
+  The service needs to present found shows in a usable form.
+- [0006: Scan frequency](0006-scan-frequency.md)
+  The scheduled job re-runs expansion and show search on an interval.
+- [0007: Geographic scope, runtime-configurable](0007-geographic-scope-runtime-configurable.md)
+  Initial scope was "anywhere in Texas," later narrowed to "near Austin only — even San Antonio is too far," with an explicit requirement that the scope be easy to change without redeploying.
+- [0008: Hosting on Render](0008-hosting-on-render.md)
+  The app needs to run continuously (for the scheduler and the always-available web page) without relying on the developer's own machine, since development and operation are currently phone-only.
+- [0009: Single-user auth via Google OAuth](0009-google-oauth-single-user.md)
+  The repo and deployed app are public.
