@@ -17,6 +17,11 @@
 - [14. Declare an explicit license and copyright](0014-license-and-copyright.md) — _Accepted_
   A repository with no license is "all rights reserved" by default — others (and future us) have no clear terms for use, and intent is ambiguous.
 
+## Language
+
+- [15. Build JVM projects with Gradle](0015-jvm-build-with-gradle.md) — _Accepted_
+  JVM projects need a consistent build tool, dependency management, and package organization so repositories are predictable to build and navigate, and so shared tooling (formatting, coverage, arch tests) can be applied the same way everywhere.
+
 ## Uncategorized
 
 - [0001: Member/lineup expansion sources](0001-member-lineup-expansion-sources.md)

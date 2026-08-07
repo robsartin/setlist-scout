@@ -44,9 +44,9 @@ in the meantime.
 ### 3. Deploy to Render
 - Push this repo to GitHub (via github.dev in your mobile browser — no clone needed)
 - render.com → New → Web Service → connect the repo
-- Environment: **Docker** is not required — Render auto-detects Maven/Java.
-  Build command: `./mvnw clean package -DskipTests`
-  Start command: `java -jar target/setlist-scout.jar`
+- Environment: **Docker** is not required — Render auto-detects Gradle/Java.
+  Build command: `./gradlew clean bootJar`
+  Start command: `java -jar build/libs/setlist-scout.jar`
 - Add a **Render Postgres** database (free tier) and copy its Internal Database URL
 - Set these environment variables in Render's dashboard:
   ```
@@ -71,5 +71,5 @@ Save. Takes effect on the next scan — no redeploy, no code change.
 ## Local development
 Requires a local Postgres (or point `DATABASE_URL` at one). Run:
 ```
-./mvnw spring-boot:run
+./gradlew bootRun
 ```

@@ -5,3 +5,7 @@ target/
 .vscode/
 .DS_Store
 application-local.yml
+
+# Gradle
+.gradle/
+build/
