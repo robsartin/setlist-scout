@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: setlist-scout
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/setlistscout}
+    username: ${DATABASE_USERNAME:setlistscout}
+    password: ${DATABASE_PASSWORD:setlistscout}
+
+  jpa:
+    hibernate:
+      ddl-auto: update # fine for a personal single-user app; switch to migrations if this grows
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope: openid, email, profile
+
+server:
+  port: ${PORT:8080} # Render sets PORT at runtime
+
+setlistscout:
+  scan-interval-ms: ${SCAN_INTERVAL_MS:259200000} # every 3 days by default -- "every few days"
+  auth:
+    allowed-email: ${ALLOWED_EMAIL:rob.sartin@gmail.com}
+  apis:
+    ticketmaster-api-key: ${TICKETMASTER_API_KEY:}
+    bandsintown-app-id: ${BANDSINTOWN_APP_ID:}
+    music-brainz-user-agent: ${MUSICBRAINZ_USER_AGENT:SetlistScout/0.1 ( rob.sartin@gmail.com )}
+    discogs-token: ${DISCOGS_TOKEN:}
+    last-fm-api-key: ${LASTFM_API_KEY:}
+    anthropic-api-key: ${ANTHROPIC_API_KEY:}
+  defaults:
+    city: ${DEFAULT_CITY:Austin}
+    state: ${DEFAULT_STATE:TX}
+    radius-miles: ${DEFAULT_RADIUS_MILES:50}
+    months-ahead: ${DEFAULT_MONTHS_AHEAD:6}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

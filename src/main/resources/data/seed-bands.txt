@@ -1,0 +1,40 @@
+# One band per line. Lines starting with # are ignored.
+# Edit this file and redeploy to change the seed list -- or use the "Add" form on /artists.
+# Note: "Anyone who plays Austin Classical Guitar" isn't a searchable artist name,
+# so it's tracked separately -- check austinclassicalguitar.org's season calendar directly.
+
+Dawes
+Punch Brothers
+Nickel Creek
+Kaleo
+James Taylor
+Warren Zevon
+Scruffy the Cat
+O Positive
+Sierra Hull
+Steve Martin
+Steep Canyon Rangers
+Pete Yorn
+Tom Petty and the Heartbreakers
+Paul Simon
+Avett Brothers
+Fleetwood Mac
+Eagles
+Bruce Springsteen
+Little Feat
+The Doobie Brothers
+Steely Dan
+Boz Scaggs
+Bob Seger
+Jackson Browne
+Dire Straits
+Tom Waits
+Rickie Lee Jones
+The Cars
+Talking Heads
+R.E.M.
+The Replacements
+Elvis Costello
+Squeeze
+Boston
+Joe Walsh

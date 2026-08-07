@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Concert Finder</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
+        th a { color: inherit; text-decoration: none; }
+        th a:hover { text-decoration: underline; }
+        .settings { background: #f4f4f4; padding: 1rem; border-radius: 6px; }
+        .settings input { width: 5rem; }
+        form.inline { display: inline; }
+        nav a { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/">Shows</a>
+        <a href="/artists">Artists</a>
+    </nav>
+    <h1>Upcoming Shows</h1>
+
+    <div class="settings">
+        <form th:action="@{/settings}" method="post">
+            Near
+            <input type="text" name="city" th:value="${settings.city}"/>,
+            <input type="text" name="state" th:value="${settings.state}" size="2"/>
+            within <input type="number" name="radiusMiles" th:value="${settings.radiusMiles}"/> miles,
+            next <input type="number" name="monthsAhead" th:value="${settings.monthsAhead}"/> months
+            <button type="submit">Save</button>
+        </form>
+        <form class="inline" th:action="@{/scan-now}" method="post">
+            <button type="submit">Scan now</button>
+        </form>
+    </div>
+
+    <table>
+        <thead>
+        <tr>
+            <th><a href="?sort=artist">Band</a></th>
+            <th><a href="?sort=eventDate">Date / Time</a></th>
+            <th><a href="?sort=venue">Venue</a></th>
+            <th><a href="?sort=price">Price</a></th>
+            <th><a href="?sort=discoveredAt">Found</a></th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="show : ${shows}">
+            <td th:text="${show.artistName}">Band</td>
+            <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
+            <td>
+                <span th:text="${show.venueName}">Venue</span>
+                <span th:if="${show.venueCity}" th:text="' (' + ${show.venueCity} + ')'"></span>
+                <a th:if="${show.ticketUrl}" th:href="${show.ticketUrl}" target="_blank">tickets</a>
+            </td>
+            <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
+            <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
+        </tr>
+        </tbody>
+    </table>
+    <p th:if="${#lists.isEmpty(shows)}">No shows found yet. Try "Scan now", or check back after the next scheduled scan.</p>
+</body>
+</html>

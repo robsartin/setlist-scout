@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Artists - Concert Finder</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+        table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; margin-bottom: 2rem; }
+        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
+        .note { color: #666; font-size: 0.9em; }
+        button { margin-right: 0.25rem; }
+        nav a { margin-right: 1rem; }
+        form.inline { display: inline; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/">Shows</a>
+        <a href="/artists">Artists</a>
+    </nav>
+
+    <h1>Active list (seed + approved)</h1>
+    <table>
+        <thead><tr><th>Name</th><th>Source</th></tr></thead>
+        <tbody>
+        <tr th:each="a : ${active}">
+            <td th:text="${a.name}">Name</td>
+            <td th:text="${a.source}">Source</td>
+        </tr>
+        </tbody>
+    </table>
+
+    <form th:action="@{/artists/seed}" method="post">
+        <input type="text" name="name" placeholder="Add a band to the seed list"/>
+        <button type="submit">Add</button>
+    </form>
+
+    <h1>Pending review</h1>
+    <form th:action="@{/artists/expand-now}" method="post">
+        <button type="submit">Run expansion now</button>
+    </form>
+    <table>
+        <thead><tr><th>Name</th><th>Why</th><th>Actions</th></tr></thead>
+        <tbody>
+        <tr th:each="a : ${pending}">
+            <td th:text="${a.name}">Name</td>
+            <td class="note" th:text="${a.note}">Note</td>
+            <td>
+                <form class="inline" th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
+                    <button type="submit">Approve</button>
+                </form>
+                <form class="inline" th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
+                    <button type="submit">Reject</button>
+                </form>
+            </td>
+        </tr>
+        </tbody>
+    </table>
+    <p th:if="${#lists.isEmpty(pending)}">Nothing pending. Run expansion to find more.</p>
+
+    <h1>Rejected</h1>
+    <table>
+        <thead><tr><th>Name</th><th>Why it was suggested</th></tr></thead>
+        <tbody>
+        <tr th:each="a : ${rejected}">
+            <td th:text="${a.name}">Name</td>
+            <td class="note" th:text="${a.note}">Note</td>
+        </tr>
+        </tbody>
+    </table>
+</body>
+</html>
