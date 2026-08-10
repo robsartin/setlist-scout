@@ -46,3 +46,5 @@
 - [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md) — _Accepted_
   [0008](0008-hosting-on-render.md) assumed Render's build would auto-detect a JVM/Maven project the way it auto-detects Node, Python, Ruby, Go, Rust, and Elixir.
   Related: [0008: Hosting on Render](0008-hosting-on-render.md), [15. Build JVM projects with Gradle](0015-jvm-build-with-gradle.md)
+- [0017: Tribute/cover band expansion sources](0017-tribute-band-expansion-sources.md)
+  Tribute acts don't appear in MusicBrainz lineup relations or Last.fm "similar artist" queries, so neither existing source finds them.

@@ -23,7 +23,7 @@ public record AppProperties(
             String musicBrainzUserAgent, // MusicBrainz requires a descriptive User-Agent, not a key
             String discogsToken,
             String lastFmApiKey,
-            String anthropicApiKey // for the LLM-based similar-artist cross-check
+            String anthropicApiKey // for the LLM-based similar-artist cross-check and tribute-band lookup
     ) {}
 
     public record Defaults(
