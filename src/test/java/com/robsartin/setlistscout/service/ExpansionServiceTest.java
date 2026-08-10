@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,16 +30,22 @@ class ExpansionServiceTest {
     @Mock private DiscogsService discogs;
     @Mock private LastFmService lastFm;
     @Mock private SimilarArtistLlmService similarArtistLlm;
+    @Mock private TributeLlmService tributeLlm;
 
     private ExpansionService expansionService;
 
     @BeforeEach
     void setUp() {
-        expansionService = new ExpansionService(artistRepository, musicBrainz, discogs, lastFm, similarArtistLlm);
+        expansionService = new ExpansionService(
+                artistRepository, musicBrainz, discogs, lastFm, similarArtistLlm, tributeLlm);
     }
 
     private static Artist seedArtist(String name) {
         return new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+    }
+
+    private static Artist approvedArtist(String name) {
+        return new Artist(name, ArtistSource.SIMILAR_EXPANSION, ArtistStatus.APPROVED, "x", "x");
     }
 
     @Test
@@ -144,5 +151,42 @@ class ExpansionServiceTest {
         ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
         verify(artistRepository).save(captor.capture());
         assertThat(captor.getValue().getNote()).isEqualTo("similar to Dawes (single-source match)");
+    }
+
+    @Test
+    @DisplayName("should save a tribute act for a SEED base with the TRIBUTE_EXPANSION source")
+    void shouldSaveTributeForSeed() {
+        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Iron Maiden")));
+        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
+        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
+        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(tributeLlm.findTributeBands("Iron Maiden", 5)).thenReturn(List.of("The Iron Maidens"));
+        when(artistRepository.existsByNameIgnoreCase("The Iron Maidens")).thenReturn(false);
+
+        expansionService.expandAll();
+
+        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository).save(captor.capture());
+        Artist saved = captor.getValue();
+        assertThat(saved.getName()).isEqualTo("The Iron Maidens");
+        assertThat(saved.getSource()).isEqualTo(ArtistSource.TRIBUTE_EXPANSION);
+        assertThat(saved.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+        assertThat(saved.getDiscoveredVia()).isEqualTo("Iron Maiden");
+        assertThat(saved.getNote()).isEqualTo("tribute/cover act for Iron Maiden");
+    }
+
+    @Test
+    @DisplayName("should NOT run tribute expansion for an APPROVED (non-seed) base")
+    void shouldSkipTributeForApproved() {
+        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(approvedArtist("Nickel Creek")));
+        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
+        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
+        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+
+        expansionService.expandAll();
+
+        verify(tributeLlm, never()).findTributeBands(any(), anyInt());
     }
 }
