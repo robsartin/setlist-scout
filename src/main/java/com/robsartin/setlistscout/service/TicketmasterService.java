@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -24,6 +25,7 @@ public class TicketmasterService {
     private final WebClient webClient;
     private final String apiKey;
 
+    @Autowired
     public TicketmasterService(AppProperties props) {
         this(props, "https://app.ticketmaster.com/discovery/v2");
     }

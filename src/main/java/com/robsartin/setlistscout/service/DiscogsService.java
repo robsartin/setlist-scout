@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import org.springframework.http.HttpHeaders;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -19,6 +20,7 @@ public class DiscogsService {
 
     private final WebClient webClient;
 
+    @Autowired
     public DiscogsService(AppProperties props) {
         this(props, "https://api.discogs.com");
     }

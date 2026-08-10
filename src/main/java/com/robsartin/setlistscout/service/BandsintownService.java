@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -23,6 +24,7 @@ public class BandsintownService {
     private final WebClient webClient;
     private final String appId;
 
+    @Autowired
     public BandsintownService(AppProperties props) {
         this(props, "https://rest.bandsintown.com");
     }
