@@ -3,7 +3,11 @@ spring:
     name: setlist-scout
 
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/setlistscout}
+    # Either set DATABASE_URL (a full jdbc:postgresql:// URL) directly, or let it be
+    # composed from DB_HOST/DB_PORT/DB_NAME -- the render.yaml blueprint wires those
+    # three from the managed database automatically, so nothing has to be hand-formatted.
+    # Local dev falls back to localhost with no env vars set.
+    url: ${DATABASE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:setlistscout}}
     username: ${DATABASE_USERNAME:setlistscout}
     password: ${DATABASE_PASSWORD:setlistscout}
 

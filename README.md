@@ -42,19 +42,29 @@ in the meantime.
 - MusicBrainz needs no key, just a descriptive User-Agent (already set in `application.yml`)
 
 ### 3. Deploy to Render
-- Push this repo to GitHub (via github.dev in your mobile browser — no clone needed)
-- render.com → New → Web Service → connect the repo
-- Environment: **Docker** — Render has no native Java/JVM runtime, so this repo's
-  root `Dockerfile` (multi-stage Gradle build → JRE runtime) is what Render builds
-  and runs. Leave Build Command / Start Command blank; the Dockerfile's
-  `ENTRYPOINT` handles the start.
-- Health check path: `/actuator/health`
-- Add a **Render Postgres** database (free tier) and copy its Internal Database URL
-- Set these environment variables in Render's dashboard:
+
+Render has no native Java/JVM runtime, so the root `Dockerfile` (multi-stage Gradle
+build → JRE runtime) is what Render builds and runs — Environment is **Docker**.
+
+**Option A — Blueprint (recommended, least manual setup).** `render.yaml` in the repo
+root provisions the web service *and* the Postgres database and wires the database
+connection automatically, so there's no JDBC URL to hand-format.
+- render.com → **New → Blueprint** → connect this repo.
+- Render creates both services and prompts you for the `sync: false` secrets
+  (`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` from step 1, and the API keys from step 2).
+- Set the Google OAuth **Authorized redirect URI** to
+  `https://<your-render-url>/login/oauth2/code/google` (step 1).
+
+**Option B — Manual dashboard.**
+- render.com → New → Web Service → connect the repo. Environment: **Docker**. Leave
+  Build/Start Command blank; the Dockerfile's `ENTRYPOINT` starts the app.
+- Health check path: `/actuator/health`.
+- Add a **Render Postgres** (free tier). Open its **Connections** page for the values below.
+- Set these on the **web service** (not the database):
   ```
-  DATABASE_URL=<from Render Postgres>
-  DATABASE_USERNAME=<from Render Postgres>
-  DATABASE_PASSWORD=<from Render Postgres>
+  DATABASE_URL=jdbc:postgresql://<INTERNAL_HOSTNAME>:5432/<DATABASE>
+  DATABASE_USERNAME=<username>
+  DATABASE_PASSWORD=<password>
   GOOGLE_CLIENT_ID=<from step 1>
   GOOGLE_CLIENT_SECRET=<from step 1>
   ALLOWED_EMAIL=rob.sartin@gmail.com
@@ -64,6 +74,13 @@ in the meantime.
   LASTFM_API_KEY=<from step 2>
   ANTHROPIC_API_KEY=<from step 2>
   ```
+  > **`DATABASE_URL` must be a `jdbc:postgresql://` URL** built from the internal
+  > hostname — **not** Render's raw `postgresql://user:pass@host/db` Internal Database
+  > URL pasted directly. Getting this wrong makes the app fall back to `localhost` and
+  > fail to start. (Alternatively, set `DB_HOST`/`DB_PORT`/`DB_NAME` instead of
+  > `DATABASE_URL` and the app composes the JDBC URL for you — this is what the Blueprint
+  > does.) The web service and database must be in the same region.
+
 - Deploy. Visit the Render URL, sign in with Google — only rob.sartin@gmail.com gets past the login.
 
 ## Changing the search location later
