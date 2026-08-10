@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -17,6 +18,7 @@ public class LastFmService {
 
     private final WebClient webClient;
 
+    @Autowired
     public LastFmService(AppProperties props) {
         this(props, "https://ws.audioscrobbler.com/2.0");
     }
