@@ -23,17 +23,20 @@ public class ExpansionService {
     private final DiscogsService discogs;
     private final LastFmService lastFm;
     private final SimilarArtistLlmService similarArtistLlm;
+    private final TributeLlmService tributeLlm;
 
     public ExpansionService(ArtistRepository artistRepository,
                              MusicBrainzService musicBrainz,
                              DiscogsService discogs,
                              LastFmService lastFm,
-                             SimilarArtistLlmService similarArtistLlm) {
+                             SimilarArtistLlmService similarArtistLlm,
+                             TributeLlmService tributeLlm) {
         this.artistRepository = artistRepository;
         this.musicBrainz = musicBrainz;
         this.discogs = discogs;
         this.lastFm = lastFm;
         this.similarArtistLlm = similarArtistLlm;
+        this.tributeLlm = tributeLlm;
     }
 
     public void expandAll() {
@@ -43,6 +46,9 @@ public class ExpansionService {
         for (Artist base : baseArtists) {
             expandMemberRelations(base);
             expandSimilarArtists(base);
+            if (base.getStatus() == ArtistStatus.SEED) {
+                expandTributeBands(base);
+            }
         }
     }
 
@@ -71,6 +77,13 @@ public class ExpansionService {
             String note = "similar to " + base.getName()
                     + (confirmedByBoth ? " (confirmed by Last.fm + LLM)" : " (single-source match)");
             saveIfNew(name, ArtistSource.SIMILAR_EXPANSION, base.getName(), note);
+        }
+    }
+
+    private void expandTributeBands(Artist base) {
+        for (String name : tributeLlm.findTributeBands(base.getName(), 5)) {
+            saveIfNew(name, ArtistSource.TRIBUTE_EXPANSION, base.getName(),
+                    "tribute/cover act for " + base.getName());
         }
     }
 
