@@ -1,0 +1,66 @@
+# Render Blueprint (Infrastructure as Code).
+#
+# Provision everything in one step: Render Dashboard -> New -> Blueprint -> connect
+# this repo. Render reads this file, creates the web service AND the Postgres database,
+# and wires the database connection automatically (DB_HOST/DB_PORT/DB_NAME/username/
+# password come straight from the managed database -- no hand-formatted JDBC URL, so the
+# "connection to localhost refused" footgun can't happen). You are prompted once for the
+# secrets marked `sync: false`.
+#
+# This is for a fresh Blueprint-managed setup. It does NOT retroactively manage a web
+# service you already created by hand -- for that, set the env vars per the README.
+services:
+  - type: web
+    name: setlist-scout
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      # Database connection -- wired automatically from the managed database below.
+      - key: DB_HOST
+        fromDatabase:
+          name: setlist-scout-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: setlist-scout-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: setlist-scout-db
+          property: database
+      - key: DATABASE_USERNAME
+        fromDatabase:
+          name: setlist-scout-db
+          property: user
+      - key: DATABASE_PASSWORD
+        fromDatabase:
+          name: setlist-scout-db
+          property: password
+      # Single-user gate.
+      - key: ALLOWED_EMAIL
+        value: rob.sartin@gmail.com
+      # Secrets -- Render prompts for these on first Blueprint apply (never committed).
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: TICKETMASTER_API_KEY
+        sync: false
+      - key: BANDSINTOWN_APP_ID
+        sync: false
+      - key: DISCOGS_TOKEN
+        sync: false
+      - key: LASTFM_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+databases:
+  - name: setlist-scout-db
+    plan: free
+    region: oregon
+    databaseName: setlistscout
+    user: setlistscout
