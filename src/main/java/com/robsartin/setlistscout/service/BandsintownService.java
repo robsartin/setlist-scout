@@ -4,7 +4,7 @@ import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -21,7 +21,7 @@ import java.util.Map;
 @Service
 public class BandsintownService {
 
-    private final WebClient webClient;
+    private final RestClient restClient;
     private final String appId;
 
     @Autowired
@@ -31,7 +31,7 @@ public class BandsintownService {
 
     /** Test seam: points at a local stub server instead of the real Bandsintown API. */
     BandsintownService(AppProperties props, String baseUrl) {
-        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
+        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
         this.appId = props.apis().bandsintownAppId();
     }
 
@@ -41,18 +41,21 @@ public class BandsintownService {
         List<Show> shows = new ArrayList<>();
 
         // Build via a URI template variable rather than pre-encoding + string
-        // concatenation -- letting WebClient encode artistName itself avoids
+        // concatenation -- letting the client encode artistName itself avoids
         // double-encoding (e.g. a pre-encoded "%20" becoming "%2520").
-        List<Map<String, Object>> events = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/artists/{artistName}/events")
-                        .queryParam("app_id", appId)
-                        .queryParam("date", "upcoming")
-                        .build(artistName))
-                .retrieve()
-                .bodyToMono(List.class)
-                .onErrorReturn(List.of())
-                .block();
+        List<Map<String, Object>> events;
+        try {
+            events = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/artists/{artistName}/events")
+                            .queryParam("app_id", appId)
+                            .queryParam("date", "upcoming")
+                            .build(artistName))
+                    .retrieve()
+                    .body(List.class);
+        } catch (Exception e) {
+            events = List.of();
+        }
 
         if (events == null) return shows;
 

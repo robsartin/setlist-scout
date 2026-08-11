@@ -3,7 +3,7 @@ package com.robsartin.setlistscout.service;
 import com.robsartin.setlistscout.config.AppProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,7 +16,7 @@ import java.util.Map;
 @Service
 public class LastFmService {
 
-    private final WebClient webClient;
+    private final RestClient restClient;
 
     @Autowired
     public LastFmService(AppProperties props) {
@@ -25,7 +25,7 @@ public class LastFmService {
 
     /** Test seam: points at a local stub server instead of the real Last.fm API. */
     LastFmService(AppProperties props, String baseUrl) {
-        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
+        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
         this.apiKey = props.apis().lastFmApiKey();
     }
 
@@ -35,18 +35,21 @@ public class LastFmService {
     public List<String> findSimilarArtists(String artistName, int limit) {
         List<String> similar = new ArrayList<>();
 
-        Map<String, Object> response = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .queryParam("method", "artist.getsimilar")
-                        .queryParam("artist", artistName)
-                        .queryParam("api_key", apiKey)
-                        .queryParam("format", "json")
-                        .queryParam("limit", limit)
-                        .build())
-                .retrieve()
-                .bodyToMono(Map.class)
-                .onErrorReturn(Map.of())
-                .block();
+        Map<String, Object> response;
+        try {
+            response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .queryParam("method", "artist.getsimilar")
+                            .queryParam("artist", artistName)
+                            .queryParam("api_key", apiKey)
+                            .queryParam("format", "json")
+                            .queryParam("limit", limit)
+                            .build())
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            response = Map.of();
+        }
 
         if (response == null) return similar;
         Map<String, Object> similarArtists = (Map<String, Object>) response.get("similarartists");

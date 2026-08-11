@@ -51,7 +51,7 @@ class ApplicationContextSmokeTest {
     @Test
     @DisplayName("the full application context starts")
     void contextLoads() {
-        // Fails if any bean (e.g. the WebClient services) can't be wired -- the #14 regression guard.
+        // Fails if any bean (e.g. the RestClient services) can't be wired -- the #14 regression guard.
     }
 
     @Test
