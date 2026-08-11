@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.scheduler;
 
 import com.robsartin.setlistscout.domain.SearchSettings;
+import com.robsartin.setlistscout.observability.Correlation;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.service.ExpansionService;
 import com.robsartin.setlistscout.service.ShowAggregationService;
@@ -31,8 +32,10 @@ public class ShowScanScheduler {
     public void scan() {
         for (SearchSettings settings : settingsRepository.findAll()) {
             String owner = settings.getOwner();
-            expansionService.expandAll(owner);       // surfaces new PENDING_REVIEW candidates only
-            showAggregationService.scanForShows(owner); // searches SEED + APPROVED artists only
+            // surfaces new PENDING_REVIEW candidates only
+            Correlation.run("expansion", owner, null, () -> expansionService.expandAll(owner));
+            // searches SEED + APPROVED artists only
+            Correlation.run("scan", owner, null, () -> showAggregationService.scanForShows(owner));
         }
     }
 }

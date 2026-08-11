@@ -1,8 +1,14 @@
 package com.robsartin.setlistscout.service;
 
+import com.robsartin.setlistscout.observability.Correlation;
+import com.robsartin.setlistscout.observability.CorrelationIds;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -47,6 +53,28 @@ class AsyncScanRunnerTest {
 
         runner.startScan(OWNER);
 
+        assertThat(state.isRunning(OWNER)).isFalse();
+    }
+
+    @Test
+    void scanRunsUnderAScanCorrelationContextAndClearsItAfter() {
+        ShowAggregationService aggregation = mock(ShowAggregationService.class);
+        ScanStateService state = new ScanStateService();
+        AsyncScanRunner runner = new AsyncScanRunner(aggregation, state, Runnable::run);
+
+        AtomicReference<String> cidDuring = new AtomicReference<>();
+        AtomicReference<String> jobDuring = new AtomicReference<>();
+        doAnswer(invocation -> {
+            cidDuring.set(MDC.get(Correlation.CID));
+            jobDuring.set(MDC.get(Correlation.JOB));
+            return null;
+        }).when(aggregation).scanForShows(OWNER);
+
+        runner.startScan(OWNER);
+
+        assertThat(CorrelationIds.isValid(cidDuring.get())).isTrue();
+        assertThat(jobDuring.get()).isEqualTo("scan");
+        assertThat(MDC.get(Correlation.CID)).isNull();
         assertThat(state.isRunning(OWNER)).isFalse();
     }
 }
