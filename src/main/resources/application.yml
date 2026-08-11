@@ -67,3 +67,10 @@ management:
     web:
       exposure:
         include: health
+
+logging:
+  structured:
+    format:
+      console: ecs
+  level:
+    com.robsartin.setlistscout: ${LOG_LEVEL:INFO}
