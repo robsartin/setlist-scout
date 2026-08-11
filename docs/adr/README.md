@@ -41,7 +41,7 @@
 - [0008: Hosting on Render](0008-hosting-on-render.md) — _Superseded by 0016_
   The app needs to run continuously (for the scheduler and the always-available web page) without relying on the developer's own machine, since development and operation are currently phone-only.
   Related: [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md)
-- [0009: Single-user auth via Google OAuth](0009-google-oauth-single-user.md)
+- [0009: Google OAuth with a per-user allow-list](0009-google-oauth-single-user.md)
   The repo and deployed app are public.
 - [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md) — _Accepted_
   [0008](0008-hosting-on-render.md) assumed Render's build would auto-detect a JVM/Maven project the way it auto-detects Node, Python, Ruby, Go, Rust, and Elixir.

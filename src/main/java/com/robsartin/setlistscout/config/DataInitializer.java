@@ -40,36 +40,29 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        seedAndBackfillSettings();
-        importSeedBandsIfEmpty();
+        String seedOwner = appProperties.auth().seedOwner();
+        seedSettingsIfMissing(seedOwner);
+        importSeedBandsIfEmpty(seedOwner);
     }
 
-    /**
-     * Ensures the singleton settings row exists and has a ZIP + geocoded coordinates --
-     * creating it from defaults if missing, and backfilling the ZIP/lat/long for a row
-     * that predates ZIP-based location. Idempotent and best-effort (a failed geocode just
-     * leaves coordinates null; Bandsintown then falls back to all-in-window).
-     */
-    private void seedAndBackfillSettings() {
+    /** Creates the seed owner's settings row (default ZIP, geocoded) if they don't have one yet. */
+    private void seedSettingsIfMissing(String owner) {
+        if (settingsRepository.findByOwner(owner).isPresent()) return;
         var d = appProperties.defaults();
-        SearchSettings settings = settingsRepository.findById(1L)
-                .orElseGet(() -> new SearchSettings(d.city(), d.state(), d.radiusMiles(), d.monthsAhead()));
-        if (settings.getPostalCode() == null || settings.getPostalCode().isBlank()) {
-            settings.setPostalCode(d.postalCode());
-        }
-        if (settings.getLatitude() == null || settings.getLongitude() == null) {
-            geocodingService.geocode(settings.getPostalCode()).ifPresent(geo -> {
-                settings.setLatitude(geo.latitude());
-                settings.setLongitude(geo.longitude());
-                settings.setCity(geo.city());
-                settings.setState(geo.state());
-            });
-        }
+        SearchSettings settings = new SearchSettings(owner, d.city(), d.state(), d.radiusMiles(), d.monthsAhead());
+        settings.setPostalCode(d.postalCode());
+        geocodingService.geocode(d.postalCode()).ifPresent(geo -> {
+            settings.setLatitude(geo.latitude());
+            settings.setLongitude(geo.longitude());
+            settings.setCity(geo.city());
+            settings.setState(geo.state());
+        });
         settingsRepository.save(settings);
     }
 
-    private void importSeedBandsIfEmpty() throws Exception {
-        if (!artistRepository.findByStatus(ArtistStatus.SEED).isEmpty()) {
+    /** Imports seed-bands.txt as the seed owner's SEED artists. Other users start empty. */
+    private void importSeedBandsIfEmpty(String owner) throws Exception {
+        if (!artistRepository.findByOwnerAndStatus(owner, ArtistStatus.SEED).isEmpty()) {
             return; // already imported
         }
         ClassPathResource resource = new ClassPathResource("data/seed-bands.txt");
@@ -81,8 +74,10 @@ public class DataInitializer implements CommandLineRunner {
             while ((line = reader.readLine()) != null) {
                 String name = line.trim();
                 if (name.isEmpty() || name.startsWith("#")) continue;
-                if (!artistRepository.existsByNameIgnoreCase(name)) {
-                    artistRepository.save(new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null));
+                if (!artistRepository.existsByOwnerAndNameIgnoreCase(owner, name)) {
+                    Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+                    artist.setOwner(owner);
+                    artistRepository.save(artist);
                 }
             }
         }

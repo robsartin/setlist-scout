@@ -7,12 +7,16 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "show_event", uniqueConstraints = @UniqueConstraint(
-        columnNames = {"artistName", "eventDateTime", "venueName"}))
+        columnNames = {"owner", "artistName", "eventDateTime", "venueName"}))
 public class Show {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /** The user (email) who owns this show -- set at the persistence boundary. */
+    @Column(nullable = false)
+    private String owner;
 
     @Column(nullable = false)
     private String artistName;
@@ -52,6 +56,8 @@ public class Show {
     }
 
     public Long getId() { return id; }
+    public String getOwner() { return owner; }
+    public void setOwner(String owner) { this.owner = owner; }
     public String getArtistName() { return artistName; }
     public LocalDateTime getEventDateTime() { return eventDateTime; }
     public String getVenueName() { return venueName; }

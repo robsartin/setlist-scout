@@ -22,15 +22,20 @@ import static org.mockito.Mockito.when;
 @SuppressWarnings("unchecked")
 class ArtistControllerTest {
 
+    private static final String OWNER = "rob@example.com";
+
     private ArtistRepository artistRepository;
     private ExpansionService expansionService;
+    private CurrentUser currentUser;
     private ArtistController controller;
 
     @BeforeEach
     void setUp() {
         artistRepository = mock(ArtistRepository.class);
         expansionService = mock(ExpansionService.class);
-        controller = new ArtistController(artistRepository, expansionService);
+        currentUser = mock(CurrentUser.class);
+        when(currentUser.email()).thenReturn(OWNER);
+        controller = new ArtistController(artistRepository, expansionService, currentUser);
     }
 
     private static Artist pending(String name, ArtistSource source) {
@@ -40,7 +45,7 @@ class ArtistControllerTest {
     @Test
     @DisplayName("list() splits pending into tribute acts and everyone else")
     void listGroupsPendingBySource() {
-        when(artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(
                 pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION),
                 pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION),
                 pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION)));
@@ -59,7 +64,7 @@ class ArtistControllerTest {
     void approveAllPendingApprovesEveryone() {
         Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION);
         Artist similar = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        when(artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(tribute, similar));
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(tribute, similar));
 
         controller.approveAllPending(null, new ConcurrentModel());
 
@@ -73,8 +78,8 @@ class ArtistControllerTest {
     @DisplayName("reject returns the pending-section fragment for an htmx request")
     void rejectReturnsFragmentForHtmx() {
         Artist a = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        when(artistRepository.findById(5L)).thenReturn(Optional.of(a));
-        when(artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW)).thenReturn(List.of());
+        when(artistRepository.findByIdAndOwner(5L, OWNER)).thenReturn(Optional.of(a));
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of());
 
         Model model = new ConcurrentModel();
         String view = controller.reject(5L, "true", model);
@@ -89,7 +94,7 @@ class ArtistControllerTest {
     @DisplayName("reject redirects for a normal (non-htmx) request")
     void rejectRedirectsWithoutHtmx() {
         Artist a = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        when(artistRepository.findById(5L)).thenReturn(Optional.of(a));
+        when(artistRepository.findByIdAndOwner(5L, OWNER)).thenReturn(Optional.of(a));
 
         String view = controller.reject(5L, null, new ConcurrentModel());
 
@@ -100,7 +105,7 @@ class ArtistControllerTest {
     @Test
     @DisplayName("addSeed returns the active-section fragment for an htmx request")
     void addSeedReturnsFragmentForHtmx() {
-        when(artistRepository.existsByNameIgnoreCase("Wilco")).thenReturn(false);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
 
         Model model = new ConcurrentModel();
         String view = controller.addSeed("Wilco", "true", model);

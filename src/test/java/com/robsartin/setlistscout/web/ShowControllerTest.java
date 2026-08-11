@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.web;
 
+import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
@@ -18,6 +19,8 @@ import static org.mockito.Mockito.when;
 
 class ShowControllerTest {
 
+    private static final String OWNER = "rob@example.com";
+
     private SearchSettingsRepository settingsRepository;
     private GeocodingService geocodingService;
     private ShowController controller;
@@ -28,14 +31,18 @@ class ShowControllerTest {
         settingsRepository = mock(SearchSettingsRepository.class);
         ShowAggregationService showAggregationService = mock(ShowAggregationService.class);
         geocodingService = mock(GeocodingService.class);
-        controller = new ShowController(showRepository, settingsRepository, showAggregationService, geocodingService);
+        AppProperties appProperties = mock(AppProperties.class);
+        CurrentUser currentUser = mock(CurrentUser.class);
+        when(currentUser.email()).thenReturn(OWNER);
+        controller = new ShowController(showRepository, settingsRepository, showAggregationService,
+                geocodingService, appProperties, currentUser);
     }
 
     @Test
     @DisplayName("updateSettings geocodes the ZIP and stores lat/long + derived city/state")
     void updateSettingsGeocodesZip() {
-        SearchSettings settings = new SearchSettings("OldCity", "OL", 25, 3);
-        when(settingsRepository.findById(1L)).thenReturn(Optional.of(settings));
+        SearchSettings settings = new SearchSettings(OWNER, "OldCity", "OL", 25, 3);
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
         when(geocodingService.geocode("78701"))
                 .thenReturn(Optional.of(new GeocodingService.GeoResult(30.2672, -97.7431, "Austin", "TX")));
 
@@ -55,10 +62,10 @@ class ShowControllerTest {
     @Test
     @DisplayName("updateSettings keeps last-known coordinates when geocoding fails")
     void updateSettingsKeepsCoordsOnGeocodeFailure() {
-        SearchSettings settings = new SearchSettings("Austin", "TX", 50, 6);
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
         settings.setLatitude(30.0);
         settings.setLongitude(-97.0);
-        when(settingsRepository.findById(1L)).thenReturn(Optional.of(settings));
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
         when(geocodingService.geocode("00000")).thenReturn(Optional.empty());
 
         controller.updateSettings("00000", 50, 6);

@@ -1,18 +1,21 @@
 package com.robsartin.setlistscout.domain;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 
 /**
- * Single-row table holding the live search parameters. Deliberately kept in the DB
- * (not application.yml) so it can be edited from the web UI without a redeploy --
- * e.g. tightening the radius from "Texas-wide" down to "near Austin only".
+ * Per-user search parameters -- one row per owner (the signed-in user's email). Kept in
+ * the DB (not application.yml) so each user edits their own location/radius/window from
+ * the web UI without a redeploy.
  */
 @Entity
 public class SearchSettings {
 
     @Id
-    private Long id = 1L; // pinned singleton row
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String owner;
 
     private String postalCode;
     private String city;   // derived from the ZIP geocode, for display
@@ -26,8 +29,8 @@ public class SearchSettings {
         // JPA
     }
 
-    public SearchSettings(String city, String state, int radiusMiles, int monthsAhead) {
-        this.id = 1L;
+    public SearchSettings(String owner, String city, String state, int radiusMiles, int monthsAhead) {
+        this.owner = owner;
         this.city = city;
         this.state = state;
         this.radiusMiles = radiusMiles;
@@ -35,6 +38,8 @@ public class SearchSettings {
     }
 
     public Long getId() { return id; }
+    public String getOwner() { return owner; }
+    public void setOwner(String owner) { this.owner = owner; }
     public String getPostalCode() { return postalCode; }
     public void setPostalCode(String postalCode) { this.postalCode = postalCode; }
     public Double getLatitude() { return latitude; }

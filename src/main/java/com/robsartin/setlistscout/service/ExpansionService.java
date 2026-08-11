@@ -39,31 +39,31 @@ public class ExpansionService {
         this.tributeLlm = tributeLlm;
     }
 
-    public void expandAll() {
-        List<Artist> baseArtists = artistRepository.findByStatusIn(
-                List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
+    public void expandAll(String owner) {
+        List<Artist> baseArtists = artistRepository.findByOwnerAndStatusIn(
+                owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
 
         for (Artist base : baseArtists) {
-            expandMemberRelations(base);
-            expandSimilarArtists(base);
+            expandMemberRelations(owner, base);
+            expandSimilarArtists(owner, base);
             if (base.getStatus() == ArtistStatus.SEED) {
-                expandTributeBands(base);
+                expandTributeBands(owner, base);
             }
         }
     }
 
-    private void expandMemberRelations(Artist base) {
+    private void expandMemberRelations(String owner, Artist base) {
         Set<String> found = new HashSet<>();
         found.addAll(musicBrainz.findRelatedArtists(base.getName()));
         found.addAll(discogs.findRelatedArtists(base.getName()));
 
         for (String name : found) {
-            saveIfNew(name, ArtistSource.MEMBER_EXPANSION, base.getName(),
+            saveIfNew(owner, name, ArtistSource.MEMBER_EXPANSION, base.getName(),
                     "member/lineup relation of " + base.getName());
         }
     }
 
-    private void expandSimilarArtists(Artist base) {
+    private void expandSimilarArtists(String owner, Artist base) {
         Set<String> lastFmResults = new HashSet<>(lastFm.findSimilarArtists(base.getName(), 8));
         Set<String> llmResults = new HashSet<>(similarArtistLlm.findSimilarArtists(base.getName(), 8));
 
@@ -76,13 +76,13 @@ public class ExpansionService {
                     && containsIgnoreCase(llmResults, name);
             String note = "similar to " + base.getName()
                     + (confirmedByBoth ? " (confirmed by Last.fm + LLM)" : " (single-source match)");
-            saveIfNew(name, ArtistSource.SIMILAR_EXPANSION, base.getName(), note);
+            saveIfNew(owner, name, ArtistSource.SIMILAR_EXPANSION, base.getName(), note);
         }
     }
 
-    private void expandTributeBands(Artist base) {
+    private void expandTributeBands(String owner, Artist base) {
         for (String name : tributeLlm.findTributeBands(base.getName(), 5)) {
-            saveIfNew(name, ArtistSource.TRIBUTE_EXPANSION, base.getName(),
+            saveIfNew(owner, name, ArtistSource.TRIBUTE_EXPANSION, base.getName(),
                     "tribute/cover act for " + base.getName());
         }
     }
@@ -91,9 +91,11 @@ public class ExpansionService {
         return set.stream().anyMatch(s -> s.equalsIgnoreCase(value));
     }
 
-    private void saveIfNew(String name, ArtistSource source, String discoveredVia, String note) {
+    private void saveIfNew(String owner, String name, ArtistSource source, String discoveredVia, String note) {
         if (name == null || name.isBlank()) return;
-        if (artistRepository.existsByNameIgnoreCase(name)) return; // already tracked (seed, approved, or pending)
-        artistRepository.save(new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, note));
+        if (artistRepository.existsByOwnerAndNameIgnoreCase(owner, name)) return; // already tracked for this user
+        Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, note);
+        artist.setOwner(owner);
+        artistRepository.save(artist);
     }
 }
