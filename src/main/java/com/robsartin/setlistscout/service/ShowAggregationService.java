@@ -28,17 +28,23 @@ public class ShowAggregationService {
     private final SearchSettingsRepository settingsRepository;
     private final TicketmasterService ticketmaster;
     private final BandsintownService bandsintown;
+    private final MusicBrainzService musicBrainz;
+    private final BandSiteScraperService bandSiteScraper;
 
     public ShowAggregationService(ArtistRepository artistRepository,
                                    ShowRepository showRepository,
                                    SearchSettingsRepository settingsRepository,
                                    TicketmasterService ticketmaster,
-                                   BandsintownService bandsintown) {
+                                   BandsintownService bandsintown,
+                                   MusicBrainzService musicBrainz,
+                                   BandSiteScraperService bandSiteScraper) {
         this.artistRepository = artistRepository;
         this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
         this.ticketmaster = ticketmaster;
         this.bandsintown = bandsintown;
+        this.musicBrainz = musicBrainz;
+        this.bandSiteScraper = bandSiteScraper;
     }
 
     public void scanForShows(String owner) {
@@ -64,7 +70,33 @@ public class ShowAggregationService {
 
             persistNew(owner, tmShows);
             persistNew(owner, bitShows);
+            persistNew(owner, scrapeBandSite(artist, settings, start, end));
         }
+    }
+
+    /**
+     * Scrapes the artist's official site for tour dates (#22). Discovers + caches the site URL
+     * from MusicBrainz on first use. v1 filters scraped shows by a loose city-name match to the
+     * user's location (precise per-show distance filtering is deferred -- see #28).
+     */
+    private List<Show> scrapeBandSite(Artist artist, SearchSettings settings,
+                                      LocalDateTime start, LocalDateTime end) {
+        String url = artist.getOfficialSiteUrl();
+        if (url == null) {
+            url = musicBrainz.findOfficialHomepage(artist.getName()).orElse(null);
+            if (url != null) {
+                artist.setOfficialSiteUrl(url);
+                artistRepository.save(artist);
+            }
+        }
+        if (url == null) return List.of();
+
+        List<Show> shows = bandSiteScraper.scrapeShows(artist.getName(), url, start, end);
+        String city = settings.getCity();
+        if (city == null) return shows;
+        return shows.stream()
+                .filter(s -> s.getVenueCity() != null && s.getVenueCity().equalsIgnoreCase(city))
+                .toList();
     }
 
     private void persistNew(String owner, List<Show> shows) {

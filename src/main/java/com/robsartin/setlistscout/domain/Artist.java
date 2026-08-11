@@ -32,6 +32,9 @@ public class Artist {
     /** Free-text note, e.g. "related act -- original artist deceased/defunct" */
     private String note;
 
+    /** The artist's official site URL (from MusicBrainz, or user-edited); scraped for tour dates. Nullable. */
+    private String officialSiteUrl;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -56,5 +59,7 @@ public class Artist {
     public void setStatus(ArtistStatus status) { this.status = status; }
     public String getDiscoveredVia() { return discoveredVia; }
     public String getNote() { return note; }
+    public String getOfficialSiteUrl() { return officialSiteUrl; }
+    public void setOfficialSiteUrl(String officialSiteUrl) { this.officialSiteUrl = officialSiteUrl; }
     public Instant getCreatedAt() { return createdAt; }
 }

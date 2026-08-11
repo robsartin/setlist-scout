@@ -55,6 +55,24 @@ public class ArtistController {
         return "redirect:/artists";
     }
 
+    /** Set or clear an artist's official-site URL (scraped for tour dates); owner-scoped. */
+    @PostMapping("/{id}/site-url")
+    public String setSiteUrl(@PathVariable Long id,
+                             @RequestParam String url,
+                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                             Model model) {
+        String owner = currentUser.email();
+        artistRepository.findByIdAndOwner(id, owner).ifPresent(a -> {
+            a.setOfficialSiteUrl(url.isBlank() ? null : url.trim());
+            artistRepository.save(a);
+        });
+        if (hxRequest != null) {
+            populateActive(model, owner);
+            return "artists :: activeSection";
+        }
+        return "redirect:/artists";
+    }
+
     @PostMapping("/{id}/approve")
     public String approve(@PathVariable Long id,
                           @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,

@@ -33,11 +33,20 @@
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload. */-->
     <div th:fragment="activeSection" id="active-section">
         <table>
-            <thead><tr><th>Name</th><th>Source</th></tr></thead>
+            <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th></tr></thead>
             <tbody>
             <tr th:each="a : ${active}">
                 <td th:text="${a.name}">Name</td>
                 <td th:text="${a.source}">Source</td>
+                <td>
+                    <a th:if="${a.officialSiteUrl}" th:href="${a.officialSiteUrl}" th:text="${a.officialSiteUrl}"
+                       target="_blank" rel="noopener noreferrer">site</a>
+                    <form class="inline" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
+                          th:action="@{'/artists/' + ${a.id} + '/site-url'}" method="post">
+                        <input type="url" name="url" th:value="${a.officialSiteUrl}" placeholder="official site URL" size="22"/>
+                        <button type="submit">Set</button>
+                    </form>
+                </td>
             </tr>
             </tbody>
         </table>
