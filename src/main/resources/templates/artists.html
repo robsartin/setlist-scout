@@ -50,7 +50,10 @@
             <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th><th>Actions</th></tr></thead>
             <tbody>
             <tr th:each="a : ${active}">
-                <td th:text="${a.name}">Name</td>
+                <td>
+                    <span th:text="${a.name}">Name</span>
+                    <span th:if="${a.source.name() == 'TRIBUTE_EXPANSION'}" class="tag tag-tribute">Tribute</span>
+                </td>
                 <td th:text="${a.source}">Source</td>
                 <td>
                     <a th:if="${a.officialSiteUrl}" th:href="${a.officialSiteUrl}" th:text="${a.officialSiteUrl}"

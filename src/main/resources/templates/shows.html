@@ -16,6 +16,8 @@
         nav a { margin-right: 1rem; }
         .scanning { font-size: 1.1rem; font-weight: 600; margin-top: 1rem; }
         .found { color: #15803d; font-weight: 600; margin-top: 1rem; }
+        .tag { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+        .tag-tribute { background: #7c3aed; color: #fff; }
     </style>
 </head>
 <body>
@@ -67,7 +69,11 @@
                 </thead>
                 <tbody>
                 <tr th:each="show : ${shows}">
-                    <td th:text="${show.artistName}">Band</td>
+                    <td>
+                        <span th:text="${show.artistName}">Band</span>
+                        <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
+                              class="tag tag-tribute">Tribute</span>
+                    </td>
                     <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
                     <td>
                         <span th:text="${show.venueName}">Venue</span>
