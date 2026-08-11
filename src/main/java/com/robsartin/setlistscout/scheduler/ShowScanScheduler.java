@@ -4,9 +4,12 @@ import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.service.ExpansionService;
 import com.robsartin.setlistscout.service.ShowAggregationService;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+// Eager despite spring.main.lazy-initialization=true, so its @Scheduled scan registers at startup.
+@Lazy(false)
 @Component
 public class ShowScanScheduler {
 
