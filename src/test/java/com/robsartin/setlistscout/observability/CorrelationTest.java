@@ -43,6 +43,7 @@ class CorrelationTest {
 
         assertThat(MDC.get(Correlation.CID)).isNull();
         assertThat(MDC.get(Correlation.JOB)).isNull();
+        assertThat(MDC.get(Correlation.OWNER)).isNull();
     }
 
     @Test
