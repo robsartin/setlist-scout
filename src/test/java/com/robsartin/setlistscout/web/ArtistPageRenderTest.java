@@ -63,4 +63,14 @@ class ArtistPageRenderTest {
                 .andExpect(content().string(containsString("Members")))
                 .andExpect(content().string(containsString("Approve all remaining (2)")));
     }
+
+    @Test
+    void showsPageRendersZipLocationForm() throws Exception {
+        // DataInitializer seeds the settings row with the default ZIP (78701) at startup.
+        mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Near ZIP")))
+                .andExpect(content().string(containsString("78701")));
+    }
 }
+
