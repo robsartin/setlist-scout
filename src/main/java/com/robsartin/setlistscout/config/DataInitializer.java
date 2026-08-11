@@ -1,11 +1,10 @@
 package com.robsartin.setlistscout.config;
 
-import com.robsartin.setlistscout.domain.Artist;
-import com.robsartin.setlistscout.domain.ArtistSource;
 import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
+import com.robsartin.setlistscout.service.ArtistSeedService;
 import com.robsartin.setlistscout.service.GeocodingService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.ClassPathResource;
@@ -27,15 +26,18 @@ public class DataInitializer implements CommandLineRunner {
     private final ArtistRepository artistRepository;
     private final AppProperties appProperties;
     private final GeocodingService geocodingService;
+    private final ArtistSeedService seedService;
 
     public DataInitializer(SearchSettingsRepository settingsRepository,
                             ArtistRepository artistRepository,
                             AppProperties appProperties,
-                            GeocodingService geocodingService) {
+                            GeocodingService geocodingService,
+                            ArtistSeedService seedService) {
         this.settingsRepository = settingsRepository;
         this.artistRepository = artistRepository;
         this.appProperties = appProperties;
         this.geocodingService = geocodingService;
+        this.seedService = seedService;
     }
 
     @Override
@@ -72,13 +74,7 @@ public class DataInitializer implements CommandLineRunner {
                 new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                String name = line.trim();
-                if (name.isEmpty() || name.startsWith("#")) continue;
-                if (!artistRepository.existsByOwnerAndNameIgnoreCase(owner, name)) {
-                    Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
-                    artist.setOwner(owner);
-                    artistRepository.save(artist);
-                }
+                seedService.addSeedIfNew(owner, line);
             }
         }
     }

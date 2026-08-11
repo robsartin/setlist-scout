@@ -4,24 +4,28 @@ import com.robsartin.setlistscout.domain.Artist;
 import com.robsartin.setlistscout.domain.ArtistSource;
 import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.repository.ArtistRepository;
+import com.robsartin.setlistscout.service.ArtistSeedService;
 import com.robsartin.setlistscout.service.ExpansionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.ui.ConcurrentModel;
 import org.springframework.ui.Model;
+import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
-import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,7 +45,9 @@ class ArtistControllerTest {
         expansionService = mock(ExpansionService.class);
         currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
-        controller = new ArtistController(artistRepository, expansionService, currentUser);
+        // Real seed service over the mocked repo so add/upload still assert on repository interactions.
+        ArtistSeedService seedService = new ArtistSeedService(artistRepository);
+        controller = new ArtistController(artistRepository, expansionService, currentUser, seedService);
     }
 
     private static Artist pending(String name, ArtistSource source) {
@@ -160,6 +166,25 @@ class ArtistControllerTest {
         assertThat(view).isEqualTo("redirect:/artists");
         assertThat(a.getStatus()).isEqualTo(ArtistStatus.REJECTED);
         verify(artistRepository).save(a);
+    }
+
+    @Test
+    @DisplayName("upload adds new distinct names as seeds, skipping blanks, comments and duplicates")
+    void uploadAddsNewSeeds() {
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Dawes")).thenReturn(true);
+        String contents = "Wilco\n\n# a comment\nDawes\n"; // Wilco new; blank + comment skipped; Dawes exists
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "artists.txt", "text/plain", contents.getBytes(StandardCharsets.UTF_8));
+        RedirectAttributesModelMap redirect = new RedirectAttributesModelMap();
+
+        String view = controller.upload(file, redirect);
+
+        assertThat(view).isEqualTo("redirect:/artists");
+        ArgumentCaptor<Artist> saved = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository, times(1)).save(saved.capture());
+        assertThat(saved.getValue().getName()).isEqualTo("Wilco");
+        assertThat(redirect.getFlashAttributes().get("uploadMessage")).asString().contains("1");
     }
 
     @Test

@@ -4,11 +4,18 @@ import com.robsartin.setlistscout.domain.Artist;
 import com.robsartin.setlistscout.domain.ArtistSource;
 import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.repository.ArtistRepository;
+import com.robsartin.setlistscout.service.ArtistSeedService;
 import com.robsartin.setlistscout.service.ExpansionService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -19,15 +26,20 @@ public class ArtistController {
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
 
+    /** Cap lines read from an uploaded artist file -- a guardrail against a runaway upload. */
+    private static final int MAX_UPLOAD_LINES = 2000;
+
     private final ArtistRepository artistRepository;
     private final ExpansionService expansionService;
     private final CurrentUser currentUser;
+    private final ArtistSeedService seedService;
 
     public ArtistController(ArtistRepository artistRepository, ExpansionService expansionService,
-                           CurrentUser currentUser) {
+                           CurrentUser currentUser, ArtistSeedService seedService) {
         this.artistRepository = artistRepository;
         this.expansionService = expansionService;
         this.currentUser = currentUser;
+        this.seedService = seedService;
     }
 
     @GetMapping
@@ -44,18 +56,41 @@ public class ArtistController {
                           @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           Model model) {
         String owner = currentUser.email();
-        // Reject a blank/whitespace name: a nameless seed would search Ticketmaster with
-        // keyword="" and pull back every local event (issue #49). Trim so " Wilco " != "Wilco".
-        String trimmed = name == null ? "" : name.trim();
-        if (!trimmed.isEmpty() && !artistRepository.existsByOwnerAndNameIgnoreCase(owner, trimmed)) {
-            Artist artist = new Artist(trimmed, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
-            artist.setOwner(owner);
-            artistRepository.save(artist);
-        }
+        // A nameless seed would search Ticketmaster with keyword="" and pull back every local
+        // event (issue #49); ArtistSeedService trims and skips blanks/duplicates.
+        seedService.addSeedIfNew(owner, name);
         if (hxRequest != null) {
             populateActive(model, owner);
             return "artists :: activeSection";
         }
+        return "redirect:/artists";
+    }
+
+    /**
+     * Bulk-add seeds from an uploaded plain-text file (one artist per line). Blank lines, {@code #}
+     * comments, and names that already exist are skipped ({@link ArtistSeedService}); reads at most
+     * {@link #MAX_UPLOAD_LINES} lines. Owner-scoped. Redirects with a summary flash message.
+     */
+    @PostMapping("/upload")
+    public String upload(@RequestParam("file") MultipartFile file, RedirectAttributes redirect) {
+        String owner = currentUser.email();
+        int added = 0;
+        if (file != null && !file.isEmpty()) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                int seen = 0;
+                while ((line = reader.readLine()) != null && seen < MAX_UPLOAD_LINES) {
+                    seen++;
+                    if (seedService.addSeedIfNew(owner, line)) added++;
+                }
+            } catch (IOException e) {
+                redirect.addFlashAttribute("uploadMessage", "Could not read that file.");
+                return "redirect:/artists";
+            }
+        }
+        redirect.addFlashAttribute("uploadMessage",
+                "Added " + added + " new artist" + (added == 1 ? "" : "s") + " from the file.");
         return "redirect:/artists";
     }
 
