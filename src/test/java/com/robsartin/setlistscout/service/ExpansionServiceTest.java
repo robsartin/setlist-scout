@@ -34,6 +34,8 @@ class ExpansionServiceTest {
 
     private ExpansionService expansionService;
 
+    private static final String OWNER = "rob@example.com";
+
     @BeforeEach
     void setUp() {
         expansionService = new ExpansionService(
@@ -51,14 +53,14 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should only expand SEED and APPROVED artists")
     void shouldOnlyExpandActiveArtists() {
-        when(artistRepository.findByStatusIn(List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
                 .thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
         when(discogs.findRelatedArtists(any())).thenReturn(List.of());
         when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         verify(musicBrainz).findRelatedArtists("Dawes");
         verify(discogs).findRelatedArtists("Dawes");
@@ -69,19 +71,20 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should save a new member-relation artist with the MEMBER_EXPANSION source")
     void shouldSaveNewMemberRelation() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Dawes")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainz.findRelatedArtists("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
         when(discogs.findRelatedArtists("Dawes")).thenReturn(List.of());
         when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(artistRepository.existsByNameIgnoreCase("Taylor Goldsmith")).thenReturn(false);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Taylor Goldsmith")).thenReturn(false);
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
         verify(artistRepository).save(captor.capture());
         Artist saved = captor.getValue();
         assertThat(saved.getName()).isEqualTo("Taylor Goldsmith");
+        assertThat(saved.getOwner()).isEqualTo(OWNER);
         assertThat(saved.getSource()).isEqualTo(ArtistSource.MEMBER_EXPANSION);
         assertThat(saved.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
         assertThat(saved.getDiscoveredVia()).isEqualTo("Dawes");
@@ -91,14 +94,14 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should not save a member relation that is already tracked")
     void shouldSkipExistingMemberRelation() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Dawes")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainz.findRelatedArtists("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
         when(discogs.findRelatedArtists("Dawes")).thenReturn(List.of());
         when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(artistRepository.existsByNameIgnoreCase("Taylor Goldsmith")).thenReturn(true);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Taylor Goldsmith")).thenReturn(true);
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         verify(artistRepository, never()).save(any());
     }
@@ -106,13 +109,13 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should skip blank names returned by an expansion source")
     void shouldSkipBlankNames() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Dawes")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainz.findRelatedArtists("Dawes")).thenReturn(List.of("", "  "));
         when(discogs.findRelatedArtists("Dawes")).thenReturn(List.of());
         when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         verify(artistRepository, never()).save(any());
     }
@@ -120,14 +123,14 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should note a similar artist found by both sources as confirmed")
     void shouldNoteConfirmedByBothSources() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Dawes")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
         when(discogs.findRelatedArtists(any())).thenReturn(List.of());
         when(lastFm.findSimilarArtists("Dawes", 8)).thenReturn(List.of("Nickel Creek"));
         when(similarArtistLlm.findSimilarArtists("Dawes", 8)).thenReturn(List.of("Nickel Creek"));
-        when(artistRepository.existsByNameIgnoreCase(any())).thenReturn(false);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
         verify(artistRepository).save(captor.capture());
@@ -139,14 +142,14 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should note a similar artist found by only one source as single-source")
     void shouldNoteSingleSourceMatch() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Dawes")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
         when(discogs.findRelatedArtists(any())).thenReturn(List.of());
         when(lastFm.findSimilarArtists("Dawes", 8)).thenReturn(List.of("Nickel Creek"));
         when(similarArtistLlm.findSimilarArtists("Dawes", 8)).thenReturn(List.of());
-        when(artistRepository.existsByNameIgnoreCase(any())).thenReturn(false);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
         verify(artistRepository).save(captor.capture());
@@ -156,15 +159,15 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should save a tribute act for a SEED base with the TRIBUTE_EXPANSION source")
     void shouldSaveTributeForSeed() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(seedArtist("Iron Maiden")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Iron Maiden")));
         when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
         when(discogs.findRelatedArtists(any())).thenReturn(List.of());
         when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(tributeLlm.findTributeBands("Iron Maiden", 5)).thenReturn(List.of("The Iron Maidens"));
-        when(artistRepository.existsByNameIgnoreCase("The Iron Maidens")).thenReturn(false);
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "The Iron Maidens")).thenReturn(false);
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
         verify(artistRepository).save(captor.capture());
@@ -179,13 +182,13 @@ class ExpansionServiceTest {
     @Test
     @DisplayName("should NOT run tribute expansion for an APPROVED (non-seed) base")
     void shouldSkipTributeForApproved() {
-        when(artistRepository.findByStatusIn(any())).thenReturn(List.of(approvedArtist("Nickel Creek")));
+        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(approvedArtist("Nickel Creek")));
         when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
         when(discogs.findRelatedArtists(any())).thenReturn(List.of());
         when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
         when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
 
-        expansionService.expandAll();
+        expansionService.expandAll(OWNER);
 
         verify(tributeLlm, never()).findTributeBands(any(), anyInt());
     }

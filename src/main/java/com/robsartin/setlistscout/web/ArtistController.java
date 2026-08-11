@@ -20,17 +20,21 @@ public class ArtistController {
 
     private final ArtistRepository artistRepository;
     private final ExpansionService expansionService;
+    private final CurrentUser currentUser;
 
-    public ArtistController(ArtistRepository artistRepository, ExpansionService expansionService) {
+    public ArtistController(ArtistRepository artistRepository, ExpansionService expansionService,
+                           CurrentUser currentUser) {
         this.artistRepository = artistRepository;
         this.expansionService = expansionService;
+        this.currentUser = currentUser;
     }
 
     @GetMapping
     public String list(Model model) {
-        populateActive(model);
-        populatePending(model);
-        model.addAttribute("rejected", artistRepository.findByStatus(ArtistStatus.REJECTED));
+        String owner = currentUser.email();
+        populateActive(model, owner);
+        populatePending(model, owner);
+        model.addAttribute("rejected", artistRepository.findByOwnerAndStatus(owner, ArtistStatus.REJECTED));
         return "artists";
     }
 
@@ -38,11 +42,14 @@ public class ArtistController {
     public String addSeed(@RequestParam String name,
                           @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           Model model) {
-        if (!artistRepository.existsByNameIgnoreCase(name)) {
-            artistRepository.save(new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null));
+        String owner = currentUser.email();
+        if (!artistRepository.existsByOwnerAndNameIgnoreCase(owner, name)) {
+            Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+            artist.setOwner(owner);
+            artistRepository.save(artist);
         }
         if (hxRequest != null) {
-            populateActive(model);
+            populateActive(model, owner);
             return "artists :: activeSection";
         }
         return "redirect:/artists";
@@ -68,7 +75,7 @@ public class ArtistController {
     @PostMapping("/approve-all-pending")
     public String approveAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                     Model model) {
-        for (Artist a : artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW)) {
+        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
             a.setStatus(ArtistStatus.APPROVED);
             artistRepository.save(a);
         }
@@ -79,12 +86,13 @@ public class ArtistController {
     @PostMapping("/expand-now")
     public String expandNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
-        expansionService.expandAll();
+        expansionService.expandAll(currentUser.email());
         return pendingResult(hxRequest, model);
     }
 
+    /** Scoped by owner so a user can only change the status of their own artists. */
     private void setStatus(Long id, ArtistStatus status) {
-        artistRepository.findById(id).ifPresent(a -> {
+        artistRepository.findByIdAndOwner(id, currentUser.email()).ifPresent(a -> {
             a.setStatus(status);
             artistRepository.save(a);
         });
@@ -93,19 +101,19 @@ public class ArtistController {
     /** htmx request -> swap just the pending section; otherwise a normal redirect (no-JS fallback). */
     private String pendingResult(String hxRequest, Model model) {
         if (hxRequest != null) {
-            populatePending(model);
+            populatePending(model, currentUser.email());
             return "artists :: pendingSection";
         }
         return "redirect:/artists";
     }
 
-    private void populateActive(Model model) {
-        model.addAttribute("active", artistRepository.findByStatusIn(
-                List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
+    private void populateActive(Model model, String owner) {
+        model.addAttribute("active", artistRepository.findByOwnerAndStatusIn(
+                owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
     }
 
-    private void populatePending(Model model) {
-        List<Artist> pending = artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW);
+    private void populatePending(Model model, String owner) {
+        List<Artist> pending = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW);
         model.addAttribute("pendingTributes", pending.stream()
                 .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION).toList());
         model.addAttribute("pendingOthers", pending.stream()

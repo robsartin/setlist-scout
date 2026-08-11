@@ -17,17 +17,19 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Renders the real /artists Thymeleaf template against a booted context + Postgres, so a
- * template error (bad fragment, expression, or grouping) fails the build. Security filters
- * are disabled so the page renders without a login. Runs in CI (needs a Docker daemon).
+ * Renders the real /artists and / Thymeleaf templates against a booted context + Postgres,
+ * signed in as a test user, and checks multi-tenant isolation. Each test uses a distinct owner
+ * so saved data can't leak between methods (no per-test rollback). Runs in CI (needs Docker).
  */
 @SpringBootTest
-@AutoConfigureMockMvc(addFilters = false)
+@AutoConfigureMockMvc
 @Testcontainers
 class ArtistPageRenderTest {
 
@@ -47,16 +49,21 @@ class ArtistPageRenderTest {
     @Autowired
     private ArtistRepository artistRepository;
 
+    private void savePending(String owner, String name, ArtistSource source, String discoveredVia, String note) {
+        Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, note);
+        artist.setOwner(owner);
+        artistRepository.save(artist);
+    }
+
     @Test
     void artistsPageRendersBothPendingGroups() throws Exception {
-        artistRepository.save(new Artist("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION,
-                ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers",
-                "tribute/cover act for Tom Petty and the Heartbreakers"));
-        // A name NOT in seed-bands.txt -- DataInitializer imports those on startup (unique name constraint).
-        artistRepository.save(new Artist("The Milk Carton Kids", ArtistSource.SIMILAR_EXPANSION,
-                ArtistStatus.PENDING_REVIEW, "Dawes", "similar to Dawes (single-source match)"));
+        String owner = "render-groups@example.com";
+        savePending(owner, "Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION,
+                "Tom Petty and the Heartbreakers", "tribute/cover act for Tom Petty and the Heartbreakers");
+        savePending(owner, "The Milk Carton Kids", ArtistSource.SIMILAR_EXPANSION,
+                "Dawes", "similar to Dawes (single-source match)");
 
-        mockMvc.perform(get("/artists"))
+        mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("Cover / tribute acts")))
                 .andExpect(content().string(containsString("Damn the Torpedoes")))
@@ -66,11 +73,21 @@ class ArtistPageRenderTest {
 
     @Test
     void showsPageRendersZipLocationForm() throws Exception {
-        // DataInitializer seeds the settings row with the default ZIP (78701) at startup.
-        mockMvc.perform(get("/"))
+        // First visit provisions this user's settings with the default ZIP (78701).
+        mockMvc.perform(get("/").with(oidcLogin().idToken(t -> t.claim("email", "render-shows@example.com"))))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("Near ZIP")))
                 .andExpect(content().string(containsString("78701")));
     }
-}
 
+    @Test
+    void artistsAreIsolatedByOwner() throws Exception {
+        savePending("alice@example.com", "Alice Only Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "alice's");
+        savePending("bob@example.com", "Bob Only Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "bob's");
+
+        mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", "alice@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Alice Only Act")))
+                .andExpect(content().string(not(containsString("Bob Only Act"))));
+    }
+}

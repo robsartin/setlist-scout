@@ -44,17 +44,17 @@ public class SecurityConfig {
 
     private OAuth2UserService<OidcUserRequest, OidcUser> allowListedOidcUserService() {
         OidcUserService delegate = new OidcUserService();
-        String allowedEmail = appProperties.auth().allowedEmail();
+        java.util.List<String> allowedEmails = appProperties.auth().allowedEmails();
 
         return (userRequest) -> {
             OidcUser user = delegate.loadUser(userRequest);
             String email = user.getEmail();
             Boolean emailVerified = user.getEmailVerified();
 
-            if (email == null
-                    || !email.equalsIgnoreCase(allowedEmail)
-                    || emailVerified == null
-                    || !emailVerified) {
+            boolean allowed = email != null
+                    && emailVerified != null && emailVerified
+                    && allowedEmails.stream().anyMatch(e -> e.equalsIgnoreCase(email));
+            if (!allowed) {
                 throw new OAuth2AuthenticationException(
                         new OAuth2Error("not_authorized"),
                         "This account is not authorized to use this application."

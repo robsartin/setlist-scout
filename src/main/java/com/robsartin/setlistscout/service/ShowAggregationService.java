@@ -41,16 +41,16 @@ public class ShowAggregationService {
         this.bandsintown = bandsintown;
     }
 
-    public void scanForShows() {
-        SearchSettings settings = settingsRepository.findById(1L)
+    public void scanForShows(String owner) {
+        SearchSettings settings = settingsRepository.findByOwner(owner)
                 .orElseThrow(() -> new IllegalStateException(
-                        "SearchSettings row missing -- run the DataInitializer / seed it manually"));
+                        "SearchSettings row missing for " + owner + " -- provisioned on first login"));
 
         LocalDateTime start = LocalDateTime.now();
         LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
 
-        List<Artist> activeArtists = artistRepository.findByStatusIn(
-                List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
+        List<Artist> activeArtists = artistRepository.findByOwnerAndStatusIn(
+                owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
 
         for (Artist artist : activeArtists) {
             List<Show> tmShows = ticketmaster.searchShows(
@@ -62,17 +62,18 @@ public class ShowAggregationService {
                     artist.getName(), settings.getLatitude(), settings.getLongitude(),
                     settings.getRadiusMiles(), start, end);
 
-            persistNew(tmShows);
-            persistNew(bitShows);
+            persistNew(owner, tmShows);
+            persistNew(owner, bitShows);
         }
     }
 
-    private void persistNew(List<Show> shows) {
+    private void persistNew(String owner, List<Show> shows) {
         for (Show show : shows) {
             if (show.getEventDateTime() == null) continue;
-            boolean exists = showRepository.existsByArtistNameAndEventDateTimeAndVenueName(
-                    show.getArtistName(), show.getEventDateTime(), show.getVenueName());
+            boolean exists = showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                    owner, show.getArtistName(), show.getEventDateTime(), show.getVenueName());
             if (!exists) {
+                show.setOwner(owner);
                 showRepository.save(show);
             }
         }

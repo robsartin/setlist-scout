@@ -4,12 +4,16 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
-@Table(name = "artist", uniqueConstraints = @UniqueConstraint(columnNames = "name"))
+@Table(name = "artist", uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "name"}))
 public class Artist {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /** The user (email) who owns this artist -- set at the persistence boundary. */
+    @Column(nullable = false)
+    private String owner;
 
     @Column(nullable = false)
     private String name;
@@ -44,6 +48,8 @@ public class Artist {
     }
 
     public Long getId() { return id; }
+    public String getOwner() { return owner; }
+    public void setOwner(String owner) { this.owner = owner; }
     public String getName() { return name; }
     public ArtistSource getSource() { return source; }
     public ArtistStatus getStatus() { return status; }

@@ -67,7 +67,8 @@ connection automatically, so there's no JDBC URL to hand-format.
   DATABASE_PASSWORD=<password>
   GOOGLE_CLIENT_ID=<from step 1>
   GOOGLE_CLIENT_SECRET=<from step 1>
-  ALLOWED_EMAIL=rob.sartin@gmail.com
+  ALLOWED_EMAILS=rob.sartin@gmail.com,davidbuley01@gmail.com
+  SEED_OWNER=rob.sartin@gmail.com
   TICKETMASTER_API_KEY=<from step 2>
   BANDSINTOWN_APP_ID=<from step 2>
   DISCOGS_TOKEN=<from step 2>

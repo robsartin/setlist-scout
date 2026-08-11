@@ -33,7 +33,8 @@ server:
 setlistscout:
   scan-interval-ms: ${SCAN_INTERVAL_MS:259200000} # every 3 days by default -- "every few days"
   auth:
-    allowed-email: ${ALLOWED_EMAIL:rob.sartin@gmail.com}
+    allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
+    seed-owner: ${SEED_OWNER:rob.sartin@gmail.com}
   apis:
     ticketmaster-api-key: ${TICKETMASTER_API_KEY:}
     bandsintown-app-id: ${BANDSINTOWN_APP_ID:}

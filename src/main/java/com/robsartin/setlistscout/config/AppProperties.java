@@ -2,6 +2,8 @@ package com.robsartin.setlistscout.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.List;
+
 /**
  * API keys and startup defaults, sourced from environment variables (see application.yml).
  * Location/radius is NOT here on purpose -- that lives in the database (SearchSettings)
@@ -14,7 +16,8 @@ public record AppProperties(
         Defaults defaults
 ) {
     public record Auth(
-            String allowedEmail // only this email may log in -- see SecurityConfig
+            List<String> allowedEmails, // only these emails may log in -- see SecurityConfig
+            String seedOwner            // the user who owns migrated/seed data and gets the seed-bands.txt list
     ) {}
 
     public record Apis(
