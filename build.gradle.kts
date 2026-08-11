@@ -7,6 +7,12 @@ plugins {
 group = "com.robsartin"
 version = "0.1.0"
 
+// Override the Spring-Boot-managed Flyway version (3.3.4 ships Flyway 10.17.x, which only
+// officially supports PostgreSQL <= 16 and WARNs on boot against Render's PG 18.4). 11.20.3
+// is the last stable Flyway 11.x and raises the supported-PostgreSQL ceiling to 18, clearing
+// the warning. This property flows to both flyway-core and flyway-database-postgresql (see #46).
+extra["flyway.version"] = "11.20.3"
+
 java {
     // JDK pinned via the toolchain so the build uses the same Java version everywhere,
     // independent of whatever JDK happens to be on PATH.
