@@ -66,6 +66,31 @@ class TicketmasterServiceTest {
     }
 
     @Test
+    @DisplayName("should prefer venue-local date/time over the UTC dateTime")
+    void shouldPreferLocalDateTimeOverUtc() {
+        // An evening show: localTime 20:00 in the venue's zone, which the UTC
+        // dateTime renders as the next-day 01:00 (a different wall-clock value).
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {"dates": {"start": {
+                            "localDate": "2026-09-01",
+                            "localTime": "20:00:00",
+                            "dateTime": "2026-09-02T01:00:00Z"
+                          }}}
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Dawes", "78701", 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getEventDateTime())
+                .isEqualTo(LocalDateTime.of(2026, 9, 1, 20, 0, 0));
+    }
+
+    @Test
     @DisplayName("should return an empty list when _embedded is missing")
     void shouldReturnEmptyWhenNoEmbedded() {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));

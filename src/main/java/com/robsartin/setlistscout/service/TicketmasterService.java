@@ -78,10 +78,7 @@ public class TicketmasterService {
     private Show parseEvent(String artistName, Map<String, Object> event) {
         Map<String, Object> dates = (Map<String, Object>) event.get("dates");
         Map<String, Object> start = dates != null ? (Map<String, Object>) dates.get("start") : null;
-        String dateTimeStr = start != null ? (String) start.get("dateTime") : null;
-        LocalDateTime eventDateTime = dateTimeStr != null
-                ? LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ISO_DATE_TIME)
-                : null;
+        LocalDateTime eventDateTime = parseStartDateTime(start);
 
         Map<String, Object> embedded = (Map<String, Object>) event.get("_embedded");
         List<Map<String, Object>> venues = embedded != null ? (List<Map<String, Object>>) embedded.get("venues") : null;
@@ -100,5 +97,30 @@ public class TicketmasterService {
         String url = (String) event.get("url");
 
         return new Show(artistName, eventDateTime, venueName, venueCity, price, "ticketmaster", url);
+    }
+
+    /**
+     * Builds the show time from Ticketmaster's {@code dates.start} block.
+     * <p>
+     * The {@code dateTime} field is UTC (trailing Z); parsing it with a local
+     * formatter keeps the UTC wall-clock time, so an evening show reads as the
+     * small hours of the next morning. Ticketmaster also exposes the correct
+     * venue-local wall-clock as {@code localDate} + {@code localTime}, so we
+     * prefer those when both are present and only fall back to the UTC
+     * {@code dateTime} when the local fields are absent.
+     */
+    private LocalDateTime parseStartDateTime(Map<String, Object> start) {
+        if (start == null) return null;
+
+        String localDate = (String) start.get("localDate");
+        String localTime = (String) start.get("localTime");
+        if (localDate != null && localTime != null) {
+            return LocalDateTime.parse(localDate + "T" + localTime, DateTimeFormatter.ISO_DATE_TIME);
+        }
+
+        String dateTimeStr = (String) start.get("dateTime");
+        return dateTimeStr != null
+                ? LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ISO_DATE_TIME)
+                : null;
     }
 }
