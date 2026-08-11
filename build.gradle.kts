@@ -33,6 +33,9 @@ dependencies {
 
     runtimeOnly("org.postgresql:postgresql")
 
+    // HTML fetch + parse for scraping band official-site tour pages (#22).
+    implementation("org.jsoup:jsoup:1.18.1")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     // Full-context smoke test boots the app against a throwaway Postgres.
