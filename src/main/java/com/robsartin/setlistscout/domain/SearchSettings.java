@@ -14,8 +14,11 @@ public class SearchSettings {
     @Id
     private Long id = 1L; // pinned singleton row
 
-    private String city;
-    private String state;
+    private String postalCode;
+    private String city;   // derived from the ZIP geocode, for display
+    private String state;  // derived from the ZIP geocode, for display
+    private Double latitude;   // geocoded from postalCode; used for Bandsintown distance filtering
+    private Double longitude;
     private int radiusMiles;
     private int monthsAhead;
 
@@ -32,6 +35,12 @@ public class SearchSettings {
     }
 
     public Long getId() { return id; }
+    public String getPostalCode() { return postalCode; }
+    public void setPostalCode(String postalCode) { this.postalCode = postalCode; }
+    public Double getLatitude() { return latitude; }
+    public void setLatitude(Double latitude) { this.latitude = latitude; }
+    public Double getLongitude() { return longitude; }
+    public void setLongitude(Double longitude) { this.longitude = longitude; }
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
     public String getState() { return state; }

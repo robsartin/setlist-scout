@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.domain.Show;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
+import com.robsartin.setlistscout.service.GeocodingService;
 import com.robsartin.setlistscout.service.ShowAggregationService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -19,13 +20,16 @@ public class ShowController {
     private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
     private final ShowAggregationService showAggregationService;
+    private final GeocodingService geocodingService;
 
     public ShowController(ShowRepository showRepository,
                            SearchSettingsRepository settingsRepository,
-                           ShowAggregationService showAggregationService) {
+                           ShowAggregationService showAggregationService,
+                           GeocodingService geocodingService) {
         this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
         this.showAggregationService = showAggregationService;
+        this.geocodingService = geocodingService;
     }
 
     @GetMapping("/")
@@ -52,15 +56,21 @@ public class ShowController {
     }
 
     @PostMapping("/settings")
-    public String updateSettings(@RequestParam String city,
-                                  @RequestParam String state,
+    public String updateSettings(@RequestParam String postalCode,
                                   @RequestParam int radiusMiles,
                                   @RequestParam int monthsAhead) {
         SearchSettings settings = settingsRepository.findById(1L).orElseThrow();
-        settings.setCity(city);
-        settings.setState(state);
+        settings.setPostalCode(postalCode);
         settings.setRadiusMiles(radiusMiles);
         settings.setMonthsAhead(monthsAhead);
+        // Geocode the ZIP to lat/long (+ display city/state). On failure, keep the last-known
+        // coordinates so a bad/temporary lookup doesn't blank out the search location.
+        geocodingService.geocode(postalCode).ifPresent(geo -> {
+            settings.setLatitude(geo.latitude());
+            settings.setLongitude(geo.longitude());
+            settings.setCity(geo.city());
+            settings.setState(geo.state());
+        });
         settingsRepository.save(settings);
         return "redirect:/";
     }

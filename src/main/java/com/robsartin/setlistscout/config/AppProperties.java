@@ -27,6 +27,7 @@ public record AppProperties(
     ) {}
 
     public record Defaults(
+            String postalCode,
             String city,
             String state,
             int radiusMiles,

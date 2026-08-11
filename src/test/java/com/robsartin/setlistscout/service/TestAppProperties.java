@@ -13,6 +13,6 @@ final class TestAppProperties {
                 new AppProperties.Apis(
                         "tm-key", "bit-app-id", "TestAgent/1.0 ( test@example.com )",
                         "discogs-token", "lastfm-key", "anthropic-key"),
-                new AppProperties.Defaults("Austin", "TX", 50, 6));
+                new AppProperties.Defaults("78701", "Austin", "TX", 50, 6));
     }
 }

@@ -42,6 +42,7 @@ setlistscout:
     last-fm-api-key: ${LASTFM_API_KEY:}
     anthropic-api-key: ${ANTHROPIC_API_KEY:}
   defaults:
+    postal-code: ${DEFAULT_POSTAL_CODE:78701}
     city: ${DEFAULT_CITY:Austin}
     state: ${DEFAULT_STATE:TX}
     radius-miles: ${DEFAULT_RADIUS_MILES:50}

@@ -48,3 +48,5 @@
   Related: [0008: Hosting on Render](0008-hosting-on-render.md), [15. Build JVM projects with Gradle](0015-jvm-build-with-gradle.md)
 - [0017: Tribute/cover band expansion sources](0017-tribute-band-expansion-sources.md)
   Tribute acts don't appear in MusicBrainz lineup relations or Last.fm "similar artist" queries, so neither existing source finds them.
+- [0018: ZIP-code search location with Zippopotam.us geocoding](0018-zip-code-search-location.md)
+  A ZIP code is a more precise, familiar way to say "near here" than city/state, and enables a real distance radius for both Ticketmaster and Bandsintown.
