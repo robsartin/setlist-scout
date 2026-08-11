@@ -33,6 +33,10 @@ dependencies {
 
     runtimeOnly("org.postgresql:postgresql")
 
+    // Versioned schema migrations (replaces ddl-auto=update; see ADR-0009).
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+
     // HTML fetch + parse for scraping band official-site tour pages (#22).
     implementation("org.jsoup:jsoup:1.18.1")
 

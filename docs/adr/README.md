@@ -52,3 +52,5 @@
   A ZIP code is a more precise, familiar way to say "near here" than city/state, and enables a real distance radius for both Ticketmaster and Bandsintown.
 - [0019: Band official-site tour scraping (hybrid JSON-LD + LLM)](0019-band-site-tour-scraping.md)
   Many artists announce tour dates only on their own site; scrape them via MusicBrainz-discovered URLs, schema.org Event JSON-LD, and an LLM fallback.
+- [0020: Schema migrations via Flyway (replacing ddl-auto=update)](0020-flyway-schema-migrations.md)
+  ddl-auto=update can't add a NOT NULL column to a populated table (it crashed prod after multi-tenancy); Flyway versioned migrations + ddl-auto=validate replace it.
