@@ -75,6 +75,21 @@ class ArtistControllerTest {
     }
 
     @Test
+    @DisplayName("rejectAllPending rejects every pending artist")
+    void rejectAllPendingRejectsEveryone() {
+        Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION);
+        Artist similar = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(tribute, similar));
+
+        controller.rejectAllPending(null, new ConcurrentModel());
+
+        assertThat(tribute.getStatus()).isEqualTo(ArtistStatus.REJECTED);
+        assertThat(similar.getStatus()).isEqualTo(ArtistStatus.REJECTED);
+        verify(artistRepository).save(tribute);
+        verify(artistRepository).save(similar);
+    }
+
+    @Test
     @DisplayName("reject returns the pending-section fragment for an htmx request")
     void rejectReturnsFragmentForHtmx() {
         Artist a = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);

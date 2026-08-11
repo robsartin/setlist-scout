@@ -15,6 +15,8 @@
         form.inline { display: inline; }
         h2 { margin-bottom: 0.25rem; }
         .approve-all button { font-weight: 600; padding: 0.4rem 0.9rem; margin: 0.5rem 0; }
+        .reject-all button { font-weight: 400; padding: 0.3rem 0.7rem; margin: 0.5rem 0; font-size: 0.85em;
+                             background: none; border: 1px solid #ccc; color: #b91c1c; }
         .tag { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
         .tag-tribute { background: #7c3aed; color: #fff; }
         .tag-member { background: #e5e7eb; color: #374151; }
@@ -75,6 +77,16 @@
             <button type="submit"
                     th:text="|Approve all remaining (${#lists.size(pendingTributes) + #lists.size(pendingOthers)})|">
                 Approve all remaining
+            </button>
+        </form>
+
+        <form class="reject-all"
+              th:if="${not (#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers))}"
+              hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+              th:action="@{/artists/reject-all-pending}" method="post">
+            <button type="submit"
+                    th:text="|Reject all remaining (${#lists.size(pendingTributes) + #lists.size(pendingOthers)})|">
+                Reject all remaining
             </button>
         </form>
 
