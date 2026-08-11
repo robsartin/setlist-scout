@@ -4,15 +4,21 @@ import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
+import com.robsartin.setlistscout.service.AsyncScanRunner;
 import com.robsartin.setlistscout.service.GeocodingService;
-import com.robsartin.setlistscout.service.ShowAggregationService;
+import com.robsartin.setlistscout.service.ScanStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.ui.ExtendedModelMap;
+import org.springframework.ui.Model;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,21 +27,25 @@ class ShowControllerTest {
 
     private static final String OWNER = "rob@example.com";
 
+    private ShowRepository showRepository;
     private SearchSettingsRepository settingsRepository;
     private GeocodingService geocodingService;
+    private ScanStateService scanState;
+    private AsyncScanRunner asyncScanRunner;
     private ShowController controller;
 
     @BeforeEach
     void setUp() {
-        ShowRepository showRepository = mock(ShowRepository.class);
+        showRepository = mock(ShowRepository.class);
         settingsRepository = mock(SearchSettingsRepository.class);
-        ShowAggregationService showAggregationService = mock(ShowAggregationService.class);
         geocodingService = mock(GeocodingService.class);
         AppProperties appProperties = mock(AppProperties.class);
+        scanState = mock(ScanStateService.class);
+        asyncScanRunner = mock(AsyncScanRunner.class);
         CurrentUser currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
-        controller = new ShowController(showRepository, settingsRepository, showAggregationService,
-                geocodingService, appProperties, currentUser);
+        controller = new ShowController(showRepository, settingsRepository, asyncScanRunner,
+                scanState, geocodingService, appProperties, currentUser);
     }
 
     @Test
@@ -74,5 +84,73 @@ class ShowControllerTest {
         assertThat(settings.getLatitude()).isEqualTo(30.0);
         assertThat(settings.getLongitude()).isEqualTo(-97.0);
         verify(settingsRepository).save(settings);
+    }
+
+    @Test
+    @DisplayName("scanNow (htmx) kicks off the async scan and returns the scanning fragment")
+    void scanNowHtmxReturnsScanningFragment() {
+        when(scanState.dots(OWNER)).thenReturn(0);
+        Model model = new ExtendedModelMap();
+
+        String view = controller.scanNow("hx", model);
+
+        verify(asyncScanRunner).startScan(OWNER);
+        assertThat(view).isEqualTo("shows :: showsRegion");
+        assertThat(model.getAttribute("scanning")).isEqualTo(true);
+        assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning");
+    }
+
+    @Test
+    @DisplayName("scanNow builds a growing dot label from the scan-state tick count")
+    void scanNowBuildsGrowingDotLabel() {
+        when(scanState.dots(OWNER)).thenReturn(3);
+        Model model = new ExtendedModelMap();
+
+        controller.scanNow("hx", model);
+
+        assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning...");
+    }
+
+    @Test
+    @DisplayName("scanNow without htmx still starts the scan and redirects (no-JS fallback)")
+    void scanNowNonHtmxRedirects() {
+        Model model = new ExtendedModelMap();
+
+        String view = controller.scanNow(null, model);
+
+        verify(asyncScanRunner).startScan(OWNER);
+        assertThat(view).isEqualTo("redirect:/");
+    }
+
+    @Test
+    @DisplayName("scanStatus returns the scanning fragment while a scan is in progress")
+    void scanStatusWhileRunningReturnsScanningFragment() {
+        when(scanState.isRunning(OWNER)).thenReturn(true);
+        when(scanState.dots(OWNER)).thenReturn(2);
+        Model model = new ExtendedModelMap();
+
+        String view = controller.scanStatus("eventDate", model);
+
+        assertThat(view).isEqualTo("shows :: showsRegion");
+        assertThat(model.getAttribute("scanning")).isEqualTo(true);
+        assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning..");
+    }
+
+    @Test
+    @DisplayName("scanStatus returns the refreshed shows fragment once the scan is done")
+    void scanStatusWhenDoneReturnsShowsFragment() {
+        when(scanState.isRunning(OWNER)).thenReturn(false);
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(anyString(), any(), any()))
+                .thenReturn(new java.util.ArrayList<>(List.of()));
+        Model model = new ExtendedModelMap();
+
+        String view = controller.scanStatus("eventDate", model);
+
+        assertThat(view).isEqualTo("shows :: showsRegion");
+        assertThat(model.getAttribute("scanning")).isEqualTo(false);
+        assertThat(model.getAttribute("justScanned")).isEqualTo(true);
+        assertThat(model.getAttribute("shows")).isNotNull();
     }
 }

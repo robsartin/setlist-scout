@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8"/>
     <title>Concert Finder</title>
+    <script th:src="@{/js/htmx.min.js}"></script>
     <style>
         body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
         table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
@@ -13,6 +14,8 @@
         .settings input { width: 5rem; }
         form.inline { display: inline; }
         nav a { margin-right: 1rem; }
+        .scanning { font-size: 1.1rem; font-weight: 600; margin-top: 1rem; }
+        .found { color: #15803d; font-weight: 600; margin-top: 1rem; }
     </style>
 </head>
 <body>
@@ -32,35 +35,52 @@
             <span th:if="${settings.city != null}"
                   th:text="'(' + ${settings.city} + ', ' + ${settings.state} + ')'">(Austin, TX)</span>
         </form>
-        <form class="inline" th:action="@{/scan-now}" method="post">
+        <form class="inline" th:action="@{/scan-now}" method="post"
+              hx-post="/scan-now" hx-target="#shows-region" hx-swap="outerHTML">
             <button type="submit">Scan now</button>
         </form>
     </div>
 
-    <table>
-        <thead>
-        <tr>
-            <th><a href="?sort=artist">Band</a></th>
-            <th><a href="?sort=eventDate">Date / Time</a></th>
-            <th><a href="?sort=venue">Venue</a></th>
-            <th><a href="?sort=price">Price</a></th>
-            <th><a href="?sort=discoveredAt">Found</a></th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="show : ${shows}">
-            <td th:text="${show.artistName}">Band</td>
-            <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
-            <td>
-                <span th:text="${show.venueName}">Venue</span>
-                <span th:if="${show.venueCity}" th:text="' (' + ${show.venueCity} + ')'"></span>
-                <a th:if="${show.ticketUrl}" th:href="${show.ticketUrl}" target="_blank">tickets</a>
-            </td>
-            <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
-            <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
-        </tr>
-        </tbody>
-    </table>
-    <p th:if="${#lists.isEmpty(shows)}">No shows found yet. Try "Scan now", or check back after the next scheduled scan.</p>
+    <!--/*
+      showsRegion is the htmx swap target for "Scan now" and /scan-status. While a scan runs it
+      shows the growing "Scanning..." indicator, which polls /scan-status every 10s; when the scan
+      finishes the poll returns the shows list (or empty message), replacing the polling element and
+      ending the poll. aria-live announces the transition for screen readers (not just the dots).
+    */-->
+    <div th:fragment="showsRegion" id="shows-region" aria-live="polite">
+        <p th:if="${scanning}" class="scanning" role="status"
+           hx-get="/scan-status" hx-trigger="every 10s" hx-target="#shows-region" hx-swap="outerHTML"
+           th:text="${scanLabel}">Scanning</p>
+
+        <div th:unless="${scanning}">
+            <p th:if="${justScanned}" class="found" role="status"
+               th:text="|Found ${#lists.size(shows)} shows|">Found N shows</p>
+            <table>
+                <thead>
+                <tr>
+                    <th><a href="?sort=artist">Band</a></th>
+                    <th><a href="?sort=eventDate">Date / Time</a></th>
+                    <th><a href="?sort=venue">Venue</a></th>
+                    <th><a href="?sort=price">Price</a></th>
+                    <th><a href="?sort=discoveredAt">Found</a></th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="show : ${shows}">
+                    <td th:text="${show.artistName}">Band</td>
+                    <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
+                    <td>
+                        <span th:text="${show.venueName}">Venue</span>
+                        <span th:if="${show.venueCity}" th:text="' (' + ${show.venueCity} + ')'"></span>
+                        <a th:if="${show.ticketUrl}" th:href="${show.ticketUrl}" target="_blank">tickets</a>
+                    </td>
+                    <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
+                    <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
+                </tr>
+                </tbody>
+            </table>
+            <p th:if="${#lists.isEmpty(shows)}">No shows found yet. Try "Scan now", or check back after the next scheduled scan.</p>
+        </div>
+    </div>
 </body>
 </html>
