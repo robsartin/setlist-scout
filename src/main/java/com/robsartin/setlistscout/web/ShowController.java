@@ -22,6 +22,9 @@ public class ShowController {
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
 
+    /** Shown while a scan is running; the poll swaps in the results once it finishes. */
+    private static final String SCANNING_LABEL = "Scanning...";
+
     private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
     private final AsyncScanRunner asyncScanRunner;
@@ -51,7 +54,7 @@ public class ShowController {
         String owner = currentUser.email();
         populateShows(model, owner, sort);
         model.addAttribute("scanning", scanState.isRunning(owner));
-        model.addAttribute("scanLabel", scanLabel(owner));
+        model.addAttribute("scanLabel", SCANNING_LABEL);
         return "shows";
     }
 
@@ -110,7 +113,7 @@ public class ShowController {
         asyncScanRunner.startScan(owner);
         if (hxRequest != null) {
             model.addAttribute("scanning", true);
-            model.addAttribute("scanLabel", scanLabel(owner));
+            model.addAttribute("scanLabel", SCANNING_LABEL);
             return "shows :: showsRegion";
         }
         return "redirect:/";
@@ -126,18 +129,13 @@ public class ShowController {
         String owner = currentUser.email();
         if (scanState.isRunning(owner)) {
             model.addAttribute("scanning", true);
-            model.addAttribute("scanLabel", scanLabel(owner));
+            model.addAttribute("scanLabel", SCANNING_LABEL);
             return "shows :: showsRegion";
         }
         populateShows(model, owner, sort);
         model.addAttribute("scanning", false);
         model.addAttribute("justScanned", true);
         return "shows :: showsRegion";
-    }
-
-    /** "Scanning" with a trailing dot per elapsed tick (grows the indicator without JS). */
-    private String scanLabel(String owner) {
-        return "Scanning" + ".".repeat(Math.max(0, scanState.dots(owner)));
     }
 
     /** The user's settings, creating a default row (default ZIP, geocoded) on their first visit. */

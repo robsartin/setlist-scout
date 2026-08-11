@@ -89,7 +89,6 @@ class ShowControllerTest {
     @Test
     @DisplayName("scanNow (htmx) kicks off the async scan and returns the scanning fragment")
     void scanNowHtmxReturnsScanningFragment() {
-        when(scanState.dots(OWNER)).thenReturn(0);
         Model model = new ExtendedModelMap();
 
         String view = controller.scanNow("hx", model);
@@ -97,17 +96,6 @@ class ShowControllerTest {
         verify(asyncScanRunner).startScan(OWNER);
         assertThat(view).isEqualTo("shows :: showsRegion");
         assertThat(model.getAttribute("scanning")).isEqualTo(true);
-        assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning");
-    }
-
-    @Test
-    @DisplayName("scanNow builds a growing dot label from the scan-state tick count")
-    void scanNowBuildsGrowingDotLabel() {
-        when(scanState.dots(OWNER)).thenReturn(3);
-        Model model = new ExtendedModelMap();
-
-        controller.scanNow("hx", model);
-
         assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning...");
     }
 
@@ -126,14 +114,13 @@ class ShowControllerTest {
     @DisplayName("scanStatus returns the scanning fragment while a scan is in progress")
     void scanStatusWhileRunningReturnsScanningFragment() {
         when(scanState.isRunning(OWNER)).thenReturn(true);
-        when(scanState.dots(OWNER)).thenReturn(2);
         Model model = new ExtendedModelMap();
 
         String view = controller.scanStatus("eventDate", model);
 
         assertThat(view).isEqualTo("shows :: showsRegion");
         assertThat(model.getAttribute("scanning")).isEqualTo(true);
-        assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning..");
+        assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning...");
     }
 
     @Test
