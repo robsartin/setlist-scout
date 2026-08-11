@@ -23,6 +23,12 @@
         .tag-similar { background: #dbeafe; color: #1e40af; }
         .group-tribute h2 { color: #6d28d9; }
         .htmx-swapping { opacity: 0.4; transition: opacity 0.2s; }
+        fieldset.decision { border: 0; margin: 0; padding: 0; }
+        fieldset.decision label { margin-right: 0.6rem; white-space: nowrap; }
+        .submit-decisions { font-weight: 600; padding: 0.45rem 1rem; margin: 1rem 0; }
+        .unreject button { font-size: 0.85em; padding: 0.2rem 0.6rem; }
+        .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                           overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
     </style>
 </head>
 <body>
@@ -90,61 +96,66 @@
             </button>
         </form>
 
-        <!-- Cover / tribute acts, called out on their own -->
-        <div class="group-tribute" th:if="${not #lists.isEmpty(pendingTributes)}">
-            <h2>&#127917; Cover / tribute acts</h2>
-            <table>
-                <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Actions</th></tr></thead>
-                <tbody>
-                <tr th:each="a : ${pendingTributes}">
-                    <td><span class="tag tag-tribute">Tribute</span></td>
-                    <td th:text="${a.name}">Name</td>
-                    <td class="via" th:text="${a.discoveredVia}">Via</td>
-                    <td class="note" th:text="${a.note}">Note</td>
-                    <td>
-                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-                              th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
-                            <button type="submit">Approve</button>
-                        </form>
-                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-                              th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
-                            <button type="submit">Reject</button>
-                        </form>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
+        <!--/* One form, one submit: each artist's Accept / Reject / Later radio (default Later) is
+               applied together by /artists/review. A plain redirect (no htmx) because a batch moves
+               artists across the active/pending/rejected lists at once, so the whole page refreshes. */-->
+        <form th:if="${not (#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers))}"
+              th:action="@{/artists/review}" method="post">
 
-        <!-- Members & similar -->
-        <div th:if="${not #lists.isEmpty(pendingOthers)}">
-            <h2>Members &amp; similar</h2>
-            <table>
-                <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Actions</th></tr></thead>
-                <tbody>
-                <tr th:each="a : ${pendingOthers}">
-                    <td>
-                        <span class="tag"
-                              th:classappend="${a.source.name() == 'MEMBER_EXPANSION'} ? 'tag-member' : 'tag-similar'"
-                              th:text="${a.source.name() == 'MEMBER_EXPANSION'} ? 'Member' : 'Similar'">Tag</span>
-                    </td>
-                    <td th:text="${a.name}">Name</td>
-                    <td class="via" th:text="${a.discoveredVia}">Via</td>
-                    <td class="note" th:text="${a.note}">Note</td>
-                    <td>
-                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-                              th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
-                            <button type="submit">Approve</button>
-                        </form>
-                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-                              th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
-                            <button type="submit">Reject</button>
-                        </form>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
+            <!-- Cover / tribute acts, called out on their own -->
+            <div class="group-tribute" th:if="${not #lists.isEmpty(pendingTributes)}">
+                <h2>&#127917; Cover / tribute acts</h2>
+                <table>
+                    <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Decision</th></tr></thead>
+                    <tbody>
+                    <tr th:each="a : ${pendingTributes}">
+                        <td><span class="tag tag-tribute">Tribute</span></td>
+                        <td th:text="${a.name}">Name</td>
+                        <td class="via" th:text="${a.discoveredVia}">Via</td>
+                        <td class="note" th:text="${a.note}">Note</td>
+                        <td>
+                            <fieldset class="decision">
+                                <legend class="visually-hidden" th:text="|Decision for ${a.name}|">Decision</legend>
+                                <label><input type="radio" th:name="${'decision-' + a.id}" value="accept"/> Accept</label>
+                                <label><input type="radio" th:name="${'decision-' + a.id}" value="reject"/> Reject</label>
+                                <label><input type="radio" th:name="${'decision-' + a.id}" value="later" checked="checked"/> Later</label>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Members & similar -->
+            <div th:if="${not #lists.isEmpty(pendingOthers)}">
+                <h2>Members &amp; similar</h2>
+                <table>
+                    <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Decision</th></tr></thead>
+                    <tbody>
+                    <tr th:each="a : ${pendingOthers}">
+                        <td>
+                            <span class="tag"
+                                  th:classappend="${a.source.name() == 'MEMBER_EXPANSION'} ? 'tag-member' : 'tag-similar'"
+                                  th:text="${a.source.name() == 'MEMBER_EXPANSION'} ? 'Member' : 'Similar'">Tag</span>
+                        </td>
+                        <td th:text="${a.name}">Name</td>
+                        <td class="via" th:text="${a.discoveredVia}">Via</td>
+                        <td class="note" th:text="${a.note}">Note</td>
+                        <td>
+                            <fieldset class="decision">
+                                <legend class="visually-hidden" th:text="|Decision for ${a.name}|">Decision</legend>
+                                <label><input type="radio" th:name="${'decision-' + a.id}" value="accept"/> Accept</label>
+                                <label><input type="radio" th:name="${'decision-' + a.id}" value="reject"/> Reject</label>
+                                <label><input type="radio" th:name="${'decision-' + a.id}" value="later" checked="checked"/> Later</label>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <button type="submit" class="submit-decisions">Submit decisions</button>
+        </form>
 
         <p th:if="${#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers)}">
             Nothing pending. Run expansion to find more.
@@ -153,11 +164,16 @@
 
     <h1>Rejected</h1>
     <table>
-        <thead><tr><th>Name</th><th>Why it was suggested</th></tr></thead>
+        <thead><tr><th>Name</th><th>Why it was suggested</th><th>Actions</th></tr></thead>
         <tbody>
         <tr th:each="a : ${rejected}">
             <td th:text="${a.name}">Name</td>
             <td class="note" th:text="${a.note}">Note</td>
+            <td>
+                <form class="inline unreject" th:action="@{'/artists/' + ${a.id} + '/unreject'}" method="post">
+                    <button type="submit">Unreject</button>
+                </form>
+            </td>
         </tr>
         </tbody>
     </table>
