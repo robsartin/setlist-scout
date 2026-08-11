@@ -78,4 +78,35 @@ class MusicBrainzServiceTest {
 
         assertThat(related).isEmpty();
     }
+
+    @Test
+    @DisplayName("findOfficialHomepage returns the official-homepage url-rel")
+    void shouldReturnOfficialHomepage() {
+        server.enqueue(json("""
+                {"artists": [{"id": "mbid-123", "name": "Dawes"}]}
+                """));
+        server.enqueue(json("""
+                {"relations": [
+                  {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q123"}},
+                  {"type": "official homepage", "url": {"resource": "https://dawestheband.com"}}
+                ]}
+                """));
+
+        assertThat(service.findOfficialHomepage("Dawes")).contains("https://dawestheband.com");
+    }
+
+    @Test
+    @DisplayName("findOfficialHomepage is empty when there is no official-homepage relation")
+    void shouldReturnEmptyHomepageWhenNone() {
+        server.enqueue(json("""
+                {"artists": [{"id": "mbid-123", "name": "Dawes"}]}
+                """));
+        server.enqueue(json("""
+                {"relations": [
+                  {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q123"}}
+                ]}
+                """));
+
+        assertThat(service.findOfficialHomepage("Dawes")).isEmpty();
+    }
 }

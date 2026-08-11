@@ -89,6 +89,54 @@ public class MusicBrainzService {
         return related;
     }
 
+    /** The artist's official homepage URL from MusicBrainz's url-rels, if one is recorded. */
+    @SuppressWarnings("unchecked")
+    public java.util.Optional<String> findOfficialHomepage(String artistName) {
+        Map<String, Object> searchResult = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/artist/")
+                        .queryParam("query", "artist:\"" + artistName + "\"")
+                        .queryParam("fmt", "json")
+                        .queryParam("limit", 1)
+                        .build())
+                .retrieve()
+                .bodyToMono(Map.class)
+                .onErrorReturn(Map.of())
+                .block();
+
+        if (searchResult == null) return java.util.Optional.empty();
+        List<Map<String, Object>> artists = (List<Map<String, Object>>) searchResult.get("artists");
+        if (artists == null || artists.isEmpty()) return java.util.Optional.empty();
+
+        String mbid = (String) artists.get(0).get("id");
+        sleepForRateLimit();
+
+        Map<String, Object> detail = webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/artist/" + mbid)
+                        .queryParam("inc", "url-rels")
+                        .queryParam("fmt", "json")
+                        .build())
+                .retrieve()
+                .bodyToMono(Map.class)
+                .onErrorReturn(Map.of())
+                .block();
+
+        if (detail == null) return java.util.Optional.empty();
+        List<Map<String, Object>> relations = (List<Map<String, Object>>) detail.get("relations");
+        if (relations == null) return java.util.Optional.empty();
+
+        for (Map<String, Object> rel : relations) {
+            if ("official homepage".equals(rel.get("type"))) {
+                Map<String, Object> url = (Map<String, Object>) rel.get("url");
+                if (url != null && url.get("resource") instanceof String resource) {
+                    return java.util.Optional.of(resource);
+                }
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
     private void sleepForRateLimit() {
         try {
             Thread.sleep(rateLimitMillis); // stay under MusicBrainz's ~1 req/sec limit
