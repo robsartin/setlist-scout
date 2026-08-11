@@ -43,7 +43,10 @@ class TicketmasterServiceTest {
                             "events": [
                               {
                                 "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
-                                "_embedded": {"venues": [{"name": "Moody Center", "city": {"name": "Austin"}}]},
+                                "_embedded": {
+                                  "venues": [{"name": "Moody Center", "city": {"name": "Austin"}}],
+                                  "attractions": [{"name": "Dawes"}]
+                                },
                                 "priceRanges": [{"min": 45.5}],
                                 "url": "https://example.com/tickets"
                               }
@@ -78,7 +81,8 @@ class TicketmasterServiceTest {
                             "localDate": "2026-09-01",
                             "localTime": "20:00:00",
                             "dateTime": "2026-09-02T01:00:00Z"
-                          }}}
+                          }},
+                          "_embedded": {"attractions": [{"name": "Dawes"}]}}
                         ]}}
                         """));
 
@@ -108,7 +112,8 @@ class TicketmasterServiceTest {
                 .setHeader("Content-Type", "application/json")
                 .setBody("""
                         {"_embedded": {"events": [
-                          {"dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}}
+                          {"dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                          "_embedded": {"attractions": [{"name": "Dawes"}]}}
                         ]}}
                         """));
 
@@ -127,6 +132,64 @@ class TicketmasterServiceTest {
         server.enqueue(new MockResponse().setResponseCode(500));
 
         List<Show> shows = service.searchShows("Dawes", "78701", 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("should keep only events whose attractions include the searched artist")
+    void shouldFilterOutEventsWithoutMatchingAttraction() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {
+                          "_embedded": {
+                            "events": [
+                              {
+                                "dates": {"start": {"dateTime": "2026-10-14T19:00:00Z"}},
+                                "_embedded": {
+                                  "venues": [{"name": "Emo's", "city": {"name": "Austin"}}],
+                                  "attractions": [{"name": "The Best"}]
+                                },
+                                "url": "https://example.com/the-best-show"
+                              },
+                              {
+                                "dates": {"start": {"dateTime": "2026-10-14T19:00:00Z"}},
+                                "_embedded": {
+                                  "venues": [{"name": "Emo's", "city": {"name": "Austin"}}],
+                                  "attractions": [{"name": "Horse Jumper of Love"}, {"name": "Dead"}]
+                                },
+                                "url": "https://example.com/horse-jumper-show"
+                              }
+                            ]
+                          }
+                        }
+                        """));
+
+        List<Show> shows = service.searchShows("the Best", "78701", 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getTicketUrl()).isEqualTo("https://example.com/the-best-show");
+    }
+
+    @Test
+    @DisplayName("should drop events with no attractions array, since a match can't be confirmed")
+    void shouldFilterOutEventsWithNoAttractionsArray() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "dates": {"start": {"dateTime": "2026-10-14T19:00:00Z"}},
+                            "_embedded": {"venues": [{"name": "Emo's", "city": {"name": "Austin"}}]},
+                            "url": "https://example.com/no-attractions-show"
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("the Best", "78701", 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();

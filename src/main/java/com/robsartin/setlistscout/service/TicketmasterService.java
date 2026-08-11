@@ -77,11 +77,36 @@ public class TicketmasterService {
         if (events == null) return shows;
 
         for (Map<String, Object> event : events) {
+            if (!hasMatchingAttraction(artistName, event)) continue;
             shows.add(parseEvent(artistName, event));
         }
         log.atDebug().addKeyValue("source", "ticketmaster").addKeyValue("artist", artistName)
                 .addKeyValue("count", shows.size()).log("show search");
         return shows;
+    }
+
+    /**
+     * Ticketmaster's {@code keyword} query is a fuzzy relevance search, so it
+     * can return events that only loosely resemble the searched artist. Only
+     * trust an event if the searched artist is actually one of the billed
+     * attractions; events with no attractions at all can't be confirmed either
+     * way, so they're dropped too.
+     */
+    @SuppressWarnings("unchecked")
+    private boolean hasMatchingAttraction(String artistName, Map<String, Object> event) {
+        Map<String, Object> embedded = (Map<String, Object>) event.get("_embedded");
+        List<Map<String, Object>> attractions = embedded != null
+                ? (List<Map<String, Object>>) embedded.get("attractions") : null;
+        if (attractions == null) return false;
+
+        String normalizedSearch = artistName.trim().toLowerCase();
+        for (Map<String, Object> attraction : attractions) {
+            if (attraction.get("name") instanceof String name
+                    && name.trim().toLowerCase().equals(normalizedSearch)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")
