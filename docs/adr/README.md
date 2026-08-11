@@ -50,3 +50,5 @@
   Tribute acts don't appear in MusicBrainz lineup relations or Last.fm "similar artist" queries, so neither existing source finds them.
 - [0018: ZIP-code search location with Zippopotam.us geocoding](0018-zip-code-search-location.md)
   A ZIP code is a more precise, familiar way to say "near here" than city/state, and enables a real distance radius for both Ticketmaster and Bandsintown.
+- [0019: Band official-site tour scraping (hybrid JSON-LD + LLM)](0019-band-site-tour-scraping.md)
+  Many artists announce tour dates only on their own site; scrape them via MusicBrainz-discovered URLs, schema.org Event JSON-LD, and an LLM fallback.

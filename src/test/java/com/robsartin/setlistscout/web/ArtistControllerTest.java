@@ -103,6 +103,18 @@ class ArtistControllerTest {
     }
 
     @Test
+    @DisplayName("setSiteUrl stores the official-site URL on the owner's artist")
+    void setSiteUrlStoresUrl() {
+        Artist a = pending("Dawes", ArtistSource.SIMILAR_EXPANSION);
+        when(artistRepository.findByIdAndOwner(7L, OWNER)).thenReturn(java.util.Optional.of(a));
+
+        controller.setSiteUrl(7L, "https://dawestheband.com", null, new ConcurrentModel());
+
+        assertThat(a.getOfficialSiteUrl()).isEqualTo("https://dawestheband.com");
+        verify(artistRepository).save(a);
+    }
+
+    @Test
     @DisplayName("addSeed returns the active-section fragment for an htmx request")
     void addSeedReturnsFragmentForHtmx() {
         when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
