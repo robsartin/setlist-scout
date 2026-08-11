@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -19,6 +21,8 @@ import java.util.regex.Pattern;
  */
 @Service
 public class TributeLlmService {
+
+    private static final Logger log = LoggerFactory.getLogger(TributeLlmService.class);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -63,6 +67,10 @@ public class TributeLlmService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "tribute-llm")
+                    .addKeyValue("artist", artistName)
+                    .log("tribute-bands request failed");
             response = Map.of();
         }
 
@@ -78,6 +86,8 @@ public class TributeLlmService {
             Matcher m = LINE_ITEM.matcher(line.trim());
             result.add(m.matches() ? m.group(1).trim() : line.trim());
         }
+        log.atDebug().addKeyValue("source", "tribute-llm").addKeyValue("artist", artistName)
+                .addKeyValue("count", result.size()).log("tribute bands request");
         return result;
     }
 }

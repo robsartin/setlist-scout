@@ -1,5 +1,7 @@
 package com.robsartin.setlistscout.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -17,6 +19,8 @@ import java.util.Optional;
  */
 @Service
 public class GeocodingService {
+
+    private static final Logger log = LoggerFactory.getLogger(GeocodingService.class);
 
     private final RestClient restClient;
 
@@ -39,6 +43,10 @@ public class GeocodingService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "geocoding")
+                    .addKeyValue("zip", zip)
+                    .log("geocode request failed");
             response = Map.of();
         }
 
@@ -52,8 +60,15 @@ public class GeocodingService {
             double longitude = Double.parseDouble((String) place.get("longitude"));
             String city = (String) place.get("place name");
             String state = (String) place.get("state abbreviation");
-            return Optional.of(new GeoResult(latitude, longitude, city, state));
+            Optional<GeoResult> result = Optional.of(new GeoResult(latitude, longitude, city, state));
+            log.atDebug().addKeyValue("source", "geocoding").addKeyValue("zip", zip)
+                    .addKeyValue("found", result.isPresent()).log("geocode lookup");
+            return result;
         } catch (NumberFormatException | NullPointerException e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "geocoding")
+                    .addKeyValue("zip", zip)
+                    .log("geocode place parse failed");
             return Optional.empty();
         }
     }

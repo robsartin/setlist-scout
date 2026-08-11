@@ -2,6 +2,8 @@ package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -21,6 +23,8 @@ import java.util.Map;
  */
 @Service
 public class TicketmasterService {
+
+    private static final Logger log = LoggerFactory.getLogger(TicketmasterService.class);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -59,6 +63,10 @@ public class TicketmasterService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "ticketmaster")
+                    .addKeyValue("artist", artistName)
+                    .log("show search failed");
             response = Map.of();
         }
 
@@ -71,6 +79,8 @@ public class TicketmasterService {
         for (Map<String, Object> event : events) {
             shows.add(parseEvent(artistName, event));
         }
+        log.atDebug().addKeyValue("source", "ticketmaster").addKeyValue("artist", artistName)
+                .addKeyValue("count", shows.size()).log("show search");
         return shows;
     }
 

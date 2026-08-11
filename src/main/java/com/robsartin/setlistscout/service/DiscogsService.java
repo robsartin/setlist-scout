@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,8 @@ import java.util.Map;
  */
 @Service
 public class DiscogsService {
+
+    private static final Logger log = LoggerFactory.getLogger(DiscogsService.class);
 
     private final RestClient restClient;
 
@@ -49,6 +53,10 @@ public class DiscogsService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "discogs")
+                    .addKeyValue("artist", artistName)
+                    .log("artist search failed");
             searchResult = Map.of();
         }
 
@@ -66,6 +74,10 @@ public class DiscogsService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "discogs")
+                    .addKeyValue("artist", artistName)
+                    .log("related-artists lookup failed");
             detail = Map.of();
         }
 
@@ -75,6 +87,8 @@ public class DiscogsService {
         addNames(related, (List<Map<String, Object>>) detail.get("groups"));
         addNames(related, (List<Map<String, Object>>) detail.get("aliases"));
 
+        log.atDebug().addKeyValue("source", "discogs").addKeyValue("artist", artistName)
+                .addKeyValue("count", related.size()).log("related artists lookup");
         return related;
     }
 

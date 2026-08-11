@@ -7,6 +7,8 @@ import com.robsartin.setlistscout.domain.Show;
 import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -22,6 +24,8 @@ import java.util.List;
  */
 @Service
 public class ShowAggregationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ShowAggregationService.class);
 
     private final ArtistRepository artistRepository;
     private final ShowRepository showRepository;
@@ -58,10 +62,16 @@ public class ShowAggregationService {
         List<Artist> activeArtists = artistRepository.findByOwnerAndStatusIn(
                 owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
 
+        log.atInfo().addKeyValue("activeArtists", activeArtists.size()).log("scan started");
+        long startNanos = System.nanoTime();
+        int searched = 0;
+        int found = 0;
+        int saved = 0;
         for (Artist artist : activeArtists) {
             // Defense in depth (issue #49): a blank name searches Ticketmaster with keyword="",
             // which returns every local event. Never let a bad row trigger that, whatever its source.
             if (artist.getName() == null || artist.getName().isBlank()) continue;
+            searched++;
 
             List<Show> tmShows = ticketmaster.searchShows(
                     artist.getName(), settings.getPostalCode(),
@@ -71,11 +81,27 @@ public class ShowAggregationService {
             List<Show> bitShows = bandsintown.searchShows(
                     artist.getName(), settings.getLatitude(), settings.getLongitude(),
                     settings.getRadiusMiles(), start, end);
+            List<Show> siteShows = scrapeBandSite(artist, settings, start, end);
 
-            persistNew(owner, tmShows);
-            persistNew(owner, bitShows);
-            persistNew(owner, scrapeBandSite(artist, settings, start, end));
+            found += tmShows.size() + bitShows.size() + siteShows.size();
+            saved += persistNew(owner, tmShows);
+            saved += persistNew(owner, bitShows);
+            saved += persistNew(owner, siteShows);
+
+            log.atDebug()
+                    .addKeyValue("artist", artist.getName())
+                    .addKeyValue("ticketmaster", tmShows.size())
+                    .addKeyValue("bandsintown", bitShows.size())
+                    .addKeyValue("bandSite", siteShows.size())
+                    .log("artist scanned");
         }
+
+        log.atInfo()
+                .addKeyValue("artistsSearched", searched)
+                .addKeyValue("showsFound", found)
+                .addKeyValue("showsSaved", saved)
+                .addKeyValue("durationMs", (System.nanoTime() - startNanos) / 1_000_000)
+                .log("scan finished");
     }
 
     /**
@@ -103,7 +129,8 @@ public class ShowAggregationService {
                 .toList();
     }
 
-    private void persistNew(String owner, List<Show> shows) {
+    private int persistNew(String owner, List<Show> shows) {
+        int saved = 0;
         for (Show show : shows) {
             if (show.getEventDateTime() == null) continue;
             boolean exists = showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
@@ -111,7 +138,9 @@ public class ShowAggregationService {
             if (!exists) {
                 show.setOwner(owner);
                 showRepository.save(show);
+                saved++;
             }
         }
+        return saved;
     }
 }

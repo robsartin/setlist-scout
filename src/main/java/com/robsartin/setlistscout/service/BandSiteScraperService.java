@@ -6,6 +6,8 @@ import com.robsartin.setlistscout.domain.Show;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +26,7 @@ import java.util.List;
 @Service
 public class BandSiteScraperService {
 
+    private static final Logger log = LoggerFactory.getLogger(BandSiteScraperService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int TIMEOUT_MS = 10_000;
     private static final String USER_AGENT = "SetlistScout/0.1 (+https://setlist-scout.onrender.com)";
@@ -46,8 +49,14 @@ public class BandSiteScraperService {
                     shows = extractShows(artistName, tourDoc, tourUrl, start, end);
                 }
             }
+            log.atDebug().addKeyValue("source", "band-site").addKeyValue("url", siteUrl)
+                    .addKeyValue("count", shows.size()).log("band-site scrape");
             return shows;
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "band-site")
+                    .addKeyValue("url", siteUrl)
+                    .log("band-site scrape failed");
             return List.of(); // network/parse/blocked -> no shows, never breaks the scan
         }
     }

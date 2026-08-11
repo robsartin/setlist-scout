@@ -2,6 +2,8 @@ package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -20,6 +22,8 @@ import java.util.Map;
  */
 @Service
 public class BandsintownService {
+
+    private static final Logger log = LoggerFactory.getLogger(BandsintownService.class);
 
     private final RestClient restClient;
     private final String appId;
@@ -54,6 +58,10 @@ public class BandsintownService {
                     .retrieve()
                     .body(List.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "bandsintown")
+                    .addKeyValue("artist", artistName)
+                    .log("show search failed");
             events = List.of();
         }
 
@@ -75,6 +83,8 @@ public class BandsintownService {
             }
             shows.add(show);
         }
+        log.atDebug().addKeyValue("source", "bandsintown").addKeyValue("artist", artistName)
+                .addKeyValue("count", shows.size()).log("show search");
         return shows;
     }
 

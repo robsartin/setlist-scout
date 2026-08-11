@@ -37,6 +37,12 @@
         <a href="/artists">Artists</a>
     </nav>
 
+    <form class="inline" th:action="@{/artists/log-level}" method="post">
+        <span class="note">Log level:</span>
+        <button type="submit" name="level" value="INFO">INFO</button>
+        <button type="submit" name="level" value="DEBUG">DEBUG</button>
+    </form>
+
     <h1>Active list (seed + approved)</h1>
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload. */-->
     <div th:fragment="activeSection" id="active-section">

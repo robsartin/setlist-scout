@@ -44,6 +44,9 @@ dependencies {
     // HTML fetch + parse for scraping band official-site tour pages (#22).
     implementation("org.jsoup:jsoup:1.18.1")
 
+    // UUIDv7 (time-ordered) correlation ids; Java's built-in UUID is v4 only.
+    implementation("com.fasterxml.uuid:java-uuid-generator:5.1.0")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     // Full-context smoke test boots the app against a throwaway Postgres.

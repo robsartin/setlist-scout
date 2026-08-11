@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,8 @@ import java.util.Map;
  */
 @Service
 public class MusicBrainzService {
+
+    private static final Logger log = LoggerFactory.getLogger(MusicBrainzService.class);
 
     private final RestClient restClient;
     private final long rateLimitMillis;
@@ -54,6 +58,10 @@ public class MusicBrainzService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "musicbrainz")
+                    .addKeyValue("artist", artistName)
+                    .log("artist search failed");
             searchResult = Map.of();
         }
 
@@ -75,6 +83,10 @@ public class MusicBrainzService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "musicbrainz")
+                    .addKeyValue("artist", artistName)
+                    .log("related-artists lookup failed");
             detail = Map.of();
         }
 
@@ -91,6 +103,8 @@ public class MusicBrainzService {
                 related.add(name);
             }
         }
+        log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
+                .addKeyValue("count", related.size()).log("related artists lookup");
         return related;
     }
 
@@ -109,6 +123,10 @@ public class MusicBrainzService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "musicbrainz")
+                    .addKeyValue("artist", artistName)
+                    .log("artist search failed");
             searchResult = Map.of();
         }
 
@@ -130,6 +148,10 @@ public class MusicBrainzService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "musicbrainz")
+                    .addKeyValue("artist", artistName)
+                    .log("official homepage lookup failed");
             detail = Map.of();
         }
 
@@ -141,11 +163,17 @@ public class MusicBrainzService {
             if ("official homepage".equals(rel.get("type"))) {
                 Map<String, Object> url = (Map<String, Object>) rel.get("url");
                 if (url != null && url.get("resource") instanceof String resource) {
-                    return java.util.Optional.of(resource);
+                    java.util.Optional<String> result = java.util.Optional.of(resource);
+                    log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
+                            .addKeyValue("found", result.isPresent()).log("official homepage lookup");
+                    return result;
                 }
             }
         }
-        return java.util.Optional.empty();
+        java.util.Optional<String> result = java.util.Optional.empty();
+        log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
+                .addKeyValue("found", result.isPresent()).log("official homepage lookup");
+        return result;
     }
 
     private void sleepForRateLimit() {

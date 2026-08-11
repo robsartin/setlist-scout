@@ -1,8 +1,10 @@
 package com.robsartin.setlistscout.service;
 
+import com.robsartin.setlistscout.observability.Correlation;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -51,7 +53,8 @@ public class AsyncScanRunner {
         if (!scanState.tryStart(owner)) {
             return;
         }
-        executor.execute(() -> {
+        String parentCid = MDC.get(Correlation.CID); // the triggering request's cid, captured on the request thread
+        executor.execute(() -> Correlation.run("scan", owner, parentCid, () -> {
             try {
                 aggregation.scanForShows(owner);
             } catch (RuntimeException e) {
@@ -59,7 +62,7 @@ public class AsyncScanRunner {
             } finally {
                 scanState.finish(owner);
             }
-        });
+        }));
     }
 
     @PreDestroy
