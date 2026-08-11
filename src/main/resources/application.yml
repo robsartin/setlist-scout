@@ -2,6 +2,14 @@ spring:
   application:
     name: setlist-scout
 
+  # Faster startup on Render's throttled free-tier CPU (the boot was exceeding Render's
+  # port-detection window). Lazy-init defers most bean creation so Tomcat binds its port
+  # quickly; the @Scheduled scanner is kept eager via @Lazy(false) so scans still register.
+  main:
+    lazy-initialization: true
+  jmx:
+    enabled: false
+
   datasource:
     # Either set DATABASE_URL (a full jdbc:postgresql:// URL) directly, or let it be
     # composed from DB_HOST/DB_PORT/DB_NAME -- the render.yaml blueprint wires those
