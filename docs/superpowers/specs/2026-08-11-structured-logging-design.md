@@ -26,20 +26,29 @@ as its own PR, CI-verified, before the logging work:
 
 ## 1. Log format & volume control
 
-- `logging.structured.format.console: ecs` — JSON (Elastic Common Schema), native to 3.4.
-  MDC fields are emitted automatically, so `cid` (and `owner`/`job`/`parentCid`) appear on
-  every line without per-statement effort.
+- `logging.structured.format.console: ecs` — JSON (Elastic Common Schema), native to 3.4,
+  emitted as **JSONL: one compact JSON object per line, newline-delimited** (not pretty-printed
+  multi-line). This is Spring Boot's structured console output and is what the Render log viewer
+  and any later `jq`/aggregation step expect. MDC fields are included automatically, so `cid`
+  (and `owner`/`job`/`parentCid`) appear on every line without per-statement effort.
 - `logging.level.com.robsartin.setlistscout: ${LOG_LEVEL:INFO}` — **`LOG_LEVEL` env var is the
   volume knob.** Default `INFO`. Set `DEBUG` in Render for a deep dive; back to `INFO` to quiet.
   (Root stays at Spring's default; only our package is knob-controlled.)
 
-### Optional: runtime level changes without redeploy
+### Runtime level changes without redeploy (in scope)
 
-Expose Actuator's `loggers` endpoint (`management.endpoints.web.exposure.include: health,loggers`)
-so a level can be changed live via `POST /actuator/loggers/com.robsartin.setlistscout {"configuredLevel":"DEBUG"}`.
-It's already behind auth (`anyRequest().authenticated()`). Trade-off: a POST endpoint (CSRF/permit
-handling) for instant, no-redeploy control. **Decision point for review — include or not.**
-Baseline (env var) works regardless.
+Flip the app's log level **live, no redeploy** — for when a user hits a problem and you want DEBUG
+right now. Mechanism: Spring's `LoggingSystem.setLogLevel("com.robsartin.setlistscout", level)` (the
+same call Actuator's loggers endpoint makes under the hood).
+
+- Surface it as a tiny **authenticated UI toggle** (INFO ⇄ DEBUG) on an existing page, POSTing
+  through our normal form + CSRF + htmx path to `POST /admin/log-level`. This is chosen over exposing
+  Actuator's `/actuator/loggers` because that endpoint wants a JSON body + CSRF token + the session
+  cookie, which is awkward to invoke by hand on a cookie-auth app; a UI toggle "just works."
+- The change is **ephemeral** — it resets to the `LOG_LEVEL` env default on the next deploy/restart,
+  which stays the persistent baseline.
+- Alternative (if we'd rather not add UI): expose `management.endpoints.web.exposure.include:
+  health,loggers` and POST to `/actuator/loggers/...`. Standard, but clunky to call here.
 
 ## 2. Correlation id (UUIDv7)
 
@@ -98,6 +107,8 @@ so ECS fields stay queryable.
 - `CorrelationTest` (background helper): sets `cid`/`owner`/`job`/`parentCid`, runs the block, and
   clears MDC afterward even on exception.
 - `CorrelationIdsTest`: generated id is a valid UUID and version 7; two successive ids are ordered.
+- `LogLevelControllerTest`: `POST /admin/log-level` with a valid level calls `LoggingSystem.setLogLevel`
+  (mocked) for our package; an invalid level is rejected; the endpoint requires authentication.
 - Structured-output format itself is configuration — spot-checked in CI logs / prod, not unit-tested.
 
 ## Out of scope (YAGNI)
