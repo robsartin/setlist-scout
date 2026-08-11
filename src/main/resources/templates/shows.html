@@ -24,12 +24,13 @@
 
     <div class="settings">
         <form th:action="@{/settings}" method="post">
-            Near
-            <input type="text" name="city" th:value="${settings.city}"/>,
-            <input type="text" name="state" th:value="${settings.state}" size="2"/>
+            Near ZIP
+            <input type="text" name="postalCode" th:value="${settings.postalCode}" size="5" maxlength="5" pattern="[0-9]{5}" required/>
             within <input type="number" name="radiusMiles" th:value="${settings.radiusMiles}"/> miles,
             next <input type="number" name="monthsAhead" th:value="${settings.monthsAhead}"/> months
             <button type="submit">Save</button>
+            <span th:if="${settings.city != null}"
+                  th:text="'(' + ${settings.city} + ', ' + ${settings.state} + ')'">(Austin, TX)</span>
         </form>
         <form class="inline" th:action="@{/scan-now}" method="post">
             <button type="submit">Scan now</button>
