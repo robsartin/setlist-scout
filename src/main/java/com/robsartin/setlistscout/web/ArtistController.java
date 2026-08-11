@@ -43,8 +43,11 @@ public class ArtistController {
                           @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           Model model) {
         String owner = currentUser.email();
-        if (!artistRepository.existsByOwnerAndNameIgnoreCase(owner, name)) {
-            Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        // Reject a blank/whitespace name: a nameless seed would search Ticketmaster with
+        // keyword="" and pull back every local event (issue #49). Trim so " Wilco " != "Wilco".
+        String trimmed = name == null ? "" : name.trim();
+        if (!trimmed.isEmpty() && !artistRepository.existsByOwnerAndNameIgnoreCase(owner, trimmed)) {
+            Artist artist = new Artist(trimmed, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
             artist.setOwner(owner);
             artistRepository.save(artist);
         }

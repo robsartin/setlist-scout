@@ -59,6 +59,10 @@ public class ShowAggregationService {
                 owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
 
         for (Artist artist : activeArtists) {
+            // Defense in depth (issue #49): a blank name searches Ticketmaster with keyword="",
+            // which returns every local event. Never let a bad row trigger that, whatever its source.
+            if (artist.getName() == null || artist.getName().isBlank()) continue;
+
             List<Show> tmShows = ticketmaster.searchShows(
                     artist.getName(), settings.getPostalCode(),
                     settings.getRadiusMiles(), start, end);

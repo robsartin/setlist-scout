@@ -14,8 +14,12 @@ import org.springframework.ui.Model;
 import java.util.List;
 import java.util.Optional;
 
+import org.mockito.ArgumentCaptor;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -140,5 +144,26 @@ class ArtistControllerTest {
         assertThat(view).isEqualTo("artists :: activeSection");
         verify(artistRepository).save(org.mockito.ArgumentMatchers.any(Artist.class));
         assertThat(model.getAttribute("active")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("addSeed ignores a blank/whitespace name (a blank seed would trigger a keyword-less search)")
+    void addSeedIgnoresBlankName() {
+        String view = controller.addSeed("   ", null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists");
+        verify(artistRepository, never()).save(any(Artist.class));
+    }
+
+    @Test
+    @DisplayName("addSeed trims surrounding whitespace before saving")
+    void addSeedTrimsName() {
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
+
+        controller.addSeed("  Wilco  ", null, new ConcurrentModel());
+
+        ArgumentCaptor<Artist> saved = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository).save(saved.capture());
+        assertThat(saved.getValue().getName()).isEqualTo("Wilco");
     }
 }
