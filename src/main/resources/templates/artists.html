@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8"/>
     <title>Artists - Concert Finder</title>
+    <script th:src="@{/js/htmx.min.js}"></script>
     <style>
         body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
         table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; margin-bottom: 2rem; }
@@ -13,11 +14,13 @@
         nav a { margin-right: 1rem; }
         form.inline { display: inline; }
         h2 { margin-bottom: 0.25rem; }
+        .approve-all button { font-weight: 600; padding: 0.4rem 0.9rem; margin: 0.5rem 0; }
         .tag { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
         .tag-tribute { background: #7c3aed; color: #fff; }
         .tag-member { background: #e5e7eb; color: #374151; }
         .tag-similar { background: #dbeafe; color: #1e40af; }
         .group-tribute h2 { color: #6d28d9; }
+        .htmx-swapping { opacity: 0.4; transition: opacity 0.2s; }
     </style>
 </head>
 <body>
@@ -27,28 +30,44 @@
     </nav>
 
     <h1>Active list (seed + approved)</h1>
-    <table>
-        <thead><tr><th>Name</th><th>Source</th></tr></thead>
-        <tbody>
-        <tr th:each="a : ${active}">
-            <td th:text="${a.name}">Name</td>
-            <td th:text="${a.source}">Source</td>
-        </tr>
-        </tbody>
-    </table>
+    <!--/* activeSection is a swap target so a manual add can refresh it without a reload. */-->
+    <div th:fragment="activeSection" id="active-section">
+        <table>
+            <thead><tr><th>Name</th><th>Source</th></tr></thead>
+            <tbody>
+            <tr th:each="a : ${active}">
+                <td th:text="${a.name}">Name</td>
+                <td th:text="${a.source}">Source</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
 
-    <form th:action="@{/artists/seed}" method="post">
+    <form hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
+          hx-on::after-request="this.reset()"
+          th:action="@{/artists/seed}" method="post">
         <input type="text" name="name" placeholder="Add a band to the seed list"/>
         <button type="submit">Add</button>
     </form>
 
     <h1>Pending review</h1>
-    <form th:action="@{/artists/expand-now}" method="post">
+    <form hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+          th:action="@{/artists/expand-now}" method="post">
         <button type="submit">Run expansion now</button>
     </form>
 
-    <!--/* The whole pending area is a fragment so htmx can swap it after an action (later increment). */-->
-    <div th:fragment="pendingSection" id="pending-section">
+    <!--/* pendingSection is the htmx swap target: an approve/reject/approve-all returns just this. */-->
+    <div th:fragment="pendingSection" id="pending-section" aria-live="polite">
+
+        <form class="approve-all"
+              th:if="${not (#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers))}"
+              hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+              th:action="@{/artists/approve-all-pending}" method="post">
+            <button type="submit"
+                    th:text="|Approve all remaining (${#lists.size(pendingTributes) + #lists.size(pendingOthers)})|">
+                Approve all remaining
+            </button>
+        </form>
 
         <!-- Cover / tribute acts, called out on their own -->
         <div class="group-tribute" th:if="${not #lists.isEmpty(pendingTributes)}">
@@ -57,17 +76,17 @@
                 <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Actions</th></tr></thead>
                 <tbody>
                 <tr th:each="a : ${pendingTributes}">
-                    <td>
-                        <span class="tag tag-tribute">Tribute</span>
-                    </td>
+                    <td><span class="tag tag-tribute">Tribute</span></td>
                     <td th:text="${a.name}">Name</td>
                     <td class="via" th:text="${a.discoveredVia}">Via</td>
                     <td class="note" th:text="${a.note}">Note</td>
                     <td>
-                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
+                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+                              th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
                             <button type="submit">Approve</button>
                         </form>
-                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
+                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+                              th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
                             <button type="submit">Reject</button>
                         </form>
                     </td>
@@ -92,10 +111,12 @@
                     <td class="via" th:text="${a.discoveredVia}">Via</td>
                     <td class="note" th:text="${a.note}">Note</td>
                     <td>
-                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
+                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+                              th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
                             <button type="submit">Approve</button>
                         </form>
-                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
+                        <form class="inline" hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
+                              th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
                             <button type="submit">Reject</button>
                         </form>
                     </td>
