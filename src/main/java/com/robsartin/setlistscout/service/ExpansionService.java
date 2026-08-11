@@ -144,13 +144,13 @@ public class ExpansionService {
      * Guards against LLM expansion sources (tribute/similar) handing back prose or a refusal
      * instead of a name -- e.g. "I don't know of any well-known tribute bands for X." -- which would
      * otherwise be stored verbatim as a PENDING_REVIEW "artist" and later sent to Ticketmaster as a
-     * keyword. A real band/artist name is short, has few words, and isn't a sentence.
+     * keyword. A real band/artist name is short and has few words; punctuation is deliberately not
+     * checked here since plenty of real names carry it ("St. Vincent", "R.E.M.", "Panic! at the Disco").
      */
     private boolean looksLikeArtistName(String name) {
         String trimmed = name.trim();
         if (trimmed.startsWith("#")) return false;
         if (trimmed.length() > MAX_NAME_LENGTH) return false;
-        if (trimmed.indexOf('.') >= 0 || trimmed.indexOf('!') >= 0 || trimmed.indexOf('?') >= 0) return false;
         return trimmed.split("\\s+").length <= MAX_NAME_WORDS;
     }
 }

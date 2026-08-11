@@ -198,6 +198,27 @@ class ExpansionServiceTest {
     }
 
     @Test
+    @DisplayName("should save legitimate punctuated band names, not just plain ones")
+    void shouldSavePunctuatedArtistNames() {
+        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
+                .thenReturn(List.of(seedArtist("Talking Heads")));
+        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
+        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
+        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists("Talking Heads", 8))
+                .thenReturn(List.of("Panic! at the Disco", "St. Vincent"));
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
+
+        expansionService.expandAll(OWNER);
+
+        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(Artist::getName)
+                .containsExactlyInAnyOrder("Panic! at the Disco", "St. Vincent");
+    }
+
+    @Test
     @DisplayName("should still save a plausible short tribute name alongside a rejected refusal")
     void shouldSaveNormalNameEvenWhenAnotherIsRefusal() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any()))
