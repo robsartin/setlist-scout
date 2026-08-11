@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -19,6 +21,8 @@ import java.util.regex.Pattern;
  */
 @Service
 public class SimilarArtistLlmService {
+
+    private static final Logger log = LoggerFactory.getLogger(SimilarArtistLlmService.class);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -61,6 +65,10 @@ public class SimilarArtistLlmService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "similar-llm")
+                    .addKeyValue("artist", artistName)
+                    .log("similar-artists request failed");
             response = Map.of();
         }
 
@@ -76,6 +84,8 @@ public class SimilarArtistLlmService {
             Matcher m = LINE_ITEM.matcher(line.trim());
             result.add(m.matches() ? m.group(1).trim() : line.trim());
         }
+        log.atDebug().addKeyValue("source", "similar-llm").addKeyValue("artist", artistName)
+                .addKeyValue("count", result.size()).log("similar artists request");
         return result;
     }
 }

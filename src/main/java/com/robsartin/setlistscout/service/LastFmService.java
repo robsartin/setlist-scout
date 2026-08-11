@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -15,6 +17,8 @@ import java.util.Map;
  */
 @Service
 public class LastFmService {
+
+    private static final Logger log = LoggerFactory.getLogger(LastFmService.class);
 
     private final RestClient restClient;
 
@@ -48,6 +52,10 @@ public class LastFmService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "lastfm")
+                    .addKeyValue("artist", artistName)
+                    .log("similar-artists search failed");
             response = Map.of();
         }
 
@@ -61,6 +69,8 @@ public class LastFmService {
             String name = (String) artist.get("name");
             if (name != null) similar.add(name);
         }
+        log.atDebug().addKeyValue("source", "lastfm").addKeyValue("artist", artistName)
+                .addKeyValue("count", similar.size()).log("similar artists search");
         return similar;
     }
 }

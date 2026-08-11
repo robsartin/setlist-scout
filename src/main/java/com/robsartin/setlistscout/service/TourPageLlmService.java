@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -17,6 +19,8 @@ import java.util.Map;
  */
 @Service
 public class TourPageLlmService {
+
+    private static final Logger log = LoggerFactory.getLogger(TourPageLlmService.class);
 
     private final RestClient restClient;
     private final String apiKey;
@@ -61,6 +65,10 @@ public class TourPageLlmService {
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "tour-llm")
+                    .addKeyValue("artist", artistName)
+                    .log("tour-page extraction request failed");
             response = Map.of();
         }
 
@@ -84,6 +92,8 @@ public class TourPageLlmService {
                 // skip lines that aren't a well-formed "date | venue | city"
             }
         }
+        log.atDebug().addKeyValue("source", "tour-llm").addKeyValue("artist", artistName)
+                .addKeyValue("count", result.size()).log("tour-page extraction");
         return result;
     }
 
