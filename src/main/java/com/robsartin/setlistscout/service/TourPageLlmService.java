@@ -3,7 +3,7 @@ package com.robsartin.setlistscout.service;
 import com.robsartin.setlistscout.config.AppProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -18,7 +18,7 @@ import java.util.Map;
 @Service
 public class TourPageLlmService {
 
-    private final WebClient webClient;
+    private final RestClient restClient;
     private final String apiKey;
 
     @Autowired
@@ -28,7 +28,7 @@ public class TourPageLlmService {
 
     /** Test seam: points at a local stub server instead of the real Anthropic API. */
     TourPageLlmService(AppProperties props, String baseUrl) {
-        this.webClient = WebClient.builder()
+        this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader("anthropic-version", "2023-06-01")
                 .build();
@@ -52,14 +52,17 @@ public class TourPageLlmService {
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
-        Map<String, Object> response = webClient.post()
-                .uri("/messages")
-                .header("x-api-key", apiKey)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .onErrorReturn(Map.of())
-                .block();
+        Map<String, Object> response;
+        try {
+            response = restClient.post()
+                    .uri("/messages")
+                    .header("x-api-key", apiKey)
+                    .body(body)
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            response = Map.of();
+        }
 
         if (response == null) return result;
         List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");

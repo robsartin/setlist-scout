@@ -2,7 +2,7 @@ package com.robsartin.setlistscout.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.Map;
@@ -18,7 +18,7 @@ import java.util.Optional;
 @Service
 public class GeocodingService {
 
-    private final WebClient webClient;
+    private final RestClient restClient;
 
     @Autowired
     public GeocodingService() {
@@ -27,17 +27,20 @@ public class GeocodingService {
 
     /** Test seam: points at a local stub server instead of the real Zippopotam.us API. */
     GeocodingService(String baseUrl) {
-        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
+        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
     }
 
     @SuppressWarnings("unchecked")
     public Optional<GeoResult> geocode(String zip) {
-        Map<String, Object> response = webClient.get()
-                .uri("/us/{zip}", zip)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .onErrorReturn(Map.of())
-                .block();
+        Map<String, Object> response;
+        try {
+            response = restClient.get()
+                    .uri("/us/{zip}", zip)
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            response = Map.of();
+        }
 
         if (response == null) return Optional.empty();
         List<Map<String, Object>> places = (List<Map<String, Object>>) response.get("places");

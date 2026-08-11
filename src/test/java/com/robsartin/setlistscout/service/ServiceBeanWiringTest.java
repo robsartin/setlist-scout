@@ -8,7 +8,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Guards against the "app can't start" class of bug: every WebClient-backed service
+ * Guards against the "app can't start" class of bug: every RestClient-backed service
  * has a package-private test-seam constructor alongside its production one, and Spring
  * only auto-selects a constructor when there is exactly one. Without an explicit
  * @Autowired on the production constructor, Spring falls back to a non-existent no-arg
@@ -28,8 +28,8 @@ class ServiceBeanWiringTest {
             .withBean(TicketmasterService.class);
 
     @Test
-    @DisplayName("every WebClient service instantiates as a Spring bean")
-    void allWebClientServicesInstantiateAsBeans() {
+    @DisplayName("every RestClient service instantiates as a Spring bean")
+    void allRestClientServicesInstantiateAsBeans() {
         contextRunner.run(context -> assertThat(context)
                 .hasNotFailed()
                 .hasSingleBean(MusicBrainzService.class)

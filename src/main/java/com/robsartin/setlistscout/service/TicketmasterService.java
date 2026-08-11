@@ -4,7 +4,7 @@ import com.robsartin.setlistscout.config.AppProperties;
 import com.robsartin.setlistscout.domain.Show;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,7 +22,7 @@ import java.util.Map;
 @Service
 public class TicketmasterService {
 
-    private final WebClient webClient;
+    private final RestClient restClient;
     private final String apiKey;
 
     @Autowired
@@ -32,7 +32,7 @@ public class TicketmasterService {
 
     /** Test seam: points at a local stub server instead of the real Ticketmaster API. */
     TicketmasterService(AppProperties props, String baseUrl) {
-        this.webClient = WebClient.builder().baseUrl(baseUrl).build();
+        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
         this.apiKey = props.apis().ticketmasterApiKey();
     }
 
@@ -42,22 +42,25 @@ public class TicketmasterService {
         List<Show> shows = new ArrayList<>();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
-        Map<String, Object> response = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/events.json")
-                        .queryParam("apikey", apiKey)
-                        .queryParam("keyword", artistName)
-                        .queryParam("postalCode", postalCode)
-                        .queryParam("radius", radiusMiles)
-                        .queryParam("unit", "miles")
-                        .queryParam("startDateTime", start.format(fmt))
-                        .queryParam("endDateTime", end.format(fmt))
-                        .queryParam("classificationName", "music")
-                        .build())
-                .retrieve()
-                .bodyToMono(Map.class)
-                .onErrorReturn(Map.of())
-                .block();
+        Map<String, Object> response;
+        try {
+            response = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/events.json")
+                            .queryParam("apikey", apiKey)
+                            .queryParam("keyword", artistName)
+                            .queryParam("postalCode", postalCode)
+                            .queryParam("radius", radiusMiles)
+                            .queryParam("unit", "miles")
+                            .queryParam("startDateTime", start.format(fmt))
+                            .queryParam("endDateTime", end.format(fmt))
+                            .queryParam("classificationName", "music")
+                            .build())
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            response = Map.of();
+        }
 
         if (response == null) return shows;
         Map<String, Object> embedded = (Map<String, Object>) response.get("_embedded");

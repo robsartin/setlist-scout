@@ -4,7 +4,7 @@ import com.robsartin.setlistscout.config.AppProperties;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +18,7 @@ import java.util.Map;
 @Service
 public class DiscogsService {
 
-    private final WebClient webClient;
+    private final RestClient restClient;
 
     @Autowired
     public DiscogsService(AppProperties props) {
@@ -27,7 +27,7 @@ public class DiscogsService {
 
     /** Test seam: points at a local stub server instead of the real Discogs API. */
     DiscogsService(AppProperties props, String baseUrl) {
-        this.webClient = WebClient.builder()
+        this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.USER_AGENT, "SetlistScout/0.1 (+personal use)")
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Discogs token=" + props.apis().discogsToken())
@@ -38,16 +38,19 @@ public class DiscogsService {
     public List<String> findRelatedArtists(String artistName) {
         List<String> related = new ArrayList<>();
 
-        Map<String, Object> searchResult = webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/database/search")
-                        .queryParam("q", artistName)
-                        .queryParam("type", "artist")
-                        .build())
-                .retrieve()
-                .bodyToMono(Map.class)
-                .onErrorReturn(Map.of())
-                .block();
+        Map<String, Object> searchResult;
+        try {
+            searchResult = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/database/search")
+                            .queryParam("q", artistName)
+                            .queryParam("type", "artist")
+                            .build())
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            searchResult = Map.of();
+        }
 
         if (searchResult == null) return related;
         List<Map<String, Object>> results = (List<Map<String, Object>>) searchResult.get("results");
@@ -56,12 +59,15 @@ public class DiscogsService {
         Object idObj = results.get(0).get("id");
         if (idObj == null) return related;
 
-        Map<String, Object> detail = webClient.get()
-                .uri("/artists/" + idObj)
-                .retrieve()
-                .bodyToMono(Map.class)
-                .onErrorReturn(Map.of())
-                .block();
+        Map<String, Object> detail;
+        try {
+            detail = restClient.get()
+                    .uri("/artists/" + idObj)
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            detail = Map.of();
+        }
 
         if (detail == null) return related;
 
