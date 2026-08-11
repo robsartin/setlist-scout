@@ -36,8 +36,8 @@ public class BandsintownService {
     }
 
     @SuppressWarnings("unchecked")
-    public List<Show> searchShows(String artistName, String cityFilter, String stateFilter,
-                                   LocalDateTime start, LocalDateTime end) {
+    public List<Show> searchShows(String artistName, Double latitude, Double longitude,
+                                   int radiusMiles, LocalDateTime start, LocalDateTime end) {
         List<Show> shows = new ArrayList<>();
 
         // Build via a URI template variable rather than pre-encoding + string
@@ -60,17 +60,15 @@ public class BandsintownService {
             Show show = parseEvent(artistName, event);
             if (show == null || show.getEventDateTime() == null) continue;
             if (show.getEventDateTime().isBefore(start) || show.getEventDateTime().isAfter(end)) continue;
-            // client-side city/state filter -- Bandsintown has no server-side radius/geo
-            // filter (see ADR-0003), so its results, which are the artist's shows worldwide,
-            // must be cut down to the saved location here.
-            if (cityFilter != null && show.getVenueCity() != null
-                    && !show.getVenueCity().equalsIgnoreCase(cityFilter)) {
-                continue; // caller can loosen this by passing cityFilter=null for a wider net
-            }
-            String region = venueRegion(event); // Bandsintown's per-event state/province
-            if (stateFilter != null && region != null
-                    && !region.equalsIgnoreCase(stateFilter)) {
-                continue; // wrong state -- without this, out-of-state shows are persisted too
+            // Bandsintown has no server-side geo filter (ADR-0003), so cut its worldwide
+            // results down to the saved radius by distance from the search origin (ADR-0018).
+            // With no origin coordinates (geocode failed), fall back to keeping all in-window shows.
+            if (latitude != null && longitude != null) {
+                double[] coords = venueCoordinates(event);
+                if (coords == null) continue; // no venue coordinates -> can't confirm it's in range
+                if (GeoDistance.milesBetween(latitude, longitude, coords[0], coords[1]) > radiusMiles) {
+                    continue;
+                }
             }
             shows.add(show);
         }
@@ -78,9 +76,17 @@ public class BandsintownService {
     }
 
     @SuppressWarnings("unchecked")
-    private String venueRegion(Map<String, Object> event) {
+    private double[] venueCoordinates(Map<String, Object> event) {
         Map<String, Object> venue = (Map<String, Object>) event.get("venue");
-        return venue != null ? (String) venue.get("region") : null;
+        if (venue == null) return null;
+        Object lat = venue.get("latitude");
+        Object lon = venue.get("longitude");
+        if (lat == null || lon == null) return null;
+        try {
+            return new double[]{Double.parseDouble(lat.toString()), Double.parseDouble(lon.toString())};
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @SuppressWarnings("unchecked")

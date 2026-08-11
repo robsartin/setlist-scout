@@ -37,7 +37,7 @@ public class TicketmasterService {
     }
 
     @SuppressWarnings("unchecked")
-    public List<Show> searchShows(String artistName, String city, String stateCode,
+    public List<Show> searchShows(String artistName, String postalCode,
                                    int radiusMiles, LocalDateTime start, LocalDateTime end) {
         List<Show> shows = new ArrayList<>();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -47,8 +47,7 @@ public class TicketmasterService {
                         .path("/events.json")
                         .queryParam("apikey", apiKey)
                         .queryParam("keyword", artistName)
-                        .queryParam("city", city)
-                        .queryParam("stateCode", stateCode)
+                        .queryParam("postalCode", postalCode)
                         .queryParam("radius", radiusMiles)
                         .queryParam("unit", "miles")
                         .queryParam("startDateTime", start.format(fmt))

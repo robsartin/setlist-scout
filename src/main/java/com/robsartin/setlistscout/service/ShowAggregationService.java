@@ -54,12 +54,13 @@ public class ShowAggregationService {
 
         for (Artist artist : activeArtists) {
             List<Show> tmShows = ticketmaster.searchShows(
-                    artist.getName(), settings.getCity(), settings.getState(),
+                    artist.getName(), settings.getPostalCode(),
                     settings.getRadiusMiles(), start, end);
-            // Bandsintown has no server-side radius filter; pass cityFilter=null to cast
-            // a wider net, then rely on Ticketmaster's radius filter as the primary cut.
+            // Bandsintown has no server-side radius filter, so it filters by distance from
+            // the geocoded ZIP lat/long (falls back to all-in-window if the geocode is missing).
             List<Show> bitShows = bandsintown.searchShows(
-                    artist.getName(), null, settings.getState(), start, end);
+                    artist.getName(), settings.getLatitude(), settings.getLongitude(),
+                    settings.getRadiusMiles(), start, end);
 
             persistNew(tmShows);
             persistNew(bitShows);

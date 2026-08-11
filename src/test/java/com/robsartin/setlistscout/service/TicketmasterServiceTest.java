@@ -3,6 +3,7 @@ package com.robsartin.setlistscout.service;
 import com.robsartin.setlistscout.domain.Show;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,7 +52,7 @@ class TicketmasterServiceTest {
                         }
                         """));
 
-        List<Show> shows = service.searchShows("Dawes", "Austin", "TX", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -69,7 +70,7 @@ class TicketmasterServiceTest {
     void shouldReturnEmptyWhenNoEmbedded() {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
 
-        List<Show> shows = service.searchShows("Dawes", "Austin", "TX", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
@@ -86,7 +87,7 @@ class TicketmasterServiceTest {
                         ]}}
                         """));
 
-        List<Show> shows = service.searchShows("Dawes", "Austin", "TX", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -100,9 +101,22 @@ class TicketmasterServiceTest {
     void shouldReturnEmptyOnServerError() {
         server.enqueue(new MockResponse().setResponseCode(500));
 
-        List<Show> shows = service.searchShows("Dawes", "Austin", "TX", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("should send the ZIP as postalCode plus the radius")
+    void shouldSendPostalCodeAndRadius() throws InterruptedException {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
+
+        service.searchShows("Dawes", "78701", 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getPath()).contains("postalCode=78701");
+        assertThat(request.getPath()).contains("radius=50");
     }
 }

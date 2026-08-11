@@ -19,6 +19,10 @@ class BandsintownServiceTest {
 
     private static final LocalDateTime START = LocalDateTime.of(2026, 1, 1, 0, 0);
     private static final LocalDateTime END = LocalDateTime.of(2026, 12, 31, 0, 0);
+    // Search origin: downtown Austin, 50-mile radius.
+    private static final double LAT = 30.2672;
+    private static final double LON = -97.7431;
+    private static final int RADIUS = 50;
 
     private MockWebServer server;
     private BandsintownService service;
@@ -36,97 +40,81 @@ class BandsintownServiceTest {
     }
 
     @Test
-    @DisplayName("should drop shows whose venue region does not match the state filter")
-    void shouldDropOutOfStateShows() {
+    @DisplayName("keeps shows within the radius and drops shows outside it")
+    void keepsInRadiusDropsOutOfRadius() {
         server.enqueue(jsonEvents("""
                 [
-                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "Moody Center", "city": "Austin", "region": "TX"}},
-                  {"datetime": "2026-06-02T20:00:00", "venue": {"name": "Brooklyn Bowl", "city": "Brooklyn", "region": "NY"}}
+                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "Moody Center", "latitude": "30.2814", "longitude": "-97.7320"}},
+                  {"datetime": "2026-06-02T20:00:00", "venue": {"name": "The Fillmore", "latitude": "37.7840", "longitude": "-122.4330"}}
                 ]
                 """));
 
-        List<Show> shows = service.searchShows("Dawes", null, "TX", START, END);
-
-        assertThat(shows).hasSize(1);
-        assertThat(shows.get(0).getVenueName()).isEqualTo("Moody Center");
-    }
-
-    @Test
-    @DisplayName("should keep a show when the venue has no region to check")
-    void shouldKeepShowWithNoRegionData() {
-        server.enqueue(jsonEvents("""
-                [
-                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "Some Club", "city": "Austin"}}
-                ]
-                """));
-
-        List<Show> shows = service.searchShows("Dawes", null, "TX", START, END);
-
-        assertThat(shows).hasSize(1);
-    }
-
-    @Test
-    @DisplayName("should cast a wide net when cityFilter is null but still apply the state filter")
-    void shouldApplyStateFilterEvenWithNullCityFilter() {
-        server.enqueue(jsonEvents("""
-                [
-                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "Moody Center", "city": "Austin", "region": "TX"}},
-                  {"datetime": "2026-06-02T20:00:00", "venue": {"name": "The Fillmore", "city": "San Francisco", "region": "CA"}}
-                ]
-                """));
-
-        List<Show> shows = service.searchShows("Dawes", null, "TX", START, END);
+        List<Show> shows = service.searchShows("Dawes", LAT, LON, RADIUS, START, END);
 
         assertThat(shows).extracting(Show::getVenueName).containsExactly("Moody Center");
     }
 
     @Test
-    @DisplayName("should drop shows outside the requested date window")
-    void shouldDropShowsOutsideWindow() {
+    @DisplayName("drops a show whose venue has no coordinates to check")
+    void dropsVenueWithoutCoordinates() {
         server.enqueue(jsonEvents("""
                 [
-                  {"datetime": "2025-01-01T20:00:00", "venue": {"name": "Too Early", "city": "Austin", "region": "TX"}},
-                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "In Window", "city": "Austin", "region": "TX"}},
-                  {"datetime": "2027-01-01T20:00:00", "venue": {"name": "Too Late", "city": "Austin", "region": "TX"}}
+                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "Coordinate-less Club"}}
                 ]
                 """));
 
-        List<Show> shows = service.searchShows("Dawes", null, "TX", START, END);
-
-        assertThat(shows).extracting(Show::getVenueName).containsExactly("In Window");
-    }
-
-    @Test
-    @DisplayName("should default venue name when the venue is missing")
-    void shouldDefaultMissingVenue() {
-        server.enqueue(jsonEvents("""
-                [
-                  {"datetime": "2026-06-01T20:00:00"}
-                ]
-                """));
-
-        List<Show> shows = service.searchShows("Dawes", null, "TX", START, END);
-
-        assertThat(shows).hasSize(1);
-        assertThat(shows.get(0).getVenueName()).isEqualTo("Unknown venue");
-    }
-
-    @Test
-    @DisplayName("should return an empty list when the API errors")
-    void shouldReturnEmptyOnServerError() {
-        server.enqueue(new MockResponse().setResponseCode(500));
-
-        List<Show> shows = service.searchShows("Dawes", null, "TX", START, END);
+        List<Show> shows = service.searchShows("Dawes", LAT, LON, RADIUS, START, END);
 
         assertThat(shows).isEmpty();
     }
 
     @Test
-    @DisplayName("should URL-encode spaces in the artist name in the request path")
-    void shouldEncodeArtistNameInPath() throws InterruptedException {
+    @DisplayName("keeps all in-window shows when the search location has no coordinates (degraded)")
+    void keepsAllWhenNoOrigin() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "Moody Center", "latitude": "30.28", "longitude": "-97.73"}},
+                  {"datetime": "2026-06-02T20:00:00", "venue": {"name": "The Fillmore", "latitude": "37.78", "longitude": "-122.43"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Dawes", null, null, RADIUS, START, END);
+
+        assertThat(shows).extracting(Show::getVenueName).containsExactly("Moody Center", "The Fillmore");
+    }
+
+    @Test
+    @DisplayName("drops shows outside the requested date window")
+    void dropsShowsOutsideWindow() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2025-01-01T20:00:00", "venue": {"name": "Too Early", "latitude": "30.27", "longitude": "-97.74"}},
+                  {"datetime": "2026-06-01T20:00:00", "venue": {"name": "In Window", "latitude": "30.27", "longitude": "-97.74"}},
+                  {"datetime": "2027-01-01T20:00:00", "venue": {"name": "Too Late", "latitude": "30.27", "longitude": "-97.74"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Dawes", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).extracting(Show::getVenueName).containsExactly("In Window");
+    }
+
+    @Test
+    @DisplayName("returns an empty list when the API errors")
+    void returnsEmptyOnServerError() {
+        server.enqueue(new MockResponse().setResponseCode(500));
+
+        List<Show> shows = service.searchShows("Dawes", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("URL-encodes spaces in the artist name in the request path")
+    void encodesArtistNameInPath() throws InterruptedException {
         server.enqueue(jsonEvents("[]"));
 
-        service.searchShows("Tom Petty", null, "TX", START, END);
+        service.searchShows("Tom Petty", LAT, LON, RADIUS, START, END);
 
         RecordedRequest request = server.takeRequest();
         assertThat(request.getPath()).startsWith("/artists/Tom%20Petty/events");
