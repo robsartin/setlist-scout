@@ -100,6 +100,17 @@ public class ArtistController {
         return pendingResult(hxRequest, model);
     }
 
+    /** Reject everything still pending in one action -- clears out a noisy batch after picking the keepers. */
+    @PostMapping("/reject-all-pending")
+    public String rejectAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                                   Model model) {
+        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
+            a.setStatus(ArtistStatus.REJECTED);
+            artistRepository.save(a);
+        }
+        return pendingResult(hxRequest, model);
+    }
+
     /** Manually trigger expansion instead of waiting for the scheduled scan. */
     @PostMapping("/expand-now")
     public String expandNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
