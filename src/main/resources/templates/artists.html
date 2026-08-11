@@ -74,6 +74,13 @@
         <button type="submit">Add</button>
     </form>
 
+    <p th:if="${uploadMessage}" th:text="${uploadMessage}" role="status" class="upload-message"></p>
+    <form th:action="@{/artists/upload}" method="post" enctype="multipart/form-data">
+        <label for="artist-file">Or bulk-add from a text file (one band per line):</label>
+        <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>
+        <button type="submit">Upload</button>
+    </form>
+
     <h1>Pending review</h1>
     <form hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
           th:action="@{/artists/expand-now}" method="post">
