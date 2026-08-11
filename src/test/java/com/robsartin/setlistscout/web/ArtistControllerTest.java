@@ -8,10 +8,12 @@ import com.robsartin.setlistscout.service.ExpansionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.ui.ConcurrentModel;
 import org.springframework.ui.Model;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.mockito.ArgumentCaptor;
@@ -94,31 +96,57 @@ class ArtistControllerTest {
     }
 
     @Test
-    @DisplayName("reject returns the pending-section fragment for an htmx request")
-    void rejectReturnsFragmentForHtmx() {
-        Artist a = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        when(artistRepository.findByIdAndOwner(5L, OWNER)).thenReturn(Optional.of(a));
-        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of());
+    @DisplayName("review applies accept/reject/later across the pending batch in one submit")
+    void reviewAppliesEachDecision() {
+        Artist accept = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION);
+        Artist reject = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION);
+        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
+        ReflectionTestUtils.setField(accept, "id", 1L);
+        ReflectionTestUtils.setField(reject, "id", 2L);
+        ReflectionTestUtils.setField(later, "id", 3L);
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
+                .thenReturn(List.of(accept, reject, later));
 
-        Model model = new ConcurrentModel();
-        String view = controller.reject(5L, "true", model);
+        String view = controller.review(Map.of(
+                "decision-1", "accept",
+                "decision-2", "reject",
+                "decision-3", "later"));
 
-        assertThat(view).isEqualTo("artists :: pendingSection");
-        assertThat(a.getStatus()).isEqualTo(ArtistStatus.REJECTED);
-        assertThat(model.getAttribute("pendingTributes")).isNotNull();
-        assertThat(model.getAttribute("pendingOthers")).isNotNull();
+        assertThat(view).isEqualTo("redirect:/artists");
+        assertThat(accept.getStatus()).isEqualTo(ArtistStatus.APPROVED);
+        assertThat(reject.getStatus()).isEqualTo(ArtistStatus.REJECTED);
+        assertThat(later.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+        verify(artistRepository).save(accept);
+        verify(artistRepository).save(reject);
+        verify(artistRepository, never()).save(later);
     }
 
     @Test
-    @DisplayName("reject redirects for a normal (non-htmx) request")
-    void rejectRedirectsWithoutHtmx() {
-        Artist a = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        when(artistRepository.findByIdAndOwner(5L, OWNER)).thenReturn(Optional.of(a));
+    @DisplayName("an artist with no submitted decision defaults to Later (left pending)")
+    void reviewLeavesUndecidedPending() {
+        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
+        ReflectionTestUtils.setField(later, "id", 7L);
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
+                .thenReturn(List.of(later));
 
-        String view = controller.reject(5L, null, new ConcurrentModel());
+        controller.review(Map.of()); // nothing submitted for this artist
+
+        assertThat(later.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+        verify(artistRepository, never()).save(later);
+    }
+
+    @Test
+    @DisplayName("unreject moves a rejected artist back to pending review")
+    void unrejectMovesBackToPending() {
+        Artist a = new Artist("Jackson Browne", ArtistSource.SIMILAR_EXPANSION,
+                ArtistStatus.REJECTED, "via", "note");
+        when(artistRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(a));
+
+        String view = controller.unreject(9L);
 
         assertThat(view).isEqualTo("redirect:/artists");
-        assertThat(a.getStatus()).isEqualTo(ArtistStatus.REJECTED);
+        assertThat(a.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+        verify(artistRepository).save(a);
     }
 
     @Test

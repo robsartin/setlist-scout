@@ -10,6 +10,7 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Controller
 @RequestMapping("/artists")
@@ -76,20 +77,34 @@ public class ArtistController {
         return "redirect:/artists";
     }
 
-    @PostMapping("/{id}/approve")
-    public String approve(@PathVariable Long id,
-                          @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
-                          Model model) {
-        setStatus(id, ArtistStatus.APPROVED);
-        return pendingResult(hxRequest, model);
+    /**
+     * Process the whole pending list from the review form's per-artist radios: Accept -&gt; APPROVED,
+     * Reject -&gt; REJECTED, Later (the default) -&gt; left PENDING_REVIEW. Iterates the owner's own
+     * pending artists and reads each one's decision, so it can only ever touch this user's rows.
+     * Redirects (rather than a fragment swap) because a batch touches the active/pending/rejected
+     * lists at once.
+     */
+    @PostMapping("/review")
+    public String review(@RequestParam Map<String, String> decisions) {
+        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
+            String decision = decisions.get("decision-" + a.getId());
+            if ("accept".equals(decision)) {
+                a.setStatus(ArtistStatus.APPROVED);
+                artistRepository.save(a);
+            } else if ("reject".equals(decision)) {
+                a.setStatus(ArtistStatus.REJECTED);
+                artistRepository.save(a);
+            }
+            // "later" (or missing) -> leave it PENDING_REVIEW for a future pass
+        }
+        return "redirect:/artists";
     }
 
-    @PostMapping("/{id}/reject")
-    public String reject(@PathVariable Long id,
-                         @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
-                         Model model) {
-        setStatus(id, ArtistStatus.REJECTED);
-        return pendingResult(hxRequest, model);
+    /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
+    @PostMapping("/{id}/unreject")
+    public String unreject(@PathVariable Long id) {
+        setStatus(id, ArtistStatus.PENDING_REVIEW);
+        return "redirect:/artists";
     }
 
     /** Approve everything still pending in one action -- the fast path for "approve most, reject a few". */
