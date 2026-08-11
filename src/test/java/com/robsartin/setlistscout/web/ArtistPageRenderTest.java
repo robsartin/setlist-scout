@@ -52,7 +52,8 @@ class ArtistPageRenderTest {
         artistRepository.save(new Artist("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION,
                 ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers",
                 "tribute/cover act for Tom Petty and the Heartbreakers"));
-        artistRepository.save(new Artist("Jackson Browne", ArtistSource.SIMILAR_EXPANSION,
+        // A name NOT in seed-bands.txt -- DataInitializer imports those on startup (unique name constraint).
+        artistRepository.save(new Artist("The Milk Carton Kids", ArtistSource.SIMILAR_EXPANSION,
                 ArtistStatus.PENDING_REVIEW, "Dawes", "similar to Dawes (single-source match)"));
 
         mockMvc.perform(get("/artists"))
