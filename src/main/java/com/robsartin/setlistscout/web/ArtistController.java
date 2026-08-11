@@ -27,7 +27,11 @@ public class ArtistController {
     public String list(Model model) {
         model.addAttribute("active", artistRepository.findByStatusIn(
                 List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
-        model.addAttribute("pending", artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW));
+        List<Artist> pending = artistRepository.findByStatus(ArtistStatus.PENDING_REVIEW);
+        model.addAttribute("pendingTributes", pending.stream()
+                .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION).toList());
+        model.addAttribute("pendingOthers", pending.stream()
+                .filter(a -> a.getSource() != ArtistSource.TRIBUTE_EXPANSION).toList());
         model.addAttribute("rejected", artistRepository.findByStatus(ArtistStatus.REJECTED));
         return "artists";
     }

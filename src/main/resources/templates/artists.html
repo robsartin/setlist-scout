@@ -6,11 +6,18 @@
     <style>
         body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
         table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; margin-bottom: 2rem; }
-        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
+        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; vertical-align: top; }
         .note { color: #666; font-size: 0.9em; }
+        .via { color: #444; font-size: 0.9em; }
         button { margin-right: 0.25rem; }
         nav a { margin-right: 1rem; }
         form.inline { display: inline; }
+        h2 { margin-bottom: 0.25rem; }
+        .tag { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+        .tag-tribute { background: #7c3aed; color: #fff; }
+        .tag-member { background: #e5e7eb; color: #374151; }
+        .tag-similar { background: #dbeafe; color: #1e40af; }
+        .group-tribute h2 { color: #6d28d9; }
     </style>
 </head>
 <body>
@@ -39,24 +46,68 @@
     <form th:action="@{/artists/expand-now}" method="post">
         <button type="submit">Run expansion now</button>
     </form>
-    <table>
-        <thead><tr><th>Name</th><th>Why</th><th>Actions</th></tr></thead>
-        <tbody>
-        <tr th:each="a : ${pending}">
-            <td th:text="${a.name}">Name</td>
-            <td class="note" th:text="${a.note}">Note</td>
-            <td>
-                <form class="inline" th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
-                    <button type="submit">Approve</button>
-                </form>
-                <form class="inline" th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
-                    <button type="submit">Reject</button>
-                </form>
-            </td>
-        </tr>
-        </tbody>
-    </table>
-    <p th:if="${#lists.isEmpty(pending)}">Nothing pending. Run expansion to find more.</p>
+
+    <!--/* The whole pending area is a fragment so htmx can swap it after an action (later increment). */-->
+    <div th:fragment="pendingSection" id="pending-section">
+
+        <!-- Cover / tribute acts, called out on their own -->
+        <div class="group-tribute" th:if="${not #lists.isEmpty(pendingTributes)}">
+            <h2>&#127917; Cover / tribute acts</h2>
+            <table>
+                <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Actions</th></tr></thead>
+                <tbody>
+                <tr th:each="a : ${pendingTributes}">
+                    <td>
+                        <span class="tag tag-tribute">Tribute</span>
+                    </td>
+                    <td th:text="${a.name}">Name</td>
+                    <td class="via" th:text="${a.discoveredVia}">Via</td>
+                    <td class="note" th:text="${a.note}">Note</td>
+                    <td>
+                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
+                            <button type="submit">Approve</button>
+                        </form>
+                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
+                            <button type="submit">Reject</button>
+                        </form>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Members & similar -->
+        <div th:if="${not #lists.isEmpty(pendingOthers)}">
+            <h2>Members &amp; similar</h2>
+            <table>
+                <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Actions</th></tr></thead>
+                <tbody>
+                <tr th:each="a : ${pendingOthers}">
+                    <td>
+                        <span class="tag"
+                              th:classappend="${a.source.name() == 'MEMBER_EXPANSION'} ? 'tag-member' : 'tag-similar'"
+                              th:text="${a.source.name() == 'MEMBER_EXPANSION'} ? 'Member' : 'Similar'">Tag</span>
+                    </td>
+                    <td th:text="${a.name}">Name</td>
+                    <td class="via" th:text="${a.discoveredVia}">Via</td>
+                    <td class="note" th:text="${a.note}">Note</td>
+                    <td>
+                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/approve'}" method="post">
+                            <button type="submit">Approve</button>
+                        </form>
+                        <form class="inline" th:action="@{'/artists/' + ${a.id} + '/reject'}" method="post">
+                            <button type="submit">Reject</button>
+                        </form>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p th:if="${#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers)}">
+            Nothing pending. Run expansion to find more.
+        </p>
+    </div>
 
     <h1>Rejected</h1>
     <table>
