@@ -27,11 +27,9 @@ spring:
     baseline-version: 0
 
   jpa:
+    open-in-view: false # No lazy associations traversed during view rendering; avoids the open-session-in-view warning
     hibernate:
       ddl-auto: validate # Flyway manages the schema; Hibernate only validates it matches the entities
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
 
   security:
     oauth2:
