@@ -107,6 +107,16 @@ public class ArtistController {
         return "redirect:/artists";
     }
 
+    /**
+     * Take an artist off the active list (seed/approved) by rejecting it -- it stops being scanned
+     * and lands in the Rejected list, reversible via Unreject. Owner-scoped via setStatus.
+     */
+    @PostMapping("/{id}/remove")
+    public String remove(@PathVariable Long id) {
+        setStatus(id, ArtistStatus.REJECTED);
+        return "redirect:/artists";
+    }
+
     /** Approve everything still pending in one action -- the fast path for "approve most, reject a few". */
     @PostMapping("/approve-all-pending")
     public String approveAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,

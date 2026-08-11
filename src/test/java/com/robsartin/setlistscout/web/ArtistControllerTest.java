@@ -150,6 +150,19 @@ class ArtistControllerTest {
     }
 
     @Test
+    @DisplayName("remove takes an active artist off the list by rejecting it")
+    void removeRejectsActiveArtist() {
+        Artist a = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        when(artistRepository.findByIdAndOwner(4L, OWNER)).thenReturn(Optional.of(a));
+
+        String view = controller.remove(4L);
+
+        assertThat(view).isEqualTo("redirect:/artists");
+        assertThat(a.getStatus()).isEqualTo(ArtistStatus.REJECTED);
+        verify(artistRepository).save(a);
+    }
+
+    @Test
     @DisplayName("setSiteUrl stores the official-site URL on the owner's artist")
     void setSiteUrlStoresUrl() {
         Artist a = pending("Dawes", ArtistSource.SIMILAR_EXPANSION);

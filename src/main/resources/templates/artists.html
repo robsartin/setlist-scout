@@ -41,7 +41,7 @@
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload. */-->
     <div th:fragment="activeSection" id="active-section">
         <table>
-            <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th></tr></thead>
+            <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th><th>Actions</th></tr></thead>
             <tbody>
             <tr th:each="a : ${active}">
                 <td th:text="${a.name}">Name</td>
@@ -53,6 +53,13 @@
                           th:action="@{'/artists/' + ${a.id} + '/site-url'}" method="post">
                         <input type="url" name="url" th:value="${a.officialSiteUrl}" placeholder="official site URL" size="22"/>
                         <button type="submit">Set</button>
+                    </form>
+                </td>
+                <td>
+                    <!--/* Remove = reject: drops off the active list, stops scanning, reversible via Unreject.
+                           Plain redirect since it updates both the active and rejected sections. */-->
+                    <form class="inline remove" th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
+                        <button type="submit">Remove</button>
                     </form>
                 </td>
             </tr>
