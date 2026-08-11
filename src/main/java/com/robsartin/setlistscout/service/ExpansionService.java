@@ -22,6 +22,12 @@ public class ExpansionService {
 
     private static final Logger log = LoggerFactory.getLogger(ExpansionService.class);
 
+    /** Longest a plausible band/artist name should be; anything past this reads as a sentence. */
+    private static final int MAX_NAME_LENGTH = 60;
+
+    /** Most words a plausible band/artist name should have. */
+    private static final int MAX_NAME_WORDS = 8;
+
     private final ArtistRepository artistRepository;
     private final MusicBrainzService musicBrainz;
     private final DiscogsService discogs;
@@ -122,10 +128,29 @@ public class ExpansionService {
 
     private boolean saveIfNew(String owner, String name, ArtistSource source, String discoveredVia, String note) {
         if (name == null || name.isBlank()) return false;
+        if (!looksLikeArtistName(name)) {
+            log.atWarn().addKeyValue("source", source).addKeyValue("name", name)
+                    .log("discarded implausible candidate name (prose/refusal?)");
+            return false;
+        }
         if (artistRepository.existsByOwnerAndNameIgnoreCase(owner, name)) return false; // already tracked for this user
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, note);
         artist.setOwner(owner);
         artistRepository.save(artist);
         return true;
+    }
+
+    /**
+     * Guards against LLM expansion sources (tribute/similar) handing back prose or a refusal
+     * instead of a name -- e.g. "I don't know of any well-known tribute bands for X." -- which would
+     * otherwise be stored verbatim as a PENDING_REVIEW "artist" and later sent to Ticketmaster as a
+     * keyword. A real band/artist name is short, has few words, and isn't a sentence.
+     */
+    private boolean looksLikeArtistName(String name) {
+        String trimmed = name.trim();
+        if (trimmed.startsWith("#")) return false;
+        if (trimmed.length() > MAX_NAME_LENGTH) return false;
+        if (trimmed.indexOf('.') >= 0 || trimmed.indexOf('!') >= 0 || trimmed.indexOf('?') >= 0) return false;
+        return trimmed.split("\\s+").length <= MAX_NAME_WORDS;
     }
 }
