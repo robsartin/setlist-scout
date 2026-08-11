@@ -5,8 +5,9 @@ import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.domain.Show;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
+import com.robsartin.setlistscout.service.AsyncScanRunner;
 import com.robsartin.setlistscout.service.GeocodingService;
-import com.robsartin.setlistscout.service.ShowAggregationService;
+import com.robsartin.setlistscout.service.ScanStateService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -18,22 +19,28 @@ import java.util.List;
 @Controller
 public class ShowController {
 
+    /** htmx sets this header on its requests; when present we return just the changed fragment. */
+    private static final String HX_REQUEST = "HX-Request";
+
     private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
-    private final ShowAggregationService showAggregationService;
+    private final AsyncScanRunner asyncScanRunner;
+    private final ScanStateService scanState;
     private final GeocodingService geocodingService;
     private final AppProperties appProperties;
     private final CurrentUser currentUser;
 
     public ShowController(ShowRepository showRepository,
                            SearchSettingsRepository settingsRepository,
-                           ShowAggregationService showAggregationService,
+                           AsyncScanRunner asyncScanRunner,
+                           ScanStateService scanState,
                            GeocodingService geocodingService,
                            AppProperties appProperties,
                            CurrentUser currentUser) {
         this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
-        this.showAggregationService = showAggregationService;
+        this.asyncScanRunner = asyncScanRunner;
+        this.scanState = scanState;
         this.geocodingService = geocodingService;
         this.appProperties = appProperties;
         this.currentUser = currentUser;
@@ -42,6 +49,14 @@ public class ShowController {
     @GetMapping("/")
     public String shows(@RequestParam(defaultValue = "eventDate") String sort, Model model) {
         String owner = currentUser.email();
+        populateShows(model, owner, sort);
+        model.addAttribute("scanning", scanState.isRunning(owner));
+        model.addAttribute("scanLabel", scanLabel(owner));
+        return "shows";
+    }
+
+    /** Loads the owner's shows (sorted) plus their settings into the model. */
+    private void populateShows(Model model, String owner, String sort) {
         SearchSettings settings = getOrCreateSettings(owner);
         LocalDateTime start = LocalDateTime.now();
         LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
@@ -60,7 +75,6 @@ public class ShowController {
         model.addAttribute("shows", shows);
         model.addAttribute("currentSort", sort);
         model.addAttribute("settings", settings);
-        return "shows";
     }
 
     @PostMapping("/settings")
@@ -83,11 +97,47 @@ public class ShowController {
         return "redirect:/";
     }
 
-    /** Manually trigger a show scan instead of waiting for the scheduled interval. */
+    /**
+     * Manually trigger a show scan. The scan runs async on a background executor (a full scan can
+     * take a while), so this returns immediately: an htmx request gets the "Scanning" fragment that
+     * polls {@code /scan-status}; a no-JS request just redirects while the scan runs in the
+     * background. A second "Scan now" while one is already running is ignored (see AsyncScanRunner).
+     */
     @PostMapping("/scan-now")
-    public String scanNow() {
-        showAggregationService.scanForShows(currentUser.email());
+    public String scanNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                          Model model) {
+        String owner = currentUser.email();
+        asyncScanRunner.startScan(owner);
+        if (hxRequest != null) {
+            model.addAttribute("scanning", true);
+            model.addAttribute("scanLabel", scanLabel(owner));
+            return "shows :: showsRegion";
+        }
         return "redirect:/";
+    }
+
+    /**
+     * Polled by the "Scanning" fragment (every 10s). While the scan runs it returns the scanning
+     * fragment with one more dot; once it's done it returns the refreshed shows list, which htmx
+     * swaps in -- replacing the polling element and so ending the poll.
+     */
+    @GetMapping("/scan-status")
+    public String scanStatus(@RequestParam(defaultValue = "eventDate") String sort, Model model) {
+        String owner = currentUser.email();
+        if (scanState.isRunning(owner)) {
+            model.addAttribute("scanning", true);
+            model.addAttribute("scanLabel", scanLabel(owner));
+            return "shows :: showsRegion";
+        }
+        populateShows(model, owner, sort);
+        model.addAttribute("scanning", false);
+        model.addAttribute("justScanned", true);
+        return "shows :: showsRegion";
+    }
+
+    /** "Scanning" with a trailing dot per elapsed tick (grows the indicator without JS). */
+    private String scanLabel(String owner) {
+        return "Scanning" + ".".repeat(Math.max(0, scanState.dots(owner)));
     }
 
     /** The user's settings, creating a default row (default ZIP, geocoded) on their first visit. */
