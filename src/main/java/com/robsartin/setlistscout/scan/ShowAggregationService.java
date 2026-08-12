@@ -16,8 +16,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Runs show search for every SEED/APPROVED artist against Ticketmaster + Bandsintown,
- * using the live SearchSettings (city/state/radius/window), and persists new shows only.
+ * Runs show search for every SEED/APPROVED artist against each injected {@link ShowSource}
+ * (Ticketmaster, Bandsintown, band-site -- ordered by {@code @Order}, first-writer-wins on
+ * de-dup), using the live SearchSettings (city/state/radius/window), and persists new shows
+ * only.
  *
  * NOTE: Austin-local sources (venue calendars, Austin Chronicle, Do512, KUTX) aren't
  * wired up yet -- those don't have clean JSON APIs like Ticketmaster/Bandsintown, so
@@ -72,16 +74,18 @@ public class ShowAggregationService {
                     settings.getPostalCode(), settings.getLatitude(), settings.getLongitude(),
                     settings.getRadiusMiles(), settings.getCity(), start, end);
 
+            List<Show> shows = new java.util.ArrayList<>();
             for (ShowSource source : showSources) {
-                List<Show> shows = source.search(query);
-                found += shows.size();
-                saved += persistNew(owner, shows);
+                List<Show> sourceShows = source.search(query);
+                found += sourceShows.size();
+                shows.addAll(sourceShows);
                 log.atDebug()
                         .addKeyValue("artist", artist.getName())
                         .addKeyValue("source", source.id())
-                        .addKeyValue("count", shows.size())
+                        .addKeyValue("count", sourceShows.size())
                         .log("artist source scanned");
             }
+            saved += persistNew(owner, shows);
         }
 
         log.atInfo()

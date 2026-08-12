@@ -3,7 +3,6 @@ package com.robsartin.setlistscout.scan.source;
 import com.robsartin.setlistscout.scan.BandSiteScraperService;
 import com.robsartin.setlistscout.scan.Show;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.time.LocalDateTime;
 import java.util.List;
