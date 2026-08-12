@@ -241,6 +241,37 @@ class ExpansionServiceTest {
     }
 
     @Test
+    @DisplayName("should isolate a failing dimension so other dimensions and other artists still process")
+    void shouldIsolateFailingDimension() {
+        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
+                .thenReturn(List.of(seedArtist("First"), seedArtist("Second")));
+
+        // "First" artist: member-relation dimension blows up on the Discogs call.
+        when(musicBrainz.findRelatedArtists("First")).thenReturn(List.of());
+        when(discogs.findRelatedArtists("First")).thenThrow(new RuntimeException("boom"));
+        when(lastFm.findSimilarArtists("First", 8)).thenReturn(List.of("SimilarFirst"));
+        when(similarArtistLlm.findSimilarArtists("First", 8)).thenReturn(List.of());
+        when(tributeLlm.findTributeBands("First", 5)).thenReturn(List.of("TributeFirst"));
+
+        // "Second" artist: everything behaves normally.
+        when(musicBrainz.findRelatedArtists("Second")).thenReturn(List.of("MemberSecond"));
+        when(discogs.findRelatedArtists("Second")).thenReturn(List.of());
+        when(lastFm.findSimilarArtists("Second", 8)).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists("Second", 8)).thenReturn(List.of());
+        when(tributeLlm.findTributeBands("Second", 5)).thenReturn(List.of("TributeSecond"));
+
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(eq(OWNER), any())).thenReturn(false);
+
+        expansionService.expandAll(OWNER);
+
+        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository, org.mockito.Mockito.times(4)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(Artist::getName)
+                .containsExactlyInAnyOrder("SimilarFirst", "TributeFirst", "MemberSecond", "TributeSecond");
+    }
+
+    @Test
     @DisplayName("should NOT run tribute expansion for an APPROVED (non-seed) base")
     void shouldSkipTributeForApproved() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(approvedArtist("Nickel Creek")));
