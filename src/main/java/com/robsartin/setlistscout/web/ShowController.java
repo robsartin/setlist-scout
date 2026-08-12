@@ -1,8 +1,10 @@
 package com.robsartin.setlistscout.web;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.domain.ArtistSource;
 import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.domain.Show;
+import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
 import com.robsartin.setlistscout.service.AsyncScanRunner;
@@ -15,6 +17,9 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Controller
 public class ShowController {
@@ -27,6 +32,7 @@ public class ShowController {
 
     private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
+    private final ArtistRepository artistRepository;
     private final AsyncScanRunner asyncScanRunner;
     private final ScanStateService scanState;
     private final GeocodingService geocodingService;
@@ -35,6 +41,7 @@ public class ShowController {
 
     public ShowController(ShowRepository showRepository,
                            SearchSettingsRepository settingsRepository,
+                           ArtistRepository artistRepository,
                            AsyncScanRunner asyncScanRunner,
                            ScanStateService scanState,
                            GeocodingService geocodingService,
@@ -42,6 +49,7 @@ public class ShowController {
                            CurrentUser currentUser) {
         this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
+        this.artistRepository = artistRepository;
         this.asyncScanRunner = asyncScanRunner;
         this.scanState = scanState;
         this.geocodingService = geocodingService;
@@ -75,9 +83,15 @@ public class ShowController {
         };
         shows.sort(comparator);
 
+        Set<String> tributeArtistNames = artistRepository.findByOwnerAndSource(owner, ArtistSource.TRIBUTE_EXPANSION)
+                .stream()
+                .map(a -> a.getName().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+
         model.addAttribute("shows", shows);
         model.addAttribute("currentSort", sort);
         model.addAttribute("settings", settings);
+        model.addAttribute("tributeArtistNames", tributeArtistNames);
     }
 
     @PostMapping("/settings")

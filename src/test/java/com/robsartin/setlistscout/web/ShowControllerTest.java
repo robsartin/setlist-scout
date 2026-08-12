@@ -1,7 +1,11 @@
 package com.robsartin.setlistscout.web;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.domain.Artist;
+import com.robsartin.setlistscout.domain.ArtistSource;
+import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.domain.SearchSettings;
+import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
 import com.robsartin.setlistscout.service.AsyncScanRunner;
@@ -15,6 +19,7 @@ import org.springframework.ui.Model;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +34,7 @@ class ShowControllerTest {
 
     private ShowRepository showRepository;
     private SearchSettingsRepository settingsRepository;
+    private ArtistRepository artistRepository;
     private GeocodingService geocodingService;
     private ScanStateService scanState;
     private AsyncScanRunner asyncScanRunner;
@@ -38,13 +44,16 @@ class ShowControllerTest {
     void setUp() {
         showRepository = mock(ShowRepository.class);
         settingsRepository = mock(SearchSettingsRepository.class);
+        artistRepository = mock(ArtistRepository.class);
         geocodingService = mock(GeocodingService.class);
         AppProperties appProperties = mock(AppProperties.class);
         scanState = mock(ScanStateService.class);
         asyncScanRunner = mock(AsyncScanRunner.class);
         CurrentUser currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
-        controller = new ShowController(showRepository, settingsRepository, asyncScanRunner,
+        when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION))
+                .thenReturn(List.of());
+        controller = new ShowController(showRepository, settingsRepository, artistRepository, asyncScanRunner,
                 scanState, geocodingService, appProperties, currentUser);
     }
 
@@ -121,6 +130,26 @@ class ShowControllerTest {
         assertThat(view).isEqualTo("shows :: showsRegion");
         assertThat(model.getAttribute("scanning")).isEqualTo(true);
         assertThat(model.getAttribute("scanLabel")).isEqualTo("Scanning...");
+    }
+
+    @Test
+    @DisplayName("shows puts the owner's lowercased tribute-artist names in the model")
+    void showsIncludesTributeArtistNames() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(anyString(), any(), any()))
+                .thenReturn(new java.util.ArrayList<>(List.of()));
+        Artist tribute = new Artist("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, ArtistStatus.APPROVED,
+                "expansion", "tribute act");
+        when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION))
+                .thenReturn(List.of(tribute));
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", model);
+
+        @SuppressWarnings("unchecked")
+        Set<String> tributeNames = (Set<String>) model.getAttribute("tributeArtistNames");
+        assertThat(tributeNames).containsExactly("damn the torpedoes");
     }
 
     @Test
