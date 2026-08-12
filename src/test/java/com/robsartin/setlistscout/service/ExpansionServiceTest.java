@@ -180,6 +180,67 @@ class ExpansionServiceTest {
     }
 
     @Test
+    @DisplayName("should skip a prose/refusal response from an LLM expansion source")
+    void shouldSkipProseRefusalResponse() {
+        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
+                .thenReturn(List.of(seedArtist("Brandi Carlile")));
+        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
+        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
+        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(tributeLlm.findTributeBands("Brandi Carlile", 5)).thenReturn(List.of(
+                "I don't know of any well-known tribute or cover bands specifically dedicated to "
+                        + "Brandi Carlile's music."));
+
+        expansionService.expandAll(OWNER);
+
+        verify(artistRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("should save legitimate punctuated band names, not just plain ones")
+    void shouldSavePunctuatedArtistNames() {
+        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
+                .thenReturn(List.of(seedArtist("Talking Heads")));
+        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
+        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
+        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists("Talking Heads", 8))
+                .thenReturn(List.of("Panic! at the Disco", "St. Vincent"));
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
+
+        expansionService.expandAll(OWNER);
+
+        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(Artist::getName)
+                .containsExactlyInAnyOrder("Panic! at the Disco", "St. Vincent");
+    }
+
+    @Test
+    @DisplayName("should still save a plausible short tribute name alongside a rejected refusal")
+    void shouldSaveNormalNameEvenWhenAnotherIsRefusal() {
+        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
+                .thenReturn(List.of(seedArtist("Iron Maiden")));
+        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
+        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
+        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(tributeLlm.findTributeBands("Iron Maiden", 5)).thenReturn(List.of(
+                "The Iron Maidens",
+                "I don't know of any well-known tribute or cover bands specifically dedicated to "
+                        + "Iron Maiden's music."));
+        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "The Iron Maidens")).thenReturn(false);
+
+        expansionService.expandAll(OWNER);
+
+        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
+        verify(artistRepository, org.mockito.Mockito.times(1)).save(captor.capture());
+        assertThat(captor.getValue().getName()).isEqualTo("The Iron Maidens");
+    }
+
+    @Test
     @DisplayName("should NOT run tribute expansion for an APPROVED (non-seed) base")
     void shouldSkipTributeForApproved() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(approvedArtist("Nickel Creek")));
