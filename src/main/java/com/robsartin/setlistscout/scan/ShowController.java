@@ -1,16 +1,10 @@
-package com.robsartin.setlistscout.web;
+package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
-import com.robsartin.setlistscout.config.AppProperties;
-import com.robsartin.setlistscout.scan.AsyncScanRunner;
-import com.robsartin.setlistscout.scan.ScanStateService;
-import com.robsartin.setlistscout.scan.Show;
-import com.robsartin.setlistscout.scan.ShowRepository;
 import com.robsartin.setlistscout.settings.SearchSettings;
-import com.robsartin.setlistscout.settings.SearchSettingsRepository;
+import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.CurrentUser;
-import com.robsartin.setlistscout.settings.GeocodingService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -32,29 +26,23 @@ public class ShowController {
     private static final String SCANNING_LABEL = "Scanning...";
 
     private final ShowRepository showRepository;
-    private final SearchSettingsRepository settingsRepository;
     private final ArtistRepository artistRepository;
     private final AsyncScanRunner asyncScanRunner;
     private final ScanStateService scanState;
-    private final GeocodingService geocodingService;
-    private final AppProperties appProperties;
+    private final SettingsService settingsService;
     private final CurrentUser currentUser;
 
     public ShowController(ShowRepository showRepository,
-                           SearchSettingsRepository settingsRepository,
                            ArtistRepository artistRepository,
                            AsyncScanRunner asyncScanRunner,
                            ScanStateService scanState,
-                           GeocodingService geocodingService,
-                           AppProperties appProperties,
+                           SettingsService settingsService,
                            CurrentUser currentUser) {
         this.showRepository = showRepository;
-        this.settingsRepository = settingsRepository;
         this.artistRepository = artistRepository;
         this.asyncScanRunner = asyncScanRunner;
         this.scanState = scanState;
-        this.geocodingService = geocodingService;
-        this.appProperties = appProperties;
+        this.settingsService = settingsService;
         this.currentUser = currentUser;
     }
 
@@ -69,7 +57,7 @@ public class ShowController {
 
     /** Loads the owner's shows (sorted) plus their settings into the model. */
     private void populateShows(Model model, String owner, String sort) {
-        SearchSettings settings = getOrCreateSettings(owner);
+        SearchSettings settings = settingsService.getOrCreateSettings(owner);
         LocalDateTime start = LocalDateTime.now();
         LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
 
@@ -93,26 +81,6 @@ public class ShowController {
         model.addAttribute("currentSort", sort);
         model.addAttribute("settings", settings);
         model.addAttribute("tributeArtistNames", tributeArtistNames);
-    }
-
-    @PostMapping("/settings")
-    public String updateSettings(@RequestParam String postalCode,
-                                  @RequestParam int radiusMiles,
-                                  @RequestParam int monthsAhead) {
-        SearchSettings settings = getOrCreateSettings(currentUser.email());
-        settings.setPostalCode(postalCode);
-        settings.setRadiusMiles(radiusMiles);
-        settings.setMonthsAhead(monthsAhead);
-        // Geocode the ZIP to lat/long (+ display city/state). On failure, keep the last-known
-        // coordinates so a bad/temporary lookup doesn't blank out the search location.
-        geocodingService.geocode(postalCode).ifPresent(geo -> {
-            settings.setLatitude(geo.latitude());
-            settings.setLongitude(geo.longitude());
-            settings.setCity(geo.city());
-            settings.setState(geo.state());
-        });
-        settingsRepository.save(settings);
-        return "redirect:/";
     }
 
     /**
@@ -151,21 +119,5 @@ public class ShowController {
         model.addAttribute("scanning", false);
         model.addAttribute("justScanned", true);
         return "shows :: showsRegion";
-    }
-
-    /** The user's settings, creating a default row (default ZIP, geocoded) on their first visit. */
-    private SearchSettings getOrCreateSettings(String owner) {
-        return settingsRepository.findByOwner(owner).orElseGet(() -> {
-            var d = appProperties.defaults();
-            SearchSettings settings = new SearchSettings(owner, d.city(), d.state(), d.radiusMiles(), d.monthsAhead());
-            settings.setPostalCode(d.postalCode());
-            geocodingService.geocode(d.postalCode()).ifPresent(geo -> {
-                settings.setLatitude(geo.latitude());
-                settings.setLongitude(geo.longitude());
-                settings.setCity(geo.city());
-                settings.setState(geo.state());
-            });
-            return settingsRepository.save(settings);
-        });
     }
 }

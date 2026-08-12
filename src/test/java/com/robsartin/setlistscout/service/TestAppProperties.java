@@ -1,6 +1,6 @@
 package com.robsartin.setlistscout.service;
 
-import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.AppProperties;
 
 import java.util.List;
 

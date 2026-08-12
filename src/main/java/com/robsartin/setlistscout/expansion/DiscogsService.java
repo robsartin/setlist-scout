@@ -1,6 +1,6 @@
 package com.robsartin.setlistscout.expansion;
 
-import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;

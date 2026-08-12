@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.config;
+package com.robsartin.setlistscout;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

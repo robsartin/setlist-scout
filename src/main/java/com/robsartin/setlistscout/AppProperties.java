@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.config;
+package com.robsartin.setlistscout;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

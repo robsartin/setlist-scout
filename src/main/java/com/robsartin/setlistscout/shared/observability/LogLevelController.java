@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.web;
+package com.robsartin.setlistscout.shared.observability;
 
 import org.springframework.boot.logging.LogLevel;
 import org.springframework.boot.logging.LoggingSystem;

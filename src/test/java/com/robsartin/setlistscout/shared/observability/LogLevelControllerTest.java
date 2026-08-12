@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.web;
+package com.robsartin.setlistscout.shared.observability;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

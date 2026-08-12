@@ -1,17 +1,12 @@
-package com.robsartin.setlistscout.web;
+package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
-import com.robsartin.setlistscout.config.AppProperties;
-import com.robsartin.setlistscout.scan.AsyncScanRunner;
-import com.robsartin.setlistscout.scan.ScanStateService;
-import com.robsartin.setlistscout.scan.ShowRepository;
 import com.robsartin.setlistscout.settings.SearchSettings;
-import com.robsartin.setlistscout.settings.SearchSettingsRepository;
+import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.CurrentUser;
-import com.robsartin.setlistscout.settings.GeocodingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,7 +14,6 @@ import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,66 +28,25 @@ class ShowControllerTest {
     private static final String OWNER = "rob@example.com";
 
     private ShowRepository showRepository;
-    private SearchSettingsRepository settingsRepository;
     private ArtistRepository artistRepository;
-    private GeocodingService geocodingService;
     private ScanStateService scanState;
     private AsyncScanRunner asyncScanRunner;
+    private SettingsService settingsService;
     private ShowController controller;
 
     @BeforeEach
     void setUp() {
         showRepository = mock(ShowRepository.class);
-        settingsRepository = mock(SearchSettingsRepository.class);
         artistRepository = mock(ArtistRepository.class);
-        geocodingService = mock(GeocodingService.class);
-        AppProperties appProperties = mock(AppProperties.class);
         scanState = mock(ScanStateService.class);
         asyncScanRunner = mock(AsyncScanRunner.class);
+        settingsService = mock(SettingsService.class);
         CurrentUser currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
         when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION))
                 .thenReturn(List.of());
-        controller = new ShowController(showRepository, settingsRepository, artistRepository, asyncScanRunner,
-                scanState, geocodingService, appProperties, currentUser);
-    }
-
-    @Test
-    @DisplayName("updateSettings geocodes the ZIP and stores lat/long + derived city/state")
-    void updateSettingsGeocodesZip() {
-        SearchSettings settings = new SearchSettings(OWNER, "OldCity", "OL", 25, 3);
-        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
-        when(geocodingService.geocode("78701"))
-                .thenReturn(Optional.of(new GeocodingService.GeoResult(30.2672, -97.7431, "Austin", "TX")));
-
-        String view = controller.updateSettings("78701", 50, 6);
-
-        assertThat(view).isEqualTo("redirect:/");
-        assertThat(settings.getPostalCode()).isEqualTo("78701");
-        assertThat(settings.getLatitude()).isEqualTo(30.2672);
-        assertThat(settings.getLongitude()).isEqualTo(-97.7431);
-        assertThat(settings.getCity()).isEqualTo("Austin");
-        assertThat(settings.getState()).isEqualTo("TX");
-        assertThat(settings.getRadiusMiles()).isEqualTo(50);
-        assertThat(settings.getMonthsAhead()).isEqualTo(6);
-        verify(settingsRepository).save(settings);
-    }
-
-    @Test
-    @DisplayName("updateSettings keeps last-known coordinates when geocoding fails")
-    void updateSettingsKeepsCoordsOnGeocodeFailure() {
-        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
-        settings.setLatitude(30.0);
-        settings.setLongitude(-97.0);
-        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
-        when(geocodingService.geocode("00000")).thenReturn(Optional.empty());
-
-        controller.updateSettings("00000", 50, 6);
-
-        assertThat(settings.getPostalCode()).isEqualTo("00000");
-        assertThat(settings.getLatitude()).isEqualTo(30.0);
-        assertThat(settings.getLongitude()).isEqualTo(-97.0);
-        verify(settingsRepository).save(settings);
+        controller = new ShowController(showRepository, artistRepository, asyncScanRunner,
+                scanState, settingsService, currentUser);
     }
 
     @Test
@@ -137,7 +90,7 @@ class ShowControllerTest {
     @DisplayName("shows puts the owner's lowercased tribute-artist names in the model")
     void showsIncludesTributeArtistNames() {
         SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
-        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
         when(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(anyString(), any(), any()))
                 .thenReturn(new java.util.ArrayList<>(List.of()));
         Artist tribute = new Artist("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, ArtistStatus.APPROVED,
@@ -158,7 +111,7 @@ class ShowControllerTest {
     void scanStatusWhenDoneReturnsShowsFragment() {
         when(scanState.isRunning(OWNER)).thenReturn(false);
         SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
-        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
         when(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(anyString(), any(), any()))
                 .thenReturn(new java.util.ArrayList<>(List.of()));
         Model model = new ExtendedModelMap();
