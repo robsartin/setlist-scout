@@ -142,6 +142,54 @@ class BandsintownServiceTest {
     }
 
     @Test
+    @DisplayName("falls back to the search keyword when lineup is not a list (malformed API shape)")
+    void fallsBackWhenLineupIsNotAList() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2026-06-01T20:00:00", "lineup": "The Damn Torpedoes",
+                   "venue": {"name": "Moody Center", "latitude": "30.2814", "longitude": "-97.7320"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Tom Petty", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Tom Petty");
+    }
+
+    @Test
+    @DisplayName("falls back to the search keyword when lineup is an empty list")
+    void fallsBackWhenLineupIsEmpty() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2026-06-01T20:00:00", "lineup": [],
+                   "venue": {"name": "Moody Center", "latitude": "30.2814", "longitude": "-97.7320"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Tom Petty", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Tom Petty");
+    }
+
+    @Test
+    @DisplayName("falls back to the search keyword when the first lineup entry is blank")
+    void fallsBackWhenLineupFirstEntryIsBlank() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2026-06-01T20:00:00", "lineup": [""],
+                   "venue": {"name": "Moody Center", "latitude": "30.2814", "longitude": "-97.7320"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Tom Petty", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Tom Petty");
+    }
+
+    @Test
     @DisplayName("URL-encodes spaces in the artist name in the request path")
     void encodesArtistNameInPath() throws InterruptedException {
         server.enqueue(jsonEvents("[]"));
