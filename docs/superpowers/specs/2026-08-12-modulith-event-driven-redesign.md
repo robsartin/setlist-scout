@@ -215,9 +215,28 @@ review** — the same guarantee as today.
 ## Phase B — delivery plan (staged PRs, agreed 2026-08-12)
 
 Phase A (Modulith structure + verify() gate + inert event registry) merged in #80. Phase B builds the
-per-unit event-driven work model on that structure. **Delivered as three staged, independently-deployable
-PRs under epic #86**, so the risky retirement of the whole-fleet scanner is isolated into one small,
-reversible deploy rather than shipped in a single large cutover.
+per-unit event-driven work model on that structure, **delivered as staged, independently-deployable PRs
+under epic #86**, so the risky retirement of the whole-fleet scanner is isolated into one small, reversible
+deploy rather than shipped in a single large cutover.
+
+**Refinement (2026-08-12, after mapping the code): 4 PRs, not 3.** Once the real code surface was clear —
+no central `ArtistService` (status transitions scattered across 5 `ReviewController` sites), expansion's
+cross-source "confirmed by both" logic, and a `catalog↔expansion` cycle risk if the `CandidateDiscovered`
+event is placed naively — the original PR2 was too big and mixed a real design question into a refactor.
+Rebalanced to keep each PR coherent and low-risk:
+- **PR1 — MERGED (#87):** scan `ShowSource` ports/adapters (pure refactor).
+- **PR2 — expansion `RelationSource` ports/adapters** (pure refactor, mirrors PR1; per-source adapters
+  bake their limits; `ExpansionService` keeps its dimension logic + `saveIfNew` persistence). No events, no migration.
+- **PR3 — events + job-model foundation:** a catalog activation service (centralise the scattered status
+  transitions → single Artist writer + single event source); the four domain events
+  (`ArtistActivated`/`ArtistDeactivated`/`SettingsChanged`/`CandidateDiscovered`) placed cycle-safely +
+  `@ApplicationModuleListener`s; **widen `event_publication.serialized_event`** (needed once events flow);
+  `scan_job`/`expand_job` tables + enqueue/cancel/re-due listeners; switch expansion persistence to
+  `CandidateDiscovered`. Jobs populate but nothing drains them (poller not built yet).
+- **PR4 — poller + cutover:** the paced due-poller (claim-lease/retry/backoff), enable it, jittered
+  backfill of active artists, retire `ShowScanScheduler.scan()` + `AsyncScanRunner`, ADR.
+
+The original 3-PR sections below remain the authoritative design for the *content*; only the PR grouping changed.
 
 **Migration-safety principle:** the new poller is built behind an env flag and stays OFF until the final
 PR; the existing `ShowScanScheduler.scan()` batch remains the sole driver until then, so every intermediate
