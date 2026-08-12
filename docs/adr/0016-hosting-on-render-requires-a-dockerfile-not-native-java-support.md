@@ -21,7 +21,12 @@ environment.
 
 Add a multi-stage `Dockerfile` at the repo root:
 
-- **Build stage** — `gradle:8.14.3-jdk21`, runs `./gradlew clean bootJar`.
+- **Build stage** — `gradle:8.14.3-jdk21`, runs `gradle clean bootJar`. The
+  image's preinstalled Gradle (pinned to the same 8.14.3 as the wrapper) is
+  used instead of `./gradlew` so the build stage does not re-download a
+  Gradle distribution -- a redundant, transient failure point. `./gradlew`
+  remains the entry point for local and CI builds, where Gradle is not
+  preinstalled.
 - **Runtime stage** — `eclipse-temurin:21-jre-alpine`, copies out only the
   built jar. Keeps the deployed image to a JRE, not a full JDK + Gradle
   toolchain.
@@ -46,7 +51,7 @@ are left blank; the Dockerfile's `ENTRYPOINT` is what runs.
 ## Consequences
 
 - The build now happens twice on every deploy conceptually (Docker's build
-  stage re-runs `./gradlew clean bootJar` inside the image), rather than
+  stage re-runs `gradle clean bootJar` inside the image), rather than
   Render building once natively -- an accepted cost of not having a native
   runtime.
 - The Dockerfile becomes something to keep in sync with `build.gradle.kts`

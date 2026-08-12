@@ -3,7 +3,12 @@
 FROM gradle:8.14.3-jdk21 AS build
 WORKDIR /app
 COPY . .
-RUN ./gradlew clean bootJar --no-daemon
+# Use the image's preinstalled Gradle (pinned to the same 8.14.3 as the
+# wrapper) rather than ./gradlew. The wrapper would re-download its own
+# distribution on every build -- a redundant, transient failure point
+# (a prod deploy flaked on SocketException fetching it; see docs/adr/0016).
+# ./gradlew stays the entry point for local/CI, where Gradle isn't preinstalled.
+RUN gradle clean bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
