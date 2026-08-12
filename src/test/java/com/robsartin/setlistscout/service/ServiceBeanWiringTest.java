@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.shared.MusicBrainzService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;

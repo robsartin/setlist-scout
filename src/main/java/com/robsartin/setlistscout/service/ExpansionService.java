@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.domain.Artist;
 import com.robsartin.setlistscout.domain.ArtistSource;
 import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.repository.ArtistRepository;
+import com.robsartin.setlistscout.shared.MusicBrainzService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

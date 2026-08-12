@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.shared;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import org.slf4j.Logger;
@@ -33,7 +33,7 @@ public class MusicBrainzService {
     }
 
     /** Test seam: local stub server and a near-zero rate-limit delay. */
-    MusicBrainzService(AppProperties props, String baseUrl, long rateLimitMillis) {
+    public MusicBrainzService(AppProperties props, String baseUrl, long rateLimitMillis) {
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.USER_AGENT, props.apis().musicBrainzUserAgent())

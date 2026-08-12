@@ -1,7 +1,7 @@
 package com.robsartin.setlistscout.scheduler;
 
 import com.robsartin.setlistscout.domain.SearchSettings;
-import com.robsartin.setlistscout.observability.Correlation;
+import com.robsartin.setlistscout.shared.observability.Correlation;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.service.ExpansionService;
 import com.robsartin.setlistscout.service.ShowAggregationService;

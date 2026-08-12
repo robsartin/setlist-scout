@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.observability;
+package com.robsartin.setlistscout.shared.observability;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

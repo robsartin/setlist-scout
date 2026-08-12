@@ -5,11 +5,11 @@ import com.robsartin.setlistscout.config.AppProperties;
 import java.util.List;
 
 /** Shared fixture: a fully-populated AppProperties for service unit tests. */
-final class TestAppProperties {
+public final class TestAppProperties {
 
     private TestAppProperties() {}
 
-    static AppProperties withKeys() {
+    public static AppProperties withKeys() {
         return new AppProperties(
                 new AppProperties.Auth(List.of("owner@example.com"), "owner@example.com"),
                 new AppProperties.Apis(

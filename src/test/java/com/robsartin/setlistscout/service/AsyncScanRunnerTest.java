@@ -1,7 +1,7 @@
 package com.robsartin.setlistscout.service;
 
-import com.robsartin.setlistscout.observability.Correlation;
-import com.robsartin.setlistscout.observability.CorrelationIds;
+import com.robsartin.setlistscout.shared.observability.Correlation;
+import com.robsartin.setlistscout.shared.observability.CorrelationIds;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 

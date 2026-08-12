@@ -8,6 +8,7 @@ import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
+import com.robsartin.setlistscout.shared.CurrentUser;
 import com.robsartin.setlistscout.service.AsyncScanRunner;
 import com.robsartin.setlistscout.service.GeocodingService;
 import com.robsartin.setlistscout.service.ScanStateService;

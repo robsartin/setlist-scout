@@ -6,6 +6,7 @@ import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.service.ArtistSeedService;
 import com.robsartin.setlistscout.service.ExpansionService;
+import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;

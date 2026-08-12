@@ -7,6 +7,7 @@ import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
+import com.robsartin.setlistscout.shared.MusicBrainzService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

@@ -1,6 +1,6 @@
 package com.robsartin.setlistscout.service;
 
-import com.robsartin.setlistscout.observability.Correlation;
+import com.robsartin.setlistscout.shared.observability.Correlation;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

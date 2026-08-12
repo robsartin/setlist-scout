@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.observability;
+package com.robsartin.setlistscout.shared.observability;
 
 import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;

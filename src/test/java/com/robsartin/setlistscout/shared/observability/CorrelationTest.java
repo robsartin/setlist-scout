@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.observability;
+package com.robsartin.setlistscout.shared.observability;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;

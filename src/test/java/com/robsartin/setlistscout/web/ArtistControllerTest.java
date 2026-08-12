@@ -6,6 +6,7 @@ import com.robsartin.setlistscout.domain.ArtistStatus;
 import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.service.ArtistSeedService;
 import com.robsartin.setlistscout.service.ExpansionService;
+import com.robsartin.setlistscout.shared.CurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
