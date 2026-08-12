@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.domain;
+package com.robsartin.setlistscout.settings;
 
 import jakarta.persistence.*;
 

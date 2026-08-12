@@ -1,11 +1,11 @@
 package com.robsartin.setlistscout.config;
 
 import com.robsartin.setlistscout.domain.ArtistStatus;
-import com.robsartin.setlistscout.domain.SearchSettings;
 import com.robsartin.setlistscout.repository.ArtistRepository;
-import com.robsartin.setlistscout.repository.SearchSettingsRepository;
 import com.robsartin.setlistscout.service.ArtistSeedService;
-import com.robsartin.setlistscout.service.GeocodingService;
+import com.robsartin.setlistscout.settings.SearchSettings;
+import com.robsartin.setlistscout.settings.SearchSettingsRepository;
+import com.robsartin.setlistscout.settings.GeocodingService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
