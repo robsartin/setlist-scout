@@ -57,6 +57,8 @@ dependencies {
 
     // Modular-monolith structure + boundary verification + application events (see spec).
     implementation("org.springframework.modulith:spring-modulith-starter-core")
+    // Durable event-publication registry (JPA-backed); inert until Phase B adds publishers/listeners.
+    implementation("org.springframework.modulith:spring-modulith-starter-jpa")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
