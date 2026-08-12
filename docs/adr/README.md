@@ -54,3 +54,12 @@
   Many artists announce tour dates only on their own site; scrape them via MusicBrainz-discovered URLs, schema.org Event JSON-LD, and an LLM fallback.
 - [0020: Schema migrations via Flyway (replacing ddl-auto=update)](0020-flyway-schema-migrations.md)
   ddl-auto=update can't add a NOT NULL column to a populated table (it crashed prod after multi-tenancy); Flyway versioned migrations + ddl-auto=validate replace it.
+
+## Modularity
+
+- [0021: Adopt Spring Modulith with enforced boundaries](0021-adopt-spring-modulith-with-enforced-boundaries.md) — _Accepted_
+  Application grew as a flat package with no structural boundaries; Spring Modulith establishes enforced module boundaries (`catalog`, `scan`, `expansion`, `settings`, `review`, `shared`) and a `ModularityTests` verifier in CI.
+  Related: [12. Use the Mikado Method to keep the build green](0012-mikado-method-for-changes.md), [0022: Event-driven inter-module communication](#modularity)
+- [0022: Event-driven inter-module communication](0022-event-driven-inter-module-communication.md) — _Accepted_
+  Cross-module writes need durability and decoupling; Spring Modulith events with a JPA event-publication registry (Flyway `V4__event_publication.sql`) provide both. Phase A places the registry; Phase B activates publishing and listening.
+  Related: [0020: Schema migrations via Flyway](0020-flyway-schema-migrations.md), [0021: Adopt Spring Modulith with enforced boundaries](#modularity)

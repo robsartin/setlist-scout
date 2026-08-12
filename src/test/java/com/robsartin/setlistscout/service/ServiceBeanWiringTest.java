@@ -1,6 +1,13 @@
 package com.robsartin.setlistscout.service;
 
-import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.AppProperties;
+import com.robsartin.setlistscout.expansion.DiscogsService;
+import com.robsartin.setlistscout.expansion.LastFmService;
+import com.robsartin.setlistscout.expansion.SimilarArtistLlmService;
+import com.robsartin.setlistscout.expansion.TributeLlmService;
+import com.robsartin.setlistscout.scan.BandsintownService;
+import com.robsartin.setlistscout.scan.TicketmasterService;
+import com.robsartin.setlistscout.shared.MusicBrainzService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
