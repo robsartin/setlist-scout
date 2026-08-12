@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.ToIntBiFunction;
 
 /**
  * Runs the expansion pipeline against every SEED/APPROVED artist and stores newly
@@ -60,10 +61,10 @@ public class ExpansionService {
         int candidates = 0;
         for (Artist base : baseArtists) {
             processed++;
-            candidates += expandMemberRelations(owner, base);
-            candidates += expandSimilarArtists(owner, base);
+            candidates += safely(owner, base, "members", this::expandMemberRelations);
+            candidates += safely(owner, base, "similar", this::expandSimilarArtists);
             if (base.getStatus() == ArtistStatus.SEED) {
-                candidates += expandTributeBands(owner, base);
+                candidates += safely(owner, base, "tributes", this::expandTributeBands);
             }
         }
         log.atInfo()
@@ -71,6 +72,24 @@ public class ExpansionService {
                 .addKeyValue("candidatesFound", candidates)
                 .addKeyValue("durationMs", (System.nanoTime() - startNanos) / 1_000_000)
                 .log("expansion finished");
+    }
+
+    /**
+     * Runs a single expansion dimension for one artist, isolated from the others. One flaky
+     * source (Discogs/Last.fm/LLM/MusicBrainz hiccup) must never abort the whole {@link #expandAll}
+     * run -- log a WARN with enough context to chase it down and move on to the next dimension/artist.
+     */
+    private int safely(String owner, Artist base, String dimension, ToIntBiFunction<String, Artist> op) {
+        try {
+            return op.applyAsInt(owner, base);
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("owner", owner)
+                    .addKeyValue("artist", base.getName())
+                    .addKeyValue("dimension", dimension)
+                    .log("expansion dimension failed");
+            return 0;
+        }
     }
 
     private int expandMemberRelations(String owner, Artist base) {
