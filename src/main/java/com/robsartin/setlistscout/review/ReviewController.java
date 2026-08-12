@@ -1,8 +1,7 @@
-package com.robsartin.setlistscout.web;
+package com.robsartin.setlistscout.review;
 
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
-import com.robsartin.setlistscout.catalog.ArtistSeedService;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpansionService;
@@ -10,107 +9,26 @@ import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 @Controller
 @RequestMapping("/artists")
-public class ArtistController {
+public class ReviewController {
 
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
 
-    /** Cap lines read from an uploaded artist file -- a guardrail against a runaway upload. */
-    private static final int MAX_UPLOAD_LINES = 2000;
-
     private final ArtistRepository artistRepository;
     private final ExpansionService expansionService;
     private final CurrentUser currentUser;
-    private final ArtistSeedService seedService;
 
-    public ArtistController(ArtistRepository artistRepository, ExpansionService expansionService,
-                           CurrentUser currentUser, ArtistSeedService seedService) {
+    public ReviewController(ArtistRepository artistRepository, ExpansionService expansionService,
+                           CurrentUser currentUser) {
         this.artistRepository = artistRepository;
         this.expansionService = expansionService;
         this.currentUser = currentUser;
-        this.seedService = seedService;
-    }
-
-    @GetMapping
-    public String list(Model model) {
-        String owner = currentUser.email();
-        populateActive(model, owner);
-        populatePending(model, owner);
-        model.addAttribute("rejected", artistRepository.findByOwnerAndStatus(owner, ArtistStatus.REJECTED));
-        return "artists";
-    }
-
-    @PostMapping("/seed")
-    public String addSeed(@RequestParam String name,
-                          @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
-                          Model model) {
-        String owner = currentUser.email();
-        // A nameless seed would search Ticketmaster with keyword="" and pull back every local
-        // event (issue #49); ArtistSeedService trims and skips blanks/duplicates.
-        seedService.addSeedIfNew(owner, name);
-        if (hxRequest != null) {
-            populateActive(model, owner);
-            return "artists :: activeSection";
-        }
-        return "redirect:/artists";
-    }
-
-    /**
-     * Bulk-add seeds from an uploaded plain-text file (one artist per line). Blank lines, {@code #}
-     * comments, and names that already exist are skipped ({@link ArtistSeedService}); reads at most
-     * {@link #MAX_UPLOAD_LINES} lines. Owner-scoped. Redirects with a summary flash message.
-     */
-    @PostMapping("/upload")
-    public String upload(@RequestParam("file") MultipartFile file, RedirectAttributes redirect) {
-        String owner = currentUser.email();
-        int added = 0;
-        if (file != null && !file.isEmpty()) {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                int seen = 0;
-                while ((line = reader.readLine()) != null && seen < MAX_UPLOAD_LINES) {
-                    seen++;
-                    if (seedService.addSeedIfNew(owner, line)) added++;
-                }
-            } catch (IOException e) {
-                redirect.addFlashAttribute("uploadMessage", "Could not read that file.");
-                return "redirect:/artists";
-            }
-        }
-        redirect.addFlashAttribute("uploadMessage",
-                "Added " + added + " new artist" + (added == 1 ? "" : "s") + " from the file.");
-        return "redirect:/artists";
-    }
-
-    /** Set or clear an artist's official-site URL (scraped for tour dates); owner-scoped. */
-    @PostMapping("/{id}/site-url")
-    public String setSiteUrl(@PathVariable Long id,
-                             @RequestParam String url,
-                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
-                             Model model) {
-        String owner = currentUser.email();
-        artistRepository.findByIdAndOwner(id, owner).ifPresent(a -> {
-            a.setOfficialSiteUrl(url.isBlank() ? null : url.trim());
-            artistRepository.save(a);
-        });
-        if (hxRequest != null) {
-            populateActive(model, owner);
-            return "artists :: activeSection";
-        }
-        return "redirect:/artists";
     }
 
     /**
@@ -198,11 +116,6 @@ public class ArtistController {
             return "artists :: pendingSection";
         }
         return "redirect:/artists";
-    }
-
-    private void populateActive(Model model, String owner) {
-        model.addAttribute("active", artistRepository.findByOwnerAndStatusIn(
-                owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
     }
 
     private void populatePending(Model model, String owner) {
