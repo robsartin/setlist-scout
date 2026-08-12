@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.shared.observability.Correlation;
 import jakarta.annotation.PreDestroy;

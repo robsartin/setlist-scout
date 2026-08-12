@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.scan;
 
 import org.springframework.stereotype.Component;
 

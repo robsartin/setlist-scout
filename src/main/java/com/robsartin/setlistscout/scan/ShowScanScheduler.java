@@ -1,10 +1,9 @@
-package com.robsartin.setlistscout.scheduler;
+package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.shared.observability.Correlation;
 import com.robsartin.setlistscout.settings.SearchSettingsRepository;
 import com.robsartin.setlistscout.expansion.ExpansionService;
-import com.robsartin.setlistscout.service.ShowAggregationService;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;

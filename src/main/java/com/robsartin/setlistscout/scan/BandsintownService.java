@@ -1,7 +1,6 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.config.AppProperties;
-import com.robsartin.setlistscout.domain.Show;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

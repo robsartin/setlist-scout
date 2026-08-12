@@ -1,6 +1,5 @@
-package com.robsartin.setlistscout.repository;
+package com.robsartin.setlistscout.scan;
 
-import com.robsartin.setlistscout.domain.Show;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.LocalDateTime;

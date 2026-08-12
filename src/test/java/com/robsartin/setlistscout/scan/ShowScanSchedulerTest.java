@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.scheduler;
+package com.robsartin.setlistscout.scan;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;

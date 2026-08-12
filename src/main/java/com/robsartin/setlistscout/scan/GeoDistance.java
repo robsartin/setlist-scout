@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.scan;
 
 /**
  * Great-circle (Haversine) distance in miles between two lat/long points. Used to filter

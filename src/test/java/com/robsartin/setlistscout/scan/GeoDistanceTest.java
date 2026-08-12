@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.scan;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

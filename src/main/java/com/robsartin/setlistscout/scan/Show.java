@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.domain;
+package com.robsartin.setlistscout.scan;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
