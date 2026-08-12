@@ -209,3 +209,70 @@ review** — the same guarantee as today.
 - No distributed services, no microservices.
 - No area-browse / "what's near me", no new external sources (separate, declined).
 - No per-artist adaptive cadence (fixed interval + on-activation is enough for now).
+
+---
+
+## Phase B — delivery plan (staged PRs, agreed 2026-08-12)
+
+Phase A (Modulith structure + verify() gate + inert event registry) merged in #80. Phase B builds the
+per-unit event-driven work model on that structure. **Delivered as three staged, independently-deployable
+PRs under epic #86**, so the risky retirement of the whole-fleet scanner is isolated into one small,
+reversible deploy rather than shipped in a single large cutover.
+
+**Migration-safety principle:** the new poller is built behind an env flag and stays OFF until the final
+PR; the existing `ShowScanScheduler.scan()` batch remains the sole driver until then, so every intermediate
+deploy is behavior-unchanged. `verify()` and the full suite stay green at every step (Mikado, TDD, subagents).
+
+### PR1 — Source ports/adapters + registry widening (pure refactor, zero behavior change)
+- Introduce `ShowSource` port + `scan.source.*` adapters (`TicketmasterShowSource`, `BandsintownShowSource`,
+  `BandSiteShowSource` wrapping the scraper+TourPageLlm); scan orchestrator iterates injected `List<ShowSource>`.
+- Introduce `RelationSource` port + `expansion.source.*` adapters (`MusicBrainzRelationSource`,
+  `DiscogsRelationSource`, `LastFmSimilarSource`, `SimilarLlmSource`, `TributeLlmSource`); expansion
+  orchestrator iterates injected `List<RelationSource>`. Adapters are query-only (never write).
+- **Widen `event_publication.serialized_event`** beyond `VARCHAR(255)` (Flyway `V5`) — the Phase-A landmine —
+  with the matching Modulith entity-mapping override, so the registry is safe before any event flows.
+- The old whole-fleet scan/expand still drives everything, now through the ports. `verify()` + suite green.
+
+### PR2 — Job model + events + listeners + poller (built, gated OFF)
+- Flyway `V6`: `scan_job` / `expand_job` tables (one row per `(owner, artist_id, source)`, unique together;
+  `status`, `attempts`, `last_error`, `last_run_at`, `next_due_at` [indexed], `claimed_at` lease;
+  `scan_job.location_fingerprint`) + repositories.
+- Events + `@ApplicationModuleListener`s: `ArtistActivated`/`ArtistDeactivated` (catalog),
+  `SettingsChanged` (settings), `CandidateDiscovered` (expansion→catalog). Listeners enqueue (idempotent
+  upsert on the unique key, due-now), cancel, and re-due (on settings change, refreshing the fingerprint).
+- **Switch expansion's candidate persistence to the `CandidateDiscovered` event path now** (poller still off) —
+  behavior-equivalent (catalog still persists PENDING_REVIEW with the name-guard + owner-dedup), and it
+  gives the event path soak time + test coverage before cutover; the old direct catalog write is deleted here.
+- Poller (`@Scheduled` tick: claim-lease + retry/backoff + per-source pacing) is **built but gated off**
+  (`SCAN_POLLER_ENABLED`/`EXPAND_POLLER_ENABLED` default false). Old batch remains the sole driver → prod
+  behavior unchanged, safe deploy. Jobs may enqueue but nothing drains them yet.
+- Tests: Modulith `@ApplicationModuleTest` + `Scenario` (activation→enqueue, settings→re-due,
+  candidate→persist-guarded); work-model unit tests (atomic claim, success reschedules, failure backs off,
+  fingerprint mismatch re-dues). Testcontainers for JPA/registry paths.
+
+### PR3 — Cutover (the isolated risky bit)
+- Flip poller flags ON. One-time **backfill** enqueues jobs for all current active (SEED/APPROVED) artists
+  with `next_due_at` **spread across the next few hours (jittered)** to avoid a boot/API stampede on the
+  free-tier instance.
+- Delete the whole-fleet `ShowScanScheduler.scan()` batch and the request-thread `AsyncScanRunner`; manual
+  "Scan now"/"Expand now" become "set this owner's jobs `next_due_at = now`" (one execution path).
+- ADR: per-unit, individually-scheduled scan/expand work model (job tables + paced poller) replacing the
+  batch; env cadences (scan 14d / expand 28d) + on-activation triggers.
+- Note: a one-time scan overlap at cutover is harmless — `ShowAggregationService` dedups shows, so a
+  re-scan is idempotent.
+
+### Proposed mechanics (defaults; env-overridable)
+- **Claim (atomic, single- or multi-instance safe):** `UPDATE scan_job SET claimed_at=now(), status='RUNNING'
+  WHERE id IN (SELECT id FROM scan_job WHERE next_due_at<=now() AND (claimed_at IS NULL OR claimed_at < now()-:lease)
+  ORDER BY next_due_at LIMIT :batch FOR UPDATE SKIP LOCKED) RETURNING …`.
+- **Lease** 5 min; **tick** 90s (`SCAN_TICK_MS`); **batch** 20 (`SCAN_BATCH_SIZE`); initial delay on boot.
+- **Backoff** `min(interval, 10min · 2^attempts)`; **park** after 6 attempts (status FAILED, WARN, no more retries).
+- **Rate limiting:** per-source max-rows-per-tick cap (env per source id) — no token bucket. Lets one
+  source's throttle (MusicBrainz ~1 rps, TM daily budget, LLM cost) not stall the others.
+- **Cadence** per source: env override per `source.id()`, falling back to `SCAN_INTERVAL` (14d) /
+  `EXPANSION_INTERVAL` (28d).
+
+### Issue/branch topology
+#86 is the tracking **epic**; each PR gets its own issue + branch off `main` (issue → branch → PR → squash),
+referencing #86. PR2 starts after PR1 merges; PR3 after PR2. Each PR is its own Mikado sub-graph executed
+subagent-driven with per-task review + a final whole-branch review, exactly as Phase A ran.
