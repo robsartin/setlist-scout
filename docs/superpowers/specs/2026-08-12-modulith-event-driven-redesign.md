@@ -55,6 +55,35 @@ touches another module's internal (non-API) types.
 `shared` is a permitted dependency for every module; domain modules do not depend on each other
 except through public API types and events.
 
+## Sources as ports + adapters (separate by site, without new modules)
+
+Each external site is an **adapter behind a port**, not a module — a source is infrastructure, not a
+domain. scan and expansion each define a port and hold one adapter per source as internals, so a
+site can be added/removed/tested in one place and its failures are isolated, with no new module
+boundary to cross:
+
+- **scan** — port `ShowSource { String id(); List<Show> search(String artist, Location loc, Window w); }`;
+  adapters in `scan.source.*`: `TicketmasterShowSource`, `BandsintownShowSource`, `BandSiteShowSource`
+  (the last wraps the band-site scraper + TourPageLlm). The orchestrator iterates the injected
+  `List<ShowSource>`.
+- **expansion** — port `RelationSource { String id(); List<Candidate> related(String artist); }`;
+  adapters in `expansion.source.*`: `MusicBrainzRelationSource`, `DiscogsRelationSource`,
+  `LastFmSimilarSource`, `SimilarLlmSource`, `TributeLlmSource`.
+
+Adapters are **query-only** — they return results and never write. `id()` is the stable source key
+(`ticketmaster`, `bandsintown`, `band-site`, `musicbrainz`, `discogs`, `lastfm`, `similar-llm`,
+`tribute-llm`) used in the work tables below.
+
+## Write path (a module writes its own data; events cross modules)
+
+A unit runs like this: the source adapter is queried (no writes); the module's **orchestrator**
+persists the results into **its own** tables and updates the job row **in one transaction**. Scan
+owns `Show`, so found shows are written directly to `ShowRepository` — no event to persist your own
+aggregate. An event is emitted only when another module must react: expansion's `CandidateDiscovered`
+is an event precisely because it crosses into catalog (the sole `Artist` writer). A future
+notifications/digest module is the one place scan would also publish `NewShowsDiscovered(owner,
+artist, count)` after persisting — added only when that consumer exists (YAGNI).
+
 ## Events (Spring Modulith `@ApplicationModuleListener` — async + transactional + durable registry)
 
 All `Artist` writes stay in **catalog**; other modules react to or request via events.
@@ -73,8 +102,9 @@ routes candidate persistence back through catalog so the `Artist` aggregate has 
 
 Two tables, one row per unit of work:
 
-`scan_job` / `expand_job`:
-- `id`, `owner`, `artist_id` (unique together: `(owner, artist_id)`)
+`scan_job` / `expand_job` — **one row per `(owner, artist, source)`** so each site is its own
+schedulable unit (per-source retry, pacing, and cadence):
+- `id`, `owner`, `artist_id`, `source` (the adapter's `id()`) — unique together: `(owner, artist_id, source)`
 - `status` — `SCHEDULED | RUNNING | FAILED`
 - `attempts` (int), `last_error` (nullable)
 - `last_run_at` (nullable), `next_due_at` (indexed)
@@ -84,11 +114,12 @@ Two tables, one row per unit of work:
   the row stale and re-due it.
 
 Lifecycle:
-1. **Enqueue** on `ArtistActivated` (`next_due_at = now`, status SCHEDULED). Idempotent — upsert on
-   `(owner, artist_id)`.
+1. **Enqueue** on `ArtistActivated` — one row **per source** (`next_due_at = now`, status SCHEDULED).
+   Idempotent — upsert on `(owner, artist_id, source)`.
 2. **Claim** — the poller selects due, unclaimed rows and atomically sets `claimed_at = now`
    (a conditional update, so two ticks can't grab the same row).
-3. **Run one unit** — scan a single artist at the owner's location / expand a single artist.
+3. **Run one unit** — query that one source's adapter for that artist (at the owner's location for
+   scans), then persist results + update the job in one transaction.
 4. **Success** → `last_run_at = now`, `next_due_at = now + interval`, `attempts = 0`,
    `claimed_at = null`, status SCHEDULED.
 5. **Failure** → `attempts++`, `last_error` set, `next_due_at = now + backoff(attempts)`,
@@ -98,11 +129,14 @@ Lifecycle:
 
 - A light `@Scheduled` tick (default every ~1–2 min, configurable) in scan and in expansion selects
   `WHERE next_due_at <= now AND (claimed_at IS NULL OR claimed_at < now - lease)` ordered by
-  `next_due_at`, `LIMIT batch`, and processes the batch **rate-limited** (respects MusicBrainz
-  ~1 req/sec, the Ticketmaster daily budget, and LLM cost).
+  `next_due_at`, `LIMIT batch`, and processes the batch **rate-limited per source** (each adapter
+  declares its limit — MusicBrainz ~1 req/sec, the Ticketmaster daily budget, LLM cost — so the
+  per-`(artist, source)` rows let one source's throttle not stall the others).
 - **Cadences (env-configured, defaults):**
   - `SCAN_INTERVAL` default **14 days**
   - `EXPANSION_INTERVAL` default **28 days**
+  - cadence is resolvable **per source** (env override per source id, falling back to the interval
+    above) — e.g. band-site scrapes can run less often than Ticketmaster.
   - plus immediate enqueue **on new/approved artist** (the `ArtistActivated` trigger)
   - `SCAN_TICK_MS`, `SCAN_BATCH_SIZE`, initial delay, and per-tick pacing also configurable.
 - No startup stampede: the tick drains due work gradually; nothing runs a full-fleet pass at boot
