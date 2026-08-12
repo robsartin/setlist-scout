@@ -4,7 +4,11 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
-import com.robsartin.setlistscout.shared.MusicBrainzService;
+import com.robsartin.setlistscout.expansion.source.DiscogsRelationSource;
+import com.robsartin.setlistscout.expansion.source.LastFmSimilarSource;
+import com.robsartin.setlistscout.expansion.source.MusicBrainzRelationSource;
+import com.robsartin.setlistscout.expansion.source.SimilarLlmSource;
+import com.robsartin.setlistscout.expansion.source.TributeLlmSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,7 +21,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,11 +30,11 @@ import static org.mockito.Mockito.when;
 class ExpansionServiceTest {
 
     @Mock private ArtistRepository artistRepository;
-    @Mock private MusicBrainzService musicBrainz;
-    @Mock private DiscogsService discogs;
-    @Mock private LastFmService lastFm;
-    @Mock private SimilarArtistLlmService similarArtistLlm;
-    @Mock private TributeLlmService tributeLlm;
+    @Mock private MusicBrainzRelationSource musicBrainzSource;
+    @Mock private DiscogsRelationSource discogsSource;
+    @Mock private LastFmSimilarSource lastFmSource;
+    @Mock private SimilarLlmSource similarLlmSource;
+    @Mock private TributeLlmSource tributeSource;
 
     private ExpansionService expansionService;
 
@@ -40,7 +43,7 @@ class ExpansionServiceTest {
     @BeforeEach
     void setUp() {
         expansionService = new ExpansionService(
-                artistRepository, musicBrainz, discogs, lastFm, similarArtistLlm, tributeLlm);
+                artistRepository, musicBrainzSource, discogsSource, lastFmSource, similarLlmSource, tributeSource);
     }
 
     private static Artist seedArtist(String name) {
@@ -56,27 +59,27 @@ class ExpansionServiceTest {
     void shouldOnlyExpandActiveArtists() {
         when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
                 .thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
 
         expansionService.expandAll(OWNER);
 
-        verify(musicBrainz).findRelatedArtists("Dawes");
-        verify(discogs).findRelatedArtists("Dawes");
-        verify(lastFm).findSimilarArtists("Dawes", 8);
-        verify(similarArtistLlm).findSimilarArtists("Dawes", 8);
+        verify(musicBrainzSource).related("Dawes");
+        verify(discogsSource).related("Dawes");
+        verify(lastFmSource).related("Dawes");
+        verify(similarLlmSource).related("Dawes");
     }
 
     @Test
     @DisplayName("should save a new member-relation artist with the MEMBER_EXPANSION source")
     void shouldSaveNewMemberRelation() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainz.findRelatedArtists("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
-        when(discogs.findRelatedArtists("Dawes")).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(musicBrainzSource.related("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
+        when(discogsSource.related("Dawes")).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
         when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Taylor Goldsmith")).thenReturn(false);
 
         expansionService.expandAll(OWNER);
@@ -96,10 +99,10 @@ class ExpansionServiceTest {
     @DisplayName("should not save a member relation that is already tracked")
     void shouldSkipExistingMemberRelation() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainz.findRelatedArtists("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
-        when(discogs.findRelatedArtists("Dawes")).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(musicBrainzSource.related("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
+        when(discogsSource.related("Dawes")).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
         when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Taylor Goldsmith")).thenReturn(true);
 
         expansionService.expandAll(OWNER);
@@ -111,10 +114,10 @@ class ExpansionServiceTest {
     @DisplayName("should skip blank names returned by an expansion source")
     void shouldSkipBlankNames() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainz.findRelatedArtists("Dawes")).thenReturn(List.of("", "  "));
-        when(discogs.findRelatedArtists("Dawes")).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(musicBrainzSource.related("Dawes")).thenReturn(List.of("", "  "));
+        when(discogsSource.related("Dawes")).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
 
         expansionService.expandAll(OWNER);
 
@@ -125,10 +128,10 @@ class ExpansionServiceTest {
     @DisplayName("should note a similar artist found by both sources as confirmed")
     void shouldNoteConfirmedByBothSources() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists("Dawes", 8)).thenReturn(List.of("Nickel Creek"));
-        when(similarArtistLlm.findSimilarArtists("Dawes", 8)).thenReturn(List.of("Nickel Creek"));
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related("Dawes")).thenReturn(List.of("Nickel Creek"));
+        when(similarLlmSource.related("Dawes")).thenReturn(List.of("Nickel Creek"));
         when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
         expansionService.expandAll(OWNER);
@@ -144,10 +147,10 @@ class ExpansionServiceTest {
     @DisplayName("should note a similar artist found by only one source as single-source")
     void shouldNoteSingleSourceMatch() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists("Dawes", 8)).thenReturn(List.of("Nickel Creek"));
-        when(similarArtistLlm.findSimilarArtists("Dawes", 8)).thenReturn(List.of());
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related("Dawes")).thenReturn(List.of("Nickel Creek"));
+        when(similarLlmSource.related("Dawes")).thenReturn(List.of());
         when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
         expansionService.expandAll(OWNER);
@@ -161,11 +164,11 @@ class ExpansionServiceTest {
     @DisplayName("should save a tribute act for a SEED base with the TRIBUTE_EXPANSION source")
     void shouldSaveTributeForSeed() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Iron Maiden")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(tributeLlm.findTributeBands("Iron Maiden", 5)).thenReturn(List.of("The Iron Maidens"));
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
+        when(tributeSource.related("Iron Maiden")).thenReturn(List.of("The Iron Maidens"));
         when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "The Iron Maidens")).thenReturn(false);
 
         expansionService.expandAll(OWNER);
@@ -185,11 +188,11 @@ class ExpansionServiceTest {
     void shouldSkipProseRefusalResponse() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any()))
                 .thenReturn(List.of(seedArtist("Brandi Carlile")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(tributeLlm.findTributeBands("Brandi Carlile", 5)).thenReturn(List.of(
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
+        when(tributeSource.related("Brandi Carlile")).thenReturn(List.of(
                 "I don't know of any well-known tribute or cover bands specifically dedicated to "
                         + "Brandi Carlile's music."));
 
@@ -203,10 +206,10 @@ class ExpansionServiceTest {
     void shouldSavePunctuatedArtistNames() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any()))
                 .thenReturn(List.of(seedArtist("Talking Heads")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists("Talking Heads", 8))
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related("Talking Heads"))
                 .thenReturn(List.of("Panic! at the Disco", "St. Vincent"));
         when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
@@ -224,11 +227,11 @@ class ExpansionServiceTest {
     void shouldSaveNormalNameEvenWhenAnotherIsRefusal() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any()))
                 .thenReturn(List.of(seedArtist("Iron Maiden")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(tributeLlm.findTributeBands("Iron Maiden", 5)).thenReturn(List.of(
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
+        when(tributeSource.related("Iron Maiden")).thenReturn(List.of(
                 "The Iron Maidens",
                 "I don't know of any well-known tribute or cover bands specifically dedicated to "
                         + "Iron Maiden's music."));
@@ -248,18 +251,18 @@ class ExpansionServiceTest {
                 .thenReturn(List.of(seedArtist("First"), seedArtist("Second")));
 
         // "First" artist: member-relation dimension blows up on the Discogs call.
-        when(musicBrainz.findRelatedArtists("First")).thenReturn(List.of());
-        when(discogs.findRelatedArtists("First")).thenThrow(new RuntimeException("boom"));
-        when(lastFm.findSimilarArtists("First", 8)).thenReturn(List.of("SimilarFirst"));
-        when(similarArtistLlm.findSimilarArtists("First", 8)).thenReturn(List.of());
-        when(tributeLlm.findTributeBands("First", 5)).thenReturn(List.of("TributeFirst"));
+        when(musicBrainzSource.related("First")).thenReturn(List.of());
+        when(discogsSource.related("First")).thenThrow(new RuntimeException("boom"));
+        when(lastFmSource.related("First")).thenReturn(List.of("SimilarFirst"));
+        when(similarLlmSource.related("First")).thenReturn(List.of());
+        when(tributeSource.related("First")).thenReturn(List.of("TributeFirst"));
 
         // "Second" artist: everything behaves normally.
-        when(musicBrainz.findRelatedArtists("Second")).thenReturn(List.of("MemberSecond"));
-        when(discogs.findRelatedArtists("Second")).thenReturn(List.of());
-        when(lastFm.findSimilarArtists("Second", 8)).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists("Second", 8)).thenReturn(List.of());
-        when(tributeLlm.findTributeBands("Second", 5)).thenReturn(List.of("TributeSecond"));
+        when(musicBrainzSource.related("Second")).thenReturn(List.of("MemberSecond"));
+        when(discogsSource.related("Second")).thenReturn(List.of());
+        when(lastFmSource.related("Second")).thenReturn(List.of());
+        when(similarLlmSource.related("Second")).thenReturn(List.of());
+        when(tributeSource.related("Second")).thenReturn(List.of("TributeSecond"));
 
         when(artistRepository.existsByOwnerAndNameIgnoreCase(eq(OWNER), any())).thenReturn(false);
 
@@ -276,13 +279,13 @@ class ExpansionServiceTest {
     @DisplayName("should NOT run tribute expansion for an APPROVED (non-seed) base")
     void shouldSkipTributeForApproved() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(approvedArtist("Nickel Creek")));
-        when(musicBrainz.findRelatedArtists(any())).thenReturn(List.of());
-        when(discogs.findRelatedArtists(any())).thenReturn(List.of());
-        when(lastFm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
-        when(similarArtistLlm.findSimilarArtists(any(), eq(8))).thenReturn(List.of());
+        when(musicBrainzSource.related(any())).thenReturn(List.of());
+        when(discogsSource.related(any())).thenReturn(List.of());
+        when(lastFmSource.related(any())).thenReturn(List.of());
+        when(similarLlmSource.related(any())).thenReturn(List.of());
 
         expansionService.expandAll(OWNER);
 
-        verify(tributeLlm, never()).findTributeBands(any(), anyInt());
+        verify(tributeSource, never()).related(any());
     }
 }
