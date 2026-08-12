@@ -14,6 +14,12 @@ prerequisite first.
 Run gradle with `JAVA_HOME=~/.sdkman/candidates/java/21.0.12-tem`. Docker is unavailable locally →
 the Testcontainers boot test (which confirms the app still boots with each move) runs in CI.
 
+**Status:** deps + all 5 domain modules' classes relocated & green (`shared` cea7e63, `settings`
+d72769d, `catalog` d839b8f, `expansion` fe64983, `scan` 31e0e2a). NEXT = the controller-split half:
+`review` module (split ArtistController), move the other controllers + config to their modules,
+resolve verify() boundary crossings to public APIs, add the event registry, turn on `verify()`,
+ADRs, PR.
+
 ## Prerequisite tree (leaves first — do bottom-up)
 
 - [x] **Add Spring Modulith deps** — `spring-modulith-starter-core` (+ `-starter-test`), BOM 1.3.12
