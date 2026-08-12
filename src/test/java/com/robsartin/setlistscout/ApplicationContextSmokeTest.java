@@ -1,7 +1,12 @@
 package com.robsartin.setlistscout;
 
+import com.robsartin.setlistscout.scan.source.BandSiteShowSource;
+import com.robsartin.setlistscout.scan.source.BandsintownShowSource;
+import com.robsartin.setlistscout.scan.source.ShowSource;
+import com.robsartin.setlistscout.scan.source.TicketmasterShowSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -15,6 +20,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,6 +50,9 @@ class ApplicationContextSmokeTest {
     @LocalServerPort
     private int port;
 
+    @Autowired
+    private List<ShowSource> showSources;
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
@@ -52,6 +61,15 @@ class ApplicationContextSmokeTest {
     @DisplayName("the full application context starts")
     void contextLoads() {
         // Fails if any bean (e.g. the RestClient services) can't be wired -- the #14 regression guard.
+    }
+
+    @Test
+    @DisplayName("ShowSource beans are injected in the expected @Order: Ticketmaster, Bandsintown, band-site")
+    void showSourcesAreInjectedInExpectedOrder() {
+        assertThat(showSources).hasSize(3);
+        assertThat(showSources.get(0)).isInstanceOf(TicketmasterShowSource.class);
+        assertThat(showSources.get(1)).isInstanceOf(BandsintownShowSource.class);
+        assertThat(showSources.get(2)).isInstanceOf(BandSiteShowSource.class);
     }
 
     @Test
