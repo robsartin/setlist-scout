@@ -130,7 +130,10 @@ public class TicketmasterService {
 
         String url = (String) event.get("url");
 
-        return new Show(artistName, eventDateTime, venueName, venueCity, price, "ticketmaster", url);
+        String eventName = (String) event.get("name");
+        String label = (eventName != null && !eventName.isBlank()) ? eventName : artistName;
+
+        return new Show(label, eventDateTime, venueName, venueCity, price, "ticketmaster", url);
     }
 
     /**

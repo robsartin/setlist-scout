@@ -196,6 +196,63 @@ class TicketmasterServiceTest {
     }
 
     @Test
+    @DisplayName("should label the show with the event's real name, not the search keyword")
+    void labelsShowWithEventNameNotSearchKeyword() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {
+                          "_embedded": {
+                            "events": [
+                              {
+                                "name": "The Damn Torpedoes - Tom Petty Tribute",
+                                "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                                "_embedded": {
+                                  "venues": [{"name": "Moody Center", "city": {"name": "Austin"}}],
+                                  "attractions": [{"name": "Tom Petty"}]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                        """));
+
+        List<Show> shows = service.searchShows("Tom Petty", "78701", 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("The Damn Torpedoes - Tom Petty Tribute");
+    }
+
+    @Test
+    @DisplayName("should fall back to the search keyword when the event has no name")
+    void fallsBackToKeywordWhenEventNameMissing() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {
+                          "_embedded": {
+                            "events": [
+                              {
+                                "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                                "_embedded": {
+                                  "venues": [{"name": "Moody Center", "city": {"name": "Austin"}}],
+                                  "attractions": [{"name": "Tom Petty"}]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                        """));
+
+        List<Show> shows = service.searchShows("Tom Petty", "78701", 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Tom Petty");
+    }
+
+    @Test
     @DisplayName("should send the ZIP as postalCode plus the radius")
     void shouldSendPostalCodeAndRadius() throws InterruptedException {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
