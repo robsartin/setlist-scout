@@ -16,7 +16,7 @@ provides durability across restarts.
 ## Decision
 
 Adopt **Spring Modulith application events** with a **durable JPA event-publication
-registry** (`spring-modulith-starter-events-jpa`). The `event_publication` table is
+registry** (`spring-modulith-starter-jpa`). The `event_publication` table is
 created by Flyway migration `V4__event_publication.sql`, consistent with ADR-0020's
 principle that Flyway owns schema evolution and respects `ddl-auto=validate`.
 

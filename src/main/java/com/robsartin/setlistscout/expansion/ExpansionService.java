@@ -17,7 +17,7 @@ import java.util.function.ToIntBiFunction;
 /**
  * Runs the expansion pipeline against every SEED/APPROVED artist and stores newly
  * discovered names as PENDING_REVIEW. Nothing here touches show search directly --
- * a human has to approve a PENDING_REVIEW artist first (see ArtistController).
+ * a human has to approve a PENDING_REVIEW artist first (see ReviewController).
  */
 @Service
 public class ExpansionService {
