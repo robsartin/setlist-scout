@@ -114,6 +114,10 @@ public class BandsintownService {
 
         String url = (String) event.get("url");
 
-        return new Show(artistName, eventDateTime, venueName, venueCity, null, "bandsintown", url);
+        List<String> lineup = (List<String>) event.get("lineup");
+        String label = (lineup != null && !lineup.isEmpty() && lineup.get(0) instanceof String headliner
+                && !headliner.isBlank()) ? headliner : artistName;
+
+        return new Show(label, eventDateTime, venueName, venueCity, null, "bandsintown", url);
     }
 }

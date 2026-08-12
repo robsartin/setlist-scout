@@ -110,6 +110,38 @@ class BandsintownServiceTest {
     }
 
     @Test
+    @DisplayName("should label the show with the lineup headliner, not the search keyword")
+    void labelsShowWithLineupHeadlinerNotSearchKeyword() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2026-06-01T20:00:00", "lineup": ["The Damn Torpedoes"],
+                   "venue": {"name": "Moody Center", "latitude": "30.2814", "longitude": "-97.7320"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Tom Petty", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("The Damn Torpedoes");
+    }
+
+    @Test
+    @DisplayName("falls back to the search keyword when lineup is missing")
+    void fallsBackToKeywordWhenLineupMissing() {
+        server.enqueue(jsonEvents("""
+                [
+                  {"datetime": "2026-06-01T20:00:00",
+                   "venue": {"name": "Moody Center", "latitude": "30.2814", "longitude": "-97.7320"}}
+                ]
+                """));
+
+        List<Show> shows = service.searchShows("Tom Petty", LAT, LON, RADIUS, START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Tom Petty");
+    }
+
+    @Test
     @DisplayName("URL-encodes spaces in the artist name in the request path")
     void encodesArtistNameInPath() throws InterruptedException {
         server.enqueue(jsonEvents("[]"));
