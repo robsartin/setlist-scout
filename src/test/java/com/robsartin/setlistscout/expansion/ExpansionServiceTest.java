@@ -9,6 +9,7 @@ import com.robsartin.setlistscout.expansion.source.LastFmSimilarSource;
 import com.robsartin.setlistscout.expansion.source.MusicBrainzRelationSource;
 import com.robsartin.setlistscout.expansion.source.SimilarLlmSource;
 import com.robsartin.setlistscout.expansion.source.TributeLlmSource;
+import com.robsartin.setlistscout.shared.events.CandidateDiscovered;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,13 +17,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +37,7 @@ class ExpansionServiceTest {
     @Mock private LastFmSimilarSource lastFmSource;
     @Mock private SimilarLlmSource similarLlmSource;
     @Mock private TributeLlmSource tributeSource;
+    @Mock private ApplicationEventPublisher publisher;
 
     private ExpansionService expansionService;
 
@@ -43,7 +46,8 @@ class ExpansionServiceTest {
     @BeforeEach
     void setUp() {
         expansionService = new ExpansionService(
-                artistRepository, musicBrainzSource, discogsSource, lastFmSource, similarLlmSource, tributeSource);
+                artistRepository, musicBrainzSource, discogsSource, lastFmSource, similarLlmSource, tributeSource,
+                publisher);
     }
 
     private static Artist seedArtist(String name) {
@@ -73,55 +77,24 @@ class ExpansionServiceTest {
     }
 
     @Test
-    @DisplayName("should save a new member-relation artist with the MEMBER_EXPANSION source")
-    void shouldSaveNewMemberRelation() {
+    @DisplayName("should publish a CandidateDiscovered event for a new member-relation artist")
+    void shouldPublishMemberRelation() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
         when(musicBrainzSource.related("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
         when(discogsSource.related("Dawes")).thenReturn(List.of());
         when(lastFmSource.related(any())).thenReturn(List.of());
         when(similarLlmSource.related(any())).thenReturn(List.of());
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Taylor Goldsmith")).thenReturn(false);
 
         expansionService.expandAll(OWNER);
 
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository).save(captor.capture());
-        Artist saved = captor.getValue();
-        assertThat(saved.getName()).isEqualTo("Taylor Goldsmith");
-        assertThat(saved.getOwner()).isEqualTo(OWNER);
-        assertThat(saved.getSource()).isEqualTo(ArtistSource.MEMBER_EXPANSION);
-        assertThat(saved.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
-        assertThat(saved.getDiscoveredVia()).isEqualTo("Dawes");
-        assertThat(saved.getNote()).isEqualTo("member/lineup relation of Dawes");
-    }
-
-    @Test
-    @DisplayName("should not save a member relation that is already tracked")
-    void shouldSkipExistingMemberRelation() {
-        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainzSource.related("Dawes")).thenReturn(List.of("Taylor Goldsmith"));
-        when(discogsSource.related("Dawes")).thenReturn(List.of());
-        when(lastFmSource.related(any())).thenReturn(List.of());
-        when(similarLlmSource.related(any())).thenReturn(List.of());
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Taylor Goldsmith")).thenReturn(true);
-
-        expansionService.expandAll(OWNER);
-
-        verify(artistRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("should skip blank names returned by an expansion source")
-    void shouldSkipBlankNames() {
-        when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Dawes")));
-        when(musicBrainzSource.related("Dawes")).thenReturn(List.of("", "  "));
-        when(discogsSource.related("Dawes")).thenReturn(List.of());
-        when(lastFmSource.related(any())).thenReturn(List.of());
-        when(similarLlmSource.related(any())).thenReturn(List.of());
-
-        expansionService.expandAll(OWNER);
-
-        verify(artistRepository, never()).save(any());
+        ArgumentCaptor<CandidateDiscovered> captor = ArgumentCaptor.forClass(CandidateDiscovered.class);
+        verify(publisher).publishEvent(captor.capture());
+        CandidateDiscovered published = captor.getValue();
+        assertThat(published.owner()).isEqualTo(OWNER);
+        assertThat(published.name()).isEqualTo("Taylor Goldsmith");
+        assertThat(published.sourceType()).isEqualTo(ArtistSource.MEMBER_EXPANSION.name());
+        assertThat(published.discoveredVia()).isEqualTo("Dawes");
+        assertThat(published.note()).isEqualTo("member/lineup relation of Dawes");
     }
 
     @Test
@@ -132,15 +105,14 @@ class ExpansionServiceTest {
         when(discogsSource.related(any())).thenReturn(List.of());
         when(lastFmSource.related("Dawes")).thenReturn(List.of("Nickel Creek"));
         when(similarLlmSource.related("Dawes")).thenReturn(List.of("Nickel Creek"));
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
         expansionService.expandAll(OWNER);
 
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository).save(captor.capture());
-        Artist saved = captor.getValue();
-        assertThat(saved.getSource()).isEqualTo(ArtistSource.SIMILAR_EXPANSION);
-        assertThat(saved.getNote()).isEqualTo("similar to Dawes (confirmed by Last.fm + LLM)");
+        ArgumentCaptor<CandidateDiscovered> captor = ArgumentCaptor.forClass(CandidateDiscovered.class);
+        verify(publisher).publishEvent(captor.capture());
+        CandidateDiscovered published = captor.getValue();
+        assertThat(published.sourceType()).isEqualTo(ArtistSource.SIMILAR_EXPANSION.name());
+        assertThat(published.note()).isEqualTo("similar to Dawes (confirmed by Last.fm + LLM)");
     }
 
     @Test
@@ -151,97 +123,33 @@ class ExpansionServiceTest {
         when(discogsSource.related(any())).thenReturn(List.of());
         when(lastFmSource.related("Dawes")).thenReturn(List.of("Nickel Creek"));
         when(similarLlmSource.related("Dawes")).thenReturn(List.of());
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
 
         expansionService.expandAll(OWNER);
 
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository).save(captor.capture());
-        assertThat(captor.getValue().getNote()).isEqualTo("similar to Dawes (single-source match)");
+        ArgumentCaptor<CandidateDiscovered> captor = ArgumentCaptor.forClass(CandidateDiscovered.class);
+        verify(publisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().note()).isEqualTo("similar to Dawes (single-source match)");
     }
 
     @Test
-    @DisplayName("should save a tribute act for a SEED base with the TRIBUTE_EXPANSION source")
-    void shouldSaveTributeForSeed() {
+    @DisplayName("should publish a tribute act for a SEED base with the TRIBUTE_EXPANSION source")
+    void shouldPublishTributeForSeed() {
         when(artistRepository.findByOwnerAndStatusIn(any(), any())).thenReturn(List.of(seedArtist("Iron Maiden")));
         when(musicBrainzSource.related(any())).thenReturn(List.of());
         when(discogsSource.related(any())).thenReturn(List.of());
         when(lastFmSource.related(any())).thenReturn(List.of());
         when(similarLlmSource.related(any())).thenReturn(List.of());
         when(tributeSource.related("Iron Maiden")).thenReturn(List.of("The Iron Maidens"));
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "The Iron Maidens")).thenReturn(false);
 
         expansionService.expandAll(OWNER);
 
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository).save(captor.capture());
-        Artist saved = captor.getValue();
-        assertThat(saved.getName()).isEqualTo("The Iron Maidens");
-        assertThat(saved.getSource()).isEqualTo(ArtistSource.TRIBUTE_EXPANSION);
-        assertThat(saved.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
-        assertThat(saved.getDiscoveredVia()).isEqualTo("Iron Maiden");
-        assertThat(saved.getNote()).isEqualTo("tribute/cover act for Iron Maiden");
-    }
-
-    @Test
-    @DisplayName("should skip a prose/refusal response from an LLM expansion source")
-    void shouldSkipProseRefusalResponse() {
-        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
-                .thenReturn(List.of(seedArtist("Brandi Carlile")));
-        when(musicBrainzSource.related(any())).thenReturn(List.of());
-        when(discogsSource.related(any())).thenReturn(List.of());
-        when(lastFmSource.related(any())).thenReturn(List.of());
-        when(similarLlmSource.related(any())).thenReturn(List.of());
-        when(tributeSource.related("Brandi Carlile")).thenReturn(List.of(
-                "I don't know of any well-known tribute or cover bands specifically dedicated to "
-                        + "Brandi Carlile's music."));
-
-        expansionService.expandAll(OWNER);
-
-        verify(artistRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("should save legitimate punctuated band names, not just plain ones")
-    void shouldSavePunctuatedArtistNames() {
-        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
-                .thenReturn(List.of(seedArtist("Talking Heads")));
-        when(musicBrainzSource.related(any())).thenReturn(List.of());
-        when(discogsSource.related(any())).thenReturn(List.of());
-        when(lastFmSource.related(any())).thenReturn(List.of());
-        when(similarLlmSource.related("Talking Heads"))
-                .thenReturn(List.of("Panic! at the Disco", "St. Vincent"));
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(any(), any())).thenReturn(false);
-
-        expansionService.expandAll(OWNER);
-
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository, org.mockito.Mockito.times(2)).save(captor.capture());
-        assertThat(captor.getAllValues())
-                .extracting(Artist::getName)
-                .containsExactlyInAnyOrder("Panic! at the Disco", "St. Vincent");
-    }
-
-    @Test
-    @DisplayName("should still save a plausible short tribute name alongside a rejected refusal")
-    void shouldSaveNormalNameEvenWhenAnotherIsRefusal() {
-        when(artistRepository.findByOwnerAndStatusIn(any(), any()))
-                .thenReturn(List.of(seedArtist("Iron Maiden")));
-        when(musicBrainzSource.related(any())).thenReturn(List.of());
-        when(discogsSource.related(any())).thenReturn(List.of());
-        when(lastFmSource.related(any())).thenReturn(List.of());
-        when(similarLlmSource.related(any())).thenReturn(List.of());
-        when(tributeSource.related("Iron Maiden")).thenReturn(List.of(
-                "The Iron Maidens",
-                "I don't know of any well-known tribute or cover bands specifically dedicated to "
-                        + "Iron Maiden's music."));
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "The Iron Maidens")).thenReturn(false);
-
-        expansionService.expandAll(OWNER);
-
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository, org.mockito.Mockito.times(1)).save(captor.capture());
-        assertThat(captor.getValue().getName()).isEqualTo("The Iron Maidens");
+        ArgumentCaptor<CandidateDiscovered> captor = ArgumentCaptor.forClass(CandidateDiscovered.class);
+        verify(publisher).publishEvent(captor.capture());
+        CandidateDiscovered published = captor.getValue();
+        assertThat(published.name()).isEqualTo("The Iron Maidens");
+        assertThat(published.sourceType()).isEqualTo(ArtistSource.TRIBUTE_EXPANSION.name());
+        assertThat(published.discoveredVia()).isEqualTo("Iron Maiden");
+        assertThat(published.note()).isEqualTo("tribute/cover act for Iron Maiden");
     }
 
     @Test
@@ -264,14 +172,12 @@ class ExpansionServiceTest {
         when(similarLlmSource.related("Second")).thenReturn(List.of());
         when(tributeSource.related("Second")).thenReturn(List.of("TributeSecond"));
 
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(eq(OWNER), any())).thenReturn(false);
-
         expansionService.expandAll(OWNER);
 
-        ArgumentCaptor<Artist> captor = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository, org.mockito.Mockito.times(4)).save(captor.capture());
+        ArgumentCaptor<CandidateDiscovered> captor = ArgumentCaptor.forClass(CandidateDiscovered.class);
+        verify(publisher, times(4)).publishEvent(captor.capture());
         assertThat(captor.getAllValues())
-                .extracting(Artist::getName)
+                .extracting(CandidateDiscovered::name)
                 .containsExactlyInAnyOrder("SimilarFirst", "TributeFirst", "MemberSecond", "TributeSecond");
     }
 
