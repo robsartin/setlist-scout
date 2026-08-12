@@ -36,7 +36,7 @@ class ArtistControllerTest {
         currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
         // Real seed service over the mocked repo so add/upload still assert on repository interactions.
-        ArtistSeedService seedService = new ArtistSeedService(artistRepository);
+        ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class));
         controller = new ArtistController(artistRepository, currentUser, seedService);
     }
 

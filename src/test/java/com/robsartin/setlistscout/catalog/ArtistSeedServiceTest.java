@@ -16,12 +16,14 @@ class ArtistSeedServiceTest {
     private static final String OWNER = "rob@example.com";
 
     private ArtistRepository artistRepository;
+    private ArtistActivationService activationService;
     private ArtistSeedService service;
 
     @BeforeEach
     void setUp() {
         artistRepository = mock(ArtistRepository.class);
-        service = new ArtistSeedService(artistRepository);
+        activationService = mock(ArtistActivationService.class);
+        service = new ArtistSeedService(artistRepository, activationService);
     }
 
     @Test
@@ -37,6 +39,7 @@ class ArtistSeedServiceTest {
         assertThat(saved.getValue().getOwner()).isEqualTo(OWNER);
         assertThat(saved.getValue().getSource()).isEqualTo(ArtistSource.SEED_LIST);
         assertThat(saved.getValue().getStatus()).isEqualTo(ArtistStatus.SEED);
+        verify(activationService).onSeedCreated(saved.getValue());
     }
 
     @Test
@@ -46,6 +49,7 @@ class ArtistSeedServiceTest {
         assertThat(service.addSeedIfNew(OWNER, null)).isFalse();
         assertThat(service.addSeedIfNew(OWNER, "# a comment")).isFalse();
         verify(artistRepository, never()).save(any(Artist.class));
+        verify(activationService, never()).onSeedCreated(any(Artist.class));
     }
 
     @Test
@@ -54,5 +58,6 @@ class ArtistSeedServiceTest {
 
         assertThat(service.addSeedIfNew(OWNER, "Dawes")).isFalse();
         verify(artistRepository, never()).save(any(Artist.class));
+        verify(activationService, never()).onSeedCreated(any(Artist.class));
     }
 }

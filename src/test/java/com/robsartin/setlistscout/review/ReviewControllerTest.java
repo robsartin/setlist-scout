@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.review;
 
 import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
@@ -14,9 +15,10 @@ import org.springframework.ui.ConcurrentModel;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,6 +31,7 @@ class ReviewControllerTest {
     private ArtistRepository artistRepository;
     private ExpansionService expansionService;
     private CurrentUser currentUser;
+    private ArtistActivationService activationService;
     private ReviewController controller;
 
     @BeforeEach
@@ -36,53 +39,49 @@ class ReviewControllerTest {
         artistRepository = mock(ArtistRepository.class);
         expansionService = mock(ExpansionService.class);
         currentUser = mock(CurrentUser.class);
+        activationService = mock(ArtistActivationService.class);
         when(currentUser.email()).thenReturn(OWNER);
-        controller = new ReviewController(artistRepository, expansionService, currentUser);
+        controller = new ReviewController(artistRepository, expansionService, currentUser, activationService);
     }
 
-    private static Artist pending(String name, ArtistSource source) {
-        return new Artist(name, source, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", "note");
+    private static Artist pending(String name, ArtistSource source, long id) {
+        Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", "note");
+        ReflectionTestUtils.setField(artist, "id", id);
+        return artist;
     }
 
     @Test
-    @DisplayName("approveAllPending approves every pending artist")
+    @DisplayName("approveAllPending delegates to the activation service for every pending artist")
     void approveAllPendingApprovesEveryone() {
-        Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION);
-        Artist similar = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
+        Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 1L);
+        Artist similar = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 2L);
         when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(tribute, similar));
 
         controller.approveAllPending(null, new ConcurrentModel());
 
-        assertThat(tribute.getStatus()).isEqualTo(ArtistStatus.APPROVED);
-        assertThat(similar.getStatus()).isEqualTo(ArtistStatus.APPROVED);
-        verify(artistRepository).save(tribute);
-        verify(artistRepository).save(similar);
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
+        verify(activationService).changeStatus(2L, OWNER, ArtistStatus.APPROVED);
     }
 
     @Test
-    @DisplayName("rejectAllPending rejects every pending artist")
+    @DisplayName("rejectAllPending delegates to the activation service for every pending artist")
     void rejectAllPendingRejectsEveryone() {
-        Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION);
-        Artist similar = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
+        Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 1L);
+        Artist similar = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 2L);
         when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(tribute, similar));
 
         controller.rejectAllPending(null, new ConcurrentModel());
 
-        assertThat(tribute.getStatus()).isEqualTo(ArtistStatus.REJECTED);
-        assertThat(similar.getStatus()).isEqualTo(ArtistStatus.REJECTED);
-        verify(artistRepository).save(tribute);
-        verify(artistRepository).save(similar);
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.REJECTED);
+        verify(activationService).changeStatus(2L, OWNER, ArtistStatus.REJECTED);
     }
 
     @Test
-    @DisplayName("review applies accept/reject/later across the pending batch in one submit")
+    @DisplayName("review delegates accept/reject decisions to the activation service and skips later")
     void reviewAppliesEachDecision() {
-        Artist accept = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION);
-        Artist reject = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION);
-        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        ReflectionTestUtils.setField(accept, "id", 1L);
-        ReflectionTestUtils.setField(reject, "id", 2L);
-        ReflectionTestUtils.setField(later, "id", 3L);
+        Artist accept = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
+        Artist reject = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 2L);
+        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 3L);
         when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
                 .thenReturn(List.of(accept, reject, later));
 
@@ -92,52 +91,38 @@ class ReviewControllerTest {
                 "decision-3", "later"));
 
         assertThat(view).isEqualTo("redirect:/artists");
-        assertThat(accept.getStatus()).isEqualTo(ArtistStatus.APPROVED);
-        assertThat(reject.getStatus()).isEqualTo(ArtistStatus.REJECTED);
-        assertThat(later.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
-        verify(artistRepository).save(accept);
-        verify(artistRepository).save(reject);
-        verify(artistRepository, never()).save(later);
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
+        verify(activationService).changeStatus(2L, OWNER, ArtistStatus.REJECTED);
+        verify(activationService, never()).changeStatus(eq(3L), any(), any());
     }
 
     @Test
     @DisplayName("an artist with no submitted decision defaults to Later (left pending)")
     void reviewLeavesUndecidedPending() {
-        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION);
-        ReflectionTestUtils.setField(later, "id", 7L);
+        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 7L);
         when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
                 .thenReturn(List.of(later));
 
         controller.review(Map.of()); // nothing submitted for this artist
 
-        assertThat(later.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
-        verify(artistRepository, never()).save(later);
+        verify(activationService, never()).changeStatus(eq(7L), any(), any());
     }
 
     @Test
-    @DisplayName("unreject moves a rejected artist back to pending review")
+    @DisplayName("unreject delegates to the activation service to move a rejected artist back to pending")
     void unrejectMovesBackToPending() {
-        Artist a = new Artist("Jackson Browne", ArtistSource.SIMILAR_EXPANSION,
-                ArtistStatus.REJECTED, "via", "note");
-        when(artistRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(a));
-
         String view = controller.unreject(9L);
 
         assertThat(view).isEqualTo("redirect:/artists");
-        assertThat(a.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
-        verify(artistRepository).save(a);
+        verify(activationService).changeStatus(9L, OWNER, ArtistStatus.PENDING_REVIEW);
     }
 
     @Test
-    @DisplayName("remove takes an active artist off the list by rejecting it")
+    @DisplayName("remove delegates to the activation service to reject an active artist")
     void removeRejectsActiveArtist() {
-        Artist a = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
-        when(artistRepository.findByIdAndOwner(4L, OWNER)).thenReturn(Optional.of(a));
-
         String view = controller.remove(4L);
 
         assertThat(view).isEqualTo("redirect:/artists");
-        assertThat(a.getStatus()).isEqualTo(ArtistStatus.REJECTED);
-        verify(artistRepository).save(a);
+        verify(activationService).changeStatus(4L, OWNER, ArtistStatus.REJECTED);
     }
 }
