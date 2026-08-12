@@ -45,6 +45,7 @@ server:
 
 setlistscout:
   scan-interval-ms: ${SCAN_INTERVAL_MS:259200000} # every 3 days by default -- "every few days"
+  scan-initial-delay-ms: ${SCAN_INITIAL_DELAY_MS:259200000} # first run one interval out, not at boot -- avoids a full scan on every deploy
   auth:
     allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
     seed-owner: ${SEED_OWNER:rob.sartin@gmail.com}

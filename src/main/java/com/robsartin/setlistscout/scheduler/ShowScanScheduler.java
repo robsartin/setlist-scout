@@ -28,7 +28,11 @@ public class ShowScanScheduler {
 
     // Every 3 days. Interval is in application.yml (setlistscout.scan-interval-ms) --
     // change it there without touching code. Runs per user (each owner with a settings row).
-    @Scheduled(fixedRateString = "${setlistscout.scan-interval-ms:259200000}")
+    // initialDelayString keeps the first run one interval out instead of firing at startup --
+    // fixedRate with no initialDelay runs immediately on boot, so every deploy would otherwise
+    // kick off a full scan + expansion of every owner.
+    @Scheduled(fixedRateString = "${setlistscout.scan-interval-ms:259200000}",
+               initialDelayString = "${setlistscout.scan-initial-delay-ms:259200000}")
     public void scan() {
         for (SearchSettings settings : settingsRepository.findAll()) {
             String owner = settings.getOwner();
