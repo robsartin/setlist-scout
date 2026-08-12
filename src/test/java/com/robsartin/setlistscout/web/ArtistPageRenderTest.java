@@ -1,9 +1,9 @@
 package com.robsartin.setlistscout.web;
 
-import com.robsartin.setlistscout.domain.Artist;
-import com.robsartin.setlistscout.domain.ArtistSource;
-import com.robsartin.setlistscout.domain.ArtistStatus;
-import com.robsartin.setlistscout.repository.ArtistRepository;
+import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;

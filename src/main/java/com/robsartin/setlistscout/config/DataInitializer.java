@@ -1,8 +1,8 @@
 package com.robsartin.setlistscout.config;
 
-import com.robsartin.setlistscout.domain.ArtistStatus;
-import com.robsartin.setlistscout.repository.ArtistRepository;
-import com.robsartin.setlistscout.service.ArtistSeedService;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSeedService;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SearchSettingsRepository;
 import com.robsartin.setlistscout.settings.GeocodingService;

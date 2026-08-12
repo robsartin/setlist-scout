@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.domain;
+package com.robsartin.setlistscout.catalog;
 
 public enum ArtistStatus {
     SEED,            // from the original hand-curated list -- always active

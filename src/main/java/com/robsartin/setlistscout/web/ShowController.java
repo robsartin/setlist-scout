@@ -1,9 +1,9 @@
 package com.robsartin.setlistscout.web;
 
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.config.AppProperties;
-import com.robsartin.setlistscout.domain.ArtistSource;
 import com.robsartin.setlistscout.domain.Show;
-import com.robsartin.setlistscout.repository.ArtistRepository;
 import com.robsartin.setlistscout.repository.ShowRepository;
 import com.robsartin.setlistscout.service.AsyncScanRunner;
 import com.robsartin.setlistscout.settings.SearchSettings;

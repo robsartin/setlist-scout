@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.domain;
+package com.robsartin.setlistscout.catalog;
 
 import jakarta.persistence.*;
 import java.time.Instant;

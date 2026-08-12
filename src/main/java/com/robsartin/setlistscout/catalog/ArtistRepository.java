@@ -1,8 +1,5 @@
-package com.robsartin.setlistscout.repository;
+package com.robsartin.setlistscout.catalog;
 
-import com.robsartin.setlistscout.domain.Artist;
-import com.robsartin.setlistscout.domain.ArtistSource;
-import com.robsartin.setlistscout.domain.ArtistStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

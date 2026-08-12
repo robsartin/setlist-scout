@@ -1,9 +1,9 @@
 package com.robsartin.setlistscout.service;
 
-import com.robsartin.setlistscout.domain.Artist;
-import com.robsartin.setlistscout.domain.ArtistSource;
-import com.robsartin.setlistscout.domain.ArtistStatus;
-import com.robsartin.setlistscout.repository.ArtistRepository;
+import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.shared.MusicBrainzService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

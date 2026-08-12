@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.domain;
+package com.robsartin.setlistscout.catalog;
 
 public enum ArtistSource {
     SEED_LIST,           // hand-entered starting list

@@ -1,10 +1,10 @@
 package com.robsartin.setlistscout.web;
 
-import com.robsartin.setlistscout.domain.Artist;
-import com.robsartin.setlistscout.domain.ArtistSource;
-import com.robsartin.setlistscout.domain.ArtistStatus;
-import com.robsartin.setlistscout.repository.ArtistRepository;
-import com.robsartin.setlistscout.service.ArtistSeedService;
+import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSeedService;
+import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.service.ExpansionService;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.stereotype.Controller;
