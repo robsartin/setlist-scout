@@ -18,9 +18,9 @@ the Testcontainers boot test (which confirms the app still boots with each move)
 
 - [x] **Add Spring Modulith deps** — `spring-modulith-starter-core` (+ `-starter-test`), BOM 1.3.12
       in `build.gradle.kts`. Compiles + tests green. (commit on branch `modulith-redesign`)
-- [ ] **`shared` module** — move MusicBrainz client, `CurrentUser`, the `observability` package into
-      `com.robsartin.setlistscout.shared.*`. It's the common leaf everyone may depend on. Fix imports;
-      green.
+- [x] **`shared` module** — moved MusicBrainz client, `CurrentUser`, the `observability` package into
+      `com.robsartin.setlistscout.shared.*`; imports fixed, green. (commit cea7e63; also moved
+      MusicBrainzServiceTest + widened two test-seam visibilities to public.)
 - [ ] **`settings` module** — move `SearchSettings`, `GeocodingService` (+ its `GeoResult`), and a new
       `SettingsController` (extract the `POST /settings` handler out of `ShowController`) into
       `…settings.*`. Green.
