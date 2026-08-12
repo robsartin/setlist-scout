@@ -1,4 +1,4 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.config.AppProperties;
 import org.slf4j.Logger;

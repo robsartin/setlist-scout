@@ -1,5 +1,6 @@
-package com.robsartin.setlistscout.service;
+package com.robsartin.setlistscout.expansion;
 
+import com.robsartin.setlistscout.service.TestAppProperties;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;

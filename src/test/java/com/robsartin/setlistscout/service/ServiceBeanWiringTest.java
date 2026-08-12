@@ -1,6 +1,10 @@
 package com.robsartin.setlistscout.service;
 
 import com.robsartin.setlistscout.config.AppProperties;
+import com.robsartin.setlistscout.expansion.DiscogsService;
+import com.robsartin.setlistscout.expansion.LastFmService;
+import com.robsartin.setlistscout.expansion.SimilarArtistLlmService;
+import com.robsartin.setlistscout.expansion.TributeLlmService;
 import com.robsartin.setlistscout.shared.MusicBrainzService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
