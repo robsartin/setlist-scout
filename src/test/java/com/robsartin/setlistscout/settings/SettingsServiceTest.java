@@ -1,14 +1,18 @@
 package com.robsartin.setlistscout.settings;
 
 import com.robsartin.setlistscout.AppProperties;
+import com.robsartin.setlistscout.shared.events.SettingsChanged;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +22,7 @@ class SettingsServiceTest {
 
     private SearchSettingsRepository settingsRepository;
     private GeocodingService geocodingService;
+    private ApplicationEventPublisher publisher;
     private SettingsService settingsService;
 
     @BeforeEach
@@ -25,7 +30,8 @@ class SettingsServiceTest {
         settingsRepository = mock(SearchSettingsRepository.class);
         geocodingService = mock(GeocodingService.class);
         AppProperties appProperties = mock(AppProperties.class);
-        settingsService = new SettingsService(settingsRepository, appProperties, geocodingService);
+        publisher = mock(ApplicationEventPublisher.class);
+        settingsService = new SettingsService(settingsRepository, appProperties, geocodingService, publisher);
     }
 
     @Test
@@ -47,6 +53,7 @@ class SettingsServiceTest {
         assertThat(settings.getRadiusMiles()).isEqualTo(50);
         assertThat(settings.getMonthsAhead()).isEqualTo(6);
         verify(settingsRepository).save(settings);
+        verify(publisher).publishEvent(new SettingsChanged(OWNER));
     }
 
     @Test
@@ -64,5 +71,17 @@ class SettingsServiceTest {
         assertThat(settings.getLatitude()).isEqualTo(30.0);
         assertThat(settings.getLongitude()).isEqualTo(-97.0);
         verify(settingsRepository).save(settings);
+        verify(publisher).publishEvent(new SettingsChanged(OWNER));
+    }
+
+    @Test
+    @DisplayName("getOrCreateSettings does not publish SettingsChanged")
+    void getOrCreateSettingsDoesNotPublish() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+
+        settingsService.getOrCreateSettings(OWNER);
+
+        verify(publisher, never()).publishEvent(any());
     }
 }
