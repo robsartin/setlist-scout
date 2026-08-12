@@ -4,7 +4,11 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
-import com.robsartin.setlistscout.shared.MusicBrainzService;
+import com.robsartin.setlistscout.expansion.source.DiscogsRelationSource;
+import com.robsartin.setlistscout.expansion.source.LastFmSimilarSource;
+import com.robsartin.setlistscout.expansion.source.MusicBrainzRelationSource;
+import com.robsartin.setlistscout.expansion.source.SimilarLlmSource;
+import com.robsartin.setlistscout.expansion.source.TributeLlmSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -31,24 +35,24 @@ public class ExpansionService {
     private static final int MAX_NAME_WORDS = 8;
 
     private final ArtistRepository artistRepository;
-    private final MusicBrainzService musicBrainz;
-    private final DiscogsService discogs;
-    private final LastFmService lastFm;
-    private final SimilarArtistLlmService similarArtistLlm;
-    private final TributeLlmService tributeLlm;
+    private final MusicBrainzRelationSource musicBrainzSource;
+    private final DiscogsRelationSource discogsSource;
+    private final LastFmSimilarSource lastFmSource;
+    private final SimilarLlmSource similarLlmSource;
+    private final TributeLlmSource tributeSource;
 
     public ExpansionService(ArtistRepository artistRepository,
-                             MusicBrainzService musicBrainz,
-                             DiscogsService discogs,
-                             LastFmService lastFm,
-                             SimilarArtistLlmService similarArtistLlm,
-                             TributeLlmService tributeLlm) {
+                             MusicBrainzRelationSource musicBrainzSource,
+                             DiscogsRelationSource discogsSource,
+                             LastFmSimilarSource lastFmSource,
+                             SimilarLlmSource similarLlmSource,
+                             TributeLlmSource tributeSource) {
         this.artistRepository = artistRepository;
-        this.musicBrainz = musicBrainz;
-        this.discogs = discogs;
-        this.lastFm = lastFm;
-        this.similarArtistLlm = similarArtistLlm;
-        this.tributeLlm = tributeLlm;
+        this.musicBrainzSource = musicBrainzSource;
+        this.discogsSource = discogsSource;
+        this.lastFmSource = lastFmSource;
+        this.similarLlmSource = similarLlmSource;
+        this.tributeSource = tributeSource;
     }
 
     public void expandAll(String owner) {
@@ -94,8 +98,8 @@ public class ExpansionService {
 
     private int expandMemberRelations(String owner, Artist base) {
         Set<String> found = new HashSet<>();
-        found.addAll(musicBrainz.findRelatedArtists(base.getName()));
-        found.addAll(discogs.findRelatedArtists(base.getName()));
+        found.addAll(musicBrainzSource.related(base.getName()));
+        found.addAll(discogsSource.related(base.getName()));
 
         int added = 0;
         for (String name : found) {
@@ -109,8 +113,8 @@ public class ExpansionService {
     }
 
     private int expandSimilarArtists(String owner, Artist base) {
-        Set<String> lastFmResults = new HashSet<>(lastFm.findSimilarArtists(base.getName(), 8));
-        Set<String> llmResults = new HashSet<>(similarArtistLlm.findSimilarArtists(base.getName(), 8));
+        Set<String> lastFmResults = new HashSet<>(lastFmSource.related(base.getName()));
+        Set<String> llmResults = new HashSet<>(similarLlmSource.related(base.getName()));
 
         Set<String> all = new HashSet<>();
         all.addAll(lastFmResults);
@@ -132,7 +136,7 @@ public class ExpansionService {
 
     private int expandTributeBands(String owner, Artist base) {
         int added = 0;
-        for (String name : tributeLlm.findTributeBands(base.getName(), 5)) {
+        for (String name : tributeSource.related(base.getName())) {
             if (saveIfNew(owner, name, ArtistSource.TRIBUTE_EXPANSION, base.getName(),
                     "tribute/cover act for " + base.getName())) {
                 added++;
