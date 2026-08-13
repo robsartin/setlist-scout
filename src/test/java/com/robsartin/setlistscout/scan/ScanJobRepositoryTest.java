@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.shared.JobStatus;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +60,9 @@ class ScanJobRepositoryTest {
     @Autowired
     private ScanJobRepository scanJobRepository;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     /**
      * claimDue has no owner filter (it's a poller-wide claim, not scoped to one caller), so a
      * stray due row left behind by another test in this class would silently pollute the
@@ -95,6 +100,31 @@ class ScanJobRepositoryTest {
         assertThat(loaded.getNextDueAt()).isEqualTo(nextDueAt);
         assertThat(loaded.getClaimedAt()).isEqualTo(job.getClaimedAt());
         assertThat(loaded.getLocationFingerprint()).isEqualTo("abc123");
+    }
+
+    @Test
+    @DisplayName("a stale save is rejected once another writer has bumped the version")
+    void staleSaveThrowsOptimisticLockingFailure() {
+        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.SCHEDULED, 0,
+                Instant.now(), "fp-1");
+        job.setOwner(OWNER);
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+        scanJobRepository.flush();
+
+        // Two independent loads of the same row (simulating poller-in-flight vs. a SettingsChanged re-due).
+        ScanJob loadA = scanJobRepository.findById(id).orElseThrow();
+        ScanJob loadB = scanJobRepository.findById(id).orElseThrow();
+        entityManager.detach(loadA);
+        entityManager.detach(loadB);
+
+        // Writer B commits first -> version bumps in the DB.
+        loadB.setNextDueAt(Instant.now().plusSeconds(3600));
+        scanJobRepository.saveAndFlush(loadB);
+
+        // Writer A now holds a stale version -> its save must be rejected, not silently win.
+        loadA.setNextDueAt(Instant.now().plusSeconds(999));
+        assertThatThrownBy(() -> scanJobRepository.saveAndFlush(loadA))
+                .isInstanceOf(org.springframework.orm.ObjectOptimisticLockingFailureException.class);
     }
 
     @Test
