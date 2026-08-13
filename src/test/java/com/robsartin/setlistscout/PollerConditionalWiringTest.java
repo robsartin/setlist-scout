@@ -39,7 +39,7 @@ class PollerConditionalWiringTest {
             .withBean(ArtistRepository.class, () -> mock(ArtistRepository.class))
             .withBean(PollerProperties.class, () -> new PollerProperties(
                     20, 20, Duration.ofMinutes(5).toMillis(),
-                    Duration.ofDays(14), Duration.ofDays(28), 6, Map.of()))
+                    Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(), true, Duration.ofHours(2)))
             // withUserConfiguration(ScanPoller.class, ...) or @Import(ScanPoller.class, ...) both
             // try to treat the imported class as a @Configuration instance the moment its
             // condition passes, which fails ("no default constructor found") since ScanPoller is

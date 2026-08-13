@@ -17,6 +17,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -47,6 +48,14 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest
 @Testcontainers
+// The Task 4 startup backfill (scan.ScanJobBackfill / expansion.ExpandJobBackfill) is a
+// synchronous ApplicationRunner: it runs once during context refresh, before any @Test method's
+// own `when(...)` stubbing below has happened. CatalogSeeder always seeds real SEED artists at
+// startup regardless, so backfill would try to enqueue expand jobs for them using these five
+// mocked RelationSource beans while their id() is still an unstubbed-null Mockito default -- a
+// real NOT NULL violation, unlike the async ExpandJobListener path this class doesn't otherwise
+// exercise for those seeded artists.
+@TestPropertySource(properties = "setlistscout.job-backfill-enabled=false")
 class ExpansionEventFlowTest {
 
     @Container

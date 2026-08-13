@@ -58,7 +58,7 @@ class ExpandPollerTest {
     void setUp() {
         properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
-                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of());
+                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(), true, Duration.ofHours(2));
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         poller = new ExpandPoller(expandJobRepository, expandUnitRunner, artistRepository, properties, clock);
     }
@@ -160,7 +160,7 @@ class ExpandPollerTest {
     void perSourceIntervalOverrideWins() {
         properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
-                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(SOURCE, Duration.ofDays(7)));
+                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(SOURCE, Duration.ofDays(7)), true, Duration.ofHours(2));
         poller = new ExpandPoller(expandJobRepository, expandUnitRunner, artistRepository, properties,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         ExpandJob job = job(0);

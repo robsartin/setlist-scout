@@ -28,7 +28,9 @@ public record PollerProperties(
         Duration scanInterval,
         Duration expansionInterval,
         int pollerParkCap,
-        Map<String, Duration> sourceIntervals
+        Map<String, Duration> sourceIntervals,
+        boolean jobBackfillEnabled,
+        Duration backfillSpread
 ) {
     public PollerProperties {
         if (sourceIntervals == null) {

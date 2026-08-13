@@ -63,6 +63,8 @@ setlistscout:
   # Per-source cadence override, e.g. source-intervals.ticketmaster: 3d -- falls back to
   # scan-interval / expansion-interval above when a source has no entry. Empty by default.
   source-intervals: {}
+  job-backfill-enabled: ${JOB_BACKFILL_ENABLED:true} # startup reconciler: enqueue jobs for active artists that predate the job tables; idempotent (insertIfAbsent)
+  backfill-spread: ${BACKFILL_SPREAD:2h} # jitter window for backfilled next_due_at, so enabling the poller doesn't fire every job on the first tick
 
   auth:
     allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
