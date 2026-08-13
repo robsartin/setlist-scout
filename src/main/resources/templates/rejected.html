@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Rejected', 'rejected', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <h1>Rejected</h1>
+
+    <div class="card">
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Name</th><th>Why it was suggested</th><th>Actions</th></tr></thead>
+                <tbody>
+                <tr th:each="a : ${rejected}">
+                    <td th:text="${a.name}">Name</td>
+                    <td class="note" th:text="${a.note}">Note</td>
+                    <td>
+                        <form class="inline unreject" th:action="@{'/artists/' + ${a.id} + '/unreject'}" method="post">
+                            <button type="submit" class="btn-sm" th:aria-label="'Unreject ' + ${a.name}">Unreject</button>
+                        </form>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</body>
+</html>

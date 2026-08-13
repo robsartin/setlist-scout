@@ -38,8 +38,6 @@ public class ArtistController {
     public String list(Model model) {
         String owner = currentUser.email();
         populateActive(model, owner);
-        populatePending(model, owner);
-        model.addAttribute("rejected", artistRepository.findByOwnerAndStatus(owner, ArtistStatus.REJECTED));
         return "artists";
     }
 
@@ -107,13 +105,5 @@ public class ArtistController {
     private void populateActive(Model model, String owner) {
         model.addAttribute("active", artistRepository.findByOwnerAndStatusIn(
                 owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
-    }
-
-    private void populatePending(Model model, String owner) {
-        List<Artist> pending = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW);
-        model.addAttribute("pendingTributes", pending.stream()
-                .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION).toList());
-        model.addAttribute("pendingOthers", pending.stream()
-                .filter(a -> a.getSource() != ArtistSource.TRIBUTE_EXPANSION).toList());
     }
 }

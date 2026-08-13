@@ -29,6 +29,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Renders the real /artists and / Thymeleaf templates against a booted context + Postgres,
  * signed in as a test user, and checks multi-tenant isolation. Each test uses a distinct owner
  * so saved data can't leak between methods (no per-test rollback). Runs in CI (needs Docker).
+ *
+ * <p>Since PR2 (#96), /artists is active-only (seed + approved); the pending-review queue moved to
+ * /artists/candidates, covered by {@link CandidatesPageRenderTest}.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -51,6 +54,12 @@ class ArtistPageRenderTest {
     @Autowired
     private ArtistRepository artistRepository;
 
+    private void saveActive(String owner, String name, ArtistStatus status) {
+        Artist artist = new Artist(name, ArtistSource.SEED_LIST, status, null, null);
+        artist.setOwner(owner);
+        artistRepository.save(artist);
+    }
+
     private void savePending(String owner, String name, ArtistSource source, String discoveredVia, String note) {
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, note);
         artist.setOwner(owner);
@@ -58,28 +67,32 @@ class ArtistPageRenderTest {
     }
 
     @Test
-    void artistsPageRendersBothPendingGroups() throws Exception {
-        String owner = "render-groups@example.com";
+    void artistsPageIsActiveOnly() throws Exception {
+        String owner = "render-active-only@example.com";
+        saveActive(owner, "The Heartbreakers", ArtistStatus.SEED);
+        saveActive(owner, "Wilco", ArtistStatus.APPROVED);
         savePending(owner, "Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION,
                 "Tom Petty and the Heartbreakers", "tribute/cover act for Tom Petty and the Heartbreakers");
-        savePending(owner, "The Milk Carton Kids", ArtistSource.SIMILAR_EXPANSION,
-                "Dawes", "similar to Dawes (single-source match)");
 
         mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("Cover / tribute acts")))
-                .andExpect(content().string(containsString("Damn the Torpedoes")))
-                .andExpect(content().string(containsString("Members")))
-                .andExpect(content().string(containsString("Approve all remaining (2)")))
+                .andExpect(content().string(containsString("The Heartbreakers")))
+                .andExpect(content().string(containsString("Wilco")))
                 .andExpect(content().string(containsString("/css/app.css")))
                 .andExpect(content().string(containsString("aria-current=\"page\"")))
                 .andExpect(content().string(containsString(">Shows<")))
                 .andExpect(content().string(containsString("id=\"active-section\"")))
-                .andExpect(content().string(containsString("id=\"pending-section\"")));
+                // Pending review moved to /artists/candidates -- none of it renders here anymore.
+                .andExpect(content().string(not(containsString("Pending review"))))
+                .andExpect(content().string(not(containsString("pending-section"))))
+                .andExpect(content().string(not(containsString("Damn the Torpedoes"))))
+                .andExpect(content().string(not(containsString("Run expansion now"))))
+                .andExpect(content().string(not(containsString("Why it was suggested"))))
+                .andExpect(content().string(not(containsString("unreject"))));
     }
 
     @Test
-    void approveAllHtmxReturnsBarePendingSection() throws Exception {
+    void approveAllHtmxReturnsBareCandidatesGlobalBar() throws Exception {
         String owner = "render-approve-all@example.com";
         savePending(owner, "Some Pending Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "similar to Dawes");
 
@@ -89,7 +102,7 @@ class ArtistPageRenderTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        org.assertj.core.api.Assertions.assertThat(res).contains("pending-section");
+        org.assertj.core.api.Assertions.assertThat(res).contains("global-bar");
         org.assertj.core.api.Assertions.assertThat(res).doesNotContain("<head").doesNotContain("topbar");
     }
 
@@ -104,8 +117,8 @@ class ArtistPageRenderTest {
 
     @Test
     void artistsAreIsolatedByOwner() throws Exception {
-        savePending("alice@example.com", "Alice Only Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "alice's");
-        savePending("bob@example.com", "Bob Only Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "bob's");
+        saveActive("alice@example.com", "Alice Only Act", ArtistStatus.SEED);
+        saveActive("bob@example.com", "Bob Only Act", ArtistStatus.SEED);
 
         mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", "alice@example.com"))))
                 .andExpect(status().isOk())

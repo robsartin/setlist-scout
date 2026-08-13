@@ -35,7 +35,7 @@
                         <!--/* Remove = reject: drops off the active list, stops scanning, reversible via Unreject.
                                Plain redirect since it updates both the active and rejected sections. */-->
                         <form class="inline remove" th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
-                            <button type="submit" class="btn-bad">Remove</button>
+                            <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${a.name}">Remove</button>
                         </form>
                     </td>
                 </tr>
@@ -57,123 +57,6 @@
         <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>
         <button type="submit">Upload</button>
     </form>
-
-    <h1>Pending review</h1>
-    <form hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-          th:action="@{/artists/expand-now}" method="post">
-        <button type="submit">Run expansion now</button>
-    </form>
-
-    <!--/* pendingSection is the htmx swap target: an approve/reject/approve-all returns just this. */-->
-    <div th:fragment="pendingSection" id="pending-section" aria-live="polite">
-
-        <form class="approve-all"
-              th:if="${not (#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers))}"
-              hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-              th:action="@{/artists/approve-all-pending}" method="post">
-            <button type="submit" class="btn-good"
-                    th:text="|Approve all remaining (${#lists.size(pendingTributes) + #lists.size(pendingOthers)})|">
-                Approve all remaining
-            </button>
-        </form>
-
-        <form class="reject-all"
-              th:if="${not (#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers))}"
-              hx-boost="true" hx-target="#pending-section" hx-swap="outerHTML" hx-push-url="false"
-              th:action="@{/artists/reject-all-pending}" method="post">
-            <button type="submit" class="btn-bad btn-sm"
-                    th:text="|Reject all remaining (${#lists.size(pendingTributes) + #lists.size(pendingOthers)})|">
-                Reject all remaining
-            </button>
-        </form>
-
-        <!--/* One form, one submit: each artist's Accept / Reject / Later radio (default Later) is
-               applied together by /artists/review. A plain redirect (no htmx) because a batch moves
-               artists across the active/pending/rejected lists at once, so the whole page refreshes. */-->
-        <form th:if="${not (#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers))}"
-              th:action="@{/artists/review}" method="post">
-
-            <!-- Cover / tribute acts, called out on their own -->
-            <div class="group-tribute" th:if="${not #lists.isEmpty(pendingTributes)}">
-                <h2>&#127917; Cover / tribute acts</h2>
-                <div class="table-scroll">
-                    <table>
-                        <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Decision</th></tr></thead>
-                        <tbody>
-                        <tr th:each="a : ${pendingTributes}">
-                            <td><span class="chip tribute">Tribute</span></td>
-                            <td th:text="${a.name}">Name</td>
-                            <td class="via" th:text="${a.discoveredVia}">Via</td>
-                            <td class="note" th:text="${a.note}">Note</td>
-                            <td>
-                                <fieldset class="decision">
-                                    <legend class="visually-hidden" th:text="|Decision for ${a.name}|">Decision</legend>
-                                    <label><input type="radio" th:name="${'decision-' + a.id}" value="accept"/> Accept</label>
-                                    <label><input type="radio" th:name="${'decision-' + a.id}" value="reject"/> Reject</label>
-                                    <label><input type="radio" th:name="${'decision-' + a.id}" value="later" checked="checked"/> Later</label>
-                                </fieldset>
-                            </td>
-                        </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Members & similar -->
-            <div th:if="${not #lists.isEmpty(pendingOthers)}">
-                <h2>Members &amp; similar</h2>
-                <div class="table-scroll">
-                    <table>
-                        <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Decision</th></tr></thead>
-                        <tbody>
-                        <tr th:each="a : ${pendingOthers}">
-                            <td>
-                                <span class="chip"
-                                      th:classappend="${a.source.name() == 'MEMBER_EXPANSION'} ? 'member' : 'similar'"
-                                      th:text="${a.source.name() == 'MEMBER_EXPANSION'} ? 'Member' : 'Similar'">Tag</span>
-                            </td>
-                            <td th:text="${a.name}">Name</td>
-                            <td class="via" th:text="${a.discoveredVia}">Via</td>
-                            <td class="note" th:text="${a.note}">Note</td>
-                            <td>
-                                <fieldset class="decision">
-                                    <legend class="visually-hidden" th:text="|Decision for ${a.name}|">Decision</legend>
-                                    <label><input type="radio" th:name="${'decision-' + a.id}" value="accept"/> Accept</label>
-                                    <label><input type="radio" th:name="${'decision-' + a.id}" value="reject"/> Reject</label>
-                                    <label><input type="radio" th:name="${'decision-' + a.id}" value="later" checked="checked"/> Later</label>
-                                </fieldset>
-                            </td>
-                        </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <button type="submit" class="submit-decisions btn-primary">Submit decisions</button>
-        </form>
-
-        <p th:if="${#lists.isEmpty(pendingTributes) and #lists.isEmpty(pendingOthers)}">
-            Nothing pending. Run expansion to find more.
-        </p>
-    </div>
-
-    <h1>Rejected</h1>
-    <div class="table-scroll">
-        <table>
-            <thead><tr><th>Name</th><th>Why it was suggested</th><th>Actions</th></tr></thead>
-            <tbody>
-            <tr th:each="a : ${rejected}">
-                <td th:text="${a.name}">Name</td>
-                <td class="note" th:text="${a.note}">Note</td>
-                <td>
-                    <form class="inline unreject" th:action="@{'/artists/' + ${a.id} + '/unreject'}" method="post">
-                        <button type="submit">Unreject</button>
-                    </form>
-                </td>
-            </tr>
-            </tbody>
-        </table>
-    </div>
 </div>
 </body>
 </html>

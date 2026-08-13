@@ -14,6 +14,10 @@
         <nav class="main" aria-label="Primary">
             <a th:href="@{/}" th:attr="aria-current=${navActive == 'shows'} ? 'page' : null">Shows</a>
             <a th:href="@{/artists}" th:attr="aria-current=${navActive == 'artists'} ? 'page' : null">Artists</a>
+            <a th:href="@{/artists/candidates}" th:attr="aria-current=${navActive == 'candidates'} ? 'page' : null">
+                Candidates <span class="count" th:if="${pendingCount != null and pendingCount > 0}" th:text="${pendingCount}">0</span>
+            </a>
+            <a th:href="@{/artists/rejected}" th:attr="aria-current=${navActive == 'rejected'} ? 'page' : null">Rejected</a>
             <a th:href="@{/#settings}" th:attr="aria-current=${navActive == 'settings'} ? 'page' : null">Settings</a>
         </nav>
     </div>

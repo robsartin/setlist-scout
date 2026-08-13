@@ -7,12 +7,12 @@ import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @Controller
 @RequestMapping("/artists")
@@ -20,6 +20,9 @@ public class ReviewController {
 
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
+
+    /** Page size for a lazy-loaded group's rows on the Candidates page. */
+    private static final int ROWS_PAGE = 25;
 
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
@@ -35,24 +38,84 @@ public class ReviewController {
     }
 
     /**
-     * Process the whole pending list from the review form's per-artist radios: Accept -&gt; APPROVED,
-     * Reject -&gt; REJECTED, Later (the default) -&gt; left PENDING_REVIEW. Iterates the owner's own
-     * pending artists and reads each one's decision, so it can only ever touch this user's rows.
-     * Redirects (rather than a fragment swap) because a batch touches the active/pending/rejected
-     * lists at once.
+     * The Candidates page: this owner's pending candidates grouped by base artist (discoveredVia)
+     * and relation type (member/similar/tribute), with counts only -- rows lazy-load per group via
+     * {@link #candidateRows}. {@code pendingCount} for the global bar comes from {@link NavModelAdvice}.
      */
-    @PostMapping("/review")
-    public String review(@RequestParam Map<String, String> decisions) {
-        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
-            String decision = decisions.get("decision-" + a.getId());
-            if ("accept".equals(decision)) {
-                activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
-            } else if ("reject".equals(decision)) {
-                activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
-            }
-            // "later" (or missing) -> leave it PENDING_REVIEW for a future pass
+    @GetMapping("/candidates")
+    public String candidates(Model model) {
+        var counts = artistRepository.countByStatusGroupedByViaAndSource(
+                currentUser.email(), ArtistStatus.PENDING_REVIEW);
+        model.addAttribute("groups", CandidateGroups.from(counts));
+        return "candidates";
+    }
+
+    /**
+     * One group's page of pending rows, loaded lazily when its {@code <details>} is first expanded
+     * (or via "Show more" for a subsequent page). Owner-scoped like everything else here.
+     */
+    @GetMapping("/candidates/rows")
+    public String candidateRows(@RequestParam String via, @RequestParam ArtistSource type,
+                                @RequestParam(defaultValue = "0") int offset, Model model) {
+        var rows = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type,
+                PageRequest.of(offset / ROWS_PAGE, ROWS_PAGE));
+        model.addAttribute("rows", rows);
+        model.addAttribute("via", via);
+        model.addAttribute("type", type);
+        model.addAttribute("nextOffset", offset + ROWS_PAGE);
+        // Simple heuristic: a full page might mean more remain. Good enough at ROWS_PAGE granularity.
+        model.addAttribute("hasMore", rows.size() == ROWS_PAGE);
+        return "candidates :: groupRows";
+    }
+
+    /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
+    @GetMapping("/rejected")
+    public String rejected(Model model) {
+        model.addAttribute("rejected",
+                artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.REJECTED));
+        return "rejected";
+    }
+
+    /** Approve one candidate. Owner-scoped via changeStatus (no-op if this owner doesn't own {@code id}). */
+    @PostMapping("/{id}/approve")
+    public String approve(@PathVariable Long id, @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                          Model model) {
+        activationService.changeStatus(id, currentUser.email(), ArtistStatus.APPROVED);
+        return rowResult(hxRequest, model);
+    }
+
+    /** Reject one candidate. Owner-scoped via changeStatus (no-op if this owner doesn't own {@code id}). */
+    @PostMapping("/{id}/reject")
+    public String reject(@PathVariable Long id, @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                         Model model) {
+        activationService.changeStatus(id, currentUser.email(), ArtistStatus.REJECTED);
+        return rowResult(hxRequest, model);
+    }
+
+    /**
+     * Approve or reject an entire relation group (one base artist x relation type) in one action.
+     * Iterates only this owner's still-pending rows for that group, so a concurrent per-item action
+     * on the same group can't be clobbered and another owner's rows are never touched.
+     */
+    @PostMapping("/candidates/group")
+    public String reviewGroup(@RequestParam String via, @RequestParam ArtistSource type,
+                              @RequestParam String decision,
+                              @RequestHeader(value = HX_REQUEST, required = false) String hxRequest, Model model) {
+        ArtistStatus status;
+        if ("approve".equals(decision)) {
+            status = ArtistStatus.APPROVED;
+        } else if ("reject".equals(decision)) {
+            status = ArtistStatus.REJECTED;
+        } else {
+            // Malformed decision: do nothing rather than silently defaulting to reject.
+            return actionResult(hxRequest, model);
         }
-        return "redirect:/artists";
+        for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type)) {
+            activationService.changeStatus(a.getId(), currentUser.email(), status);
+        }
+        return actionResult(hxRequest, model);
     }
 
     /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
@@ -79,7 +142,7 @@ public class ReviewController {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
         }
-        return pendingResult(hxRequest, model);
+        return actionResult(hxRequest, model);
     }
 
     /** Reject everything still pending in one action -- clears out a noisy batch after picking the keepers. */
@@ -89,7 +152,7 @@ public class ReviewController {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
         }
-        return pendingResult(hxRequest, model);
+        return actionResult(hxRequest, model);
     }
 
     /** Manually request expansion: mark all of this owner's expand jobs due-now (the poller drains them). */
@@ -97,7 +160,7 @@ public class ReviewController {
     public String expandNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
         expandJobRepository.redueAll(currentUser.email(), java.time.Instant.now());
-        return pendingResult(hxRequest, model);
+        return actionResult(hxRequest, model);
     }
 
     /** Scoped by owner so a user can only change the status of their own artists. */
@@ -105,20 +168,31 @@ public class ReviewController {
         activationService.changeStatus(id, currentUser.email(), status);
     }
 
-    /** htmx request -> swap just the pending section; otherwise a normal redirect (no-JS fallback). */
-    private String pendingResult(String hxRequest, Model model) {
+    /**
+     * Result for a per-item approve/reject: htmx request -&gt; a bare empty fragment swapped in for
+     * the row itself (its form targets {@code closest .cand} with {@code hx-swap="outerHTML"}, so
+     * the row simply disappears); otherwise a normal redirect to the Candidates page (no-JS
+     * fallback). The group's summary count and the nav badge re-sync on that next full page load --
+     * acceptable for v1; an htmx out-of-band count update is a follow-up, not built now.
+     */
+    private String rowResult(String hxRequest, Model model) {
         if (hxRequest != null) {
-            populatePending(model, currentUser.email());
-            return "artists :: pendingSection";
+            return "candidates :: rowDone";
         }
-        return "redirect:/artists";
+        return "redirect:/artists/candidates";
     }
 
-    private void populatePending(Model model, String owner) {
-        List<Artist> pending = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW);
-        model.addAttribute("pendingTributes", pending.stream()
-                .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION).toList());
-        model.addAttribute("pendingOthers", pending.stream()
-                .filter(a -> a.getSource() != ArtistSource.TRIBUTE_EXPANSION).toList());
+    /**
+     * Result for a per-group bulk or global approve/reject: htmx request -&gt; swap just the
+     * Candidates page's global bar (its pendingCount attribute comes from {@link NavModelAdvice},
+     * already applied to the model for every request); otherwise a normal redirect to the Candidates
+     * page (no-JS fallback). The group's own summary count re-syncs on that next full page load --
+     * acceptable for v1; an htmx out-of-band count update is a follow-up, not built now.
+     */
+    private String actionResult(String hxRequest, Model model) {
+        if (hxRequest != null) {
+            return "candidates :: globalBar";
+        }
+        return "redirect:/artists/candidates";
     }
 }
