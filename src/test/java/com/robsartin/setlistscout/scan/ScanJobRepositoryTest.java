@@ -38,9 +38,8 @@ import static org.assertj.core.api.Assertions.within;
  * Testcontainers-backed round-trip of ScanJob through the real Postgres schema (Flyway V6),
  * not just the entity mapping -- proves the (owner, artist_id, source) unique constraint is
  * actually enforced by the database, not merely assumed. Boots the full context (like
- * ApplicationContextSmokeTest) rather than an @ApplicationModuleTest slice, since the scan
- * module's ShowScanScheduler pulls in ExpansionService and a STANDALONE module slice doesn't
- * wire that dependency graph.
+ * ApplicationContextSmokeTest) rather than an @ApplicationModuleTest slice, for consistency with
+ * this suite's other Testcontainers-backed repository tests.
  */
 @SpringBootTest
 @Testcontainers

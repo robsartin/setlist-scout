@@ -109,9 +109,9 @@ class PollerFlowTest {
 
     /**
      * Replace exactly ONE concrete bean per source port. Mocking the concrete class (not the
-     * {@code ShowSource}/{@code RelationSource} interface) is required because other beans -- e.g.
-     * {@code ExpansionService} -- autowire these sources by their concrete type, so an
-     * interface-typed mock would leave those concrete-type dependencies unsatisfied. The mock still
+     * {@code ShowSource}/{@code RelationSource} interface) matters if any other bean ever comes to
+     * autowire one of these sources by its concrete type -- an interface-typed mock would leave
+     * that concrete-type dependency unsatisfied. The mock still
      * lands in the injected {@code List<ShowSource>}/{@code List<RelationSource>}; the runners filter
      * to the single source whose {@code id()} equals the job's {@code source}, so the remaining real
      * sources are never invoked. Stubbing {@code id()} in each test is required: an unstubbed Mockito
