@@ -17,9 +17,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -167,5 +169,35 @@ class ScanPollerTest {
         assertThat(failing.getStatus()).isEqualTo(JobStatus.FAILED);
         verify(scanJobRepository).save(ok);
         verify(scanJobRepository).save(failing);
+    }
+
+    @Test
+    @DisplayName("a reschedule that loses an optimistic-lock race is swallowed; the tick continues")
+    void concurrentRedueDuringRunIsSkipped() {
+        ScanJob job = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        // The unit runs fine, but the reschedule save loses to a concurrent redueAll:
+        when(scanJobRepository.save(job))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ScanJob.class, 1L));
+
+        // Must not propagate out of tick():
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+        verify(scanUnitRunner).run(job.getOwner(), job.getArtistId(), job.getSource());
+    }
+
+    @Test
+    @DisplayName("a conflict on one claimed job doesn't stop the rest of the batch from being processed")
+    void conflictOnOneJobDoesNotSkipRestOfBatch() {
+        ScanJob conflicting = job(0);
+        ScanJob ok = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(conflicting, ok));
+        when(scanJobRepository.save(conflicting))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ScanJob.class, 1L));
+
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+
+        verify(scanUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE);
+        verify(scanJobRepository).save(ok);
+        assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
     }
 }

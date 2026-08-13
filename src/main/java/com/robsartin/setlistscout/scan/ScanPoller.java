@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -93,6 +94,12 @@ public class ScanPoller {
         try {
             scanUnitRunner.run(job.getOwner(), job.getArtistId(), job.getSource());
             recordSuccess(job, now);
+        } catch (OptimisticLockingFailureException concurrentChange) {
+            // The job was re-dued (SettingsChanged / manual "Scan now") or deleted (ArtistDeactivated)
+            // while we ran it. That writer's intent wins -- drop our stale reschedule and move on.
+            log.atInfo().addKeyValue("owner", job.getOwner()).addKeyValue("artistId", job.getArtistId())
+                    .addKeyValue("source", job.getSource())
+                    .log("scan job changed concurrently during run; skipping reschedule");
         } catch (RuntimeException ex) {
             recordFailure(job, now, ex);
         }
@@ -145,7 +152,8 @@ public class ScanPoller {
         if (attempts >= properties.pollerParkCap()) {
             return interval;
         }
-        Duration exponential = BACKOFF_BASE.multipliedBy(1L << attempts);
+        int shift = Math.min(attempts, 30);   // cap the shift; >2^30 * 10m already dwarfs any interval
+        Duration exponential = BACKOFF_BASE.multipliedBy(1L << shift);
         return exponential.compareTo(interval) < 0 ? exponential : interval;
     }
 
