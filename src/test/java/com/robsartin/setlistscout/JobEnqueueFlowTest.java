@@ -194,6 +194,10 @@ class JobEnqueueFlowTest {
                 .allMatch(j -> expectedFingerprint.equals(j.getLocationFingerprint()));
         assertThat(reDuedJobs).as("every job's nextDueAt advanced to (at or after) the settings change")
                 .allMatch(j -> !j.getNextDueAt().isBefore(beforeUpdate));
+        assertThat(reDuedJobs).as("every job is SCHEDULED and cleanly claimable again (redueAll)")
+                .allMatch(j -> j.getStatus() == JobStatus.SCHEDULED
+                        && j.getAttempts() == 0
+                        && j.getClaimedAt() == null);
     }
 
     @Test

@@ -12,6 +12,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -31,6 +32,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * Testcontainers-backed round-trip of ScanJob through the real Postgres schema (Flyway V6),
@@ -139,6 +141,36 @@ class ScanJobRepositoryTest {
 
         assertThatThrownBy(() -> scanJobRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("redueAll makes all of an owner's jobs due-now, claimable, and bumps version")
+    // redueAll returns int, so Spring Data routes it through EntityManager#executeUpdate (unlike
+    // claimDue's List<ScanJob>+RETURNING, which goes through getResultList and needs no ambient
+    // transaction). executeUpdate is a genuine JPA requirement for an active transaction -- in
+    // production that's supplied by ScanJobListener#onSettingsChanged running inside its own
+    // @ApplicationModuleListener transaction; here we supply one explicitly.
+    @Transactional
+    void redueAllResetsJobsAndBumpsVersion() {
+        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 4,
+                Instant.now().plus(java.time.Duration.ofDays(14)), "fp-old");
+        job.setOwner(OWNER);
+        job.setClaimedAt(Instant.now());
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+        long v0 = scanJobRepository.findById(id).orElseThrow().getVersion();
+
+        Instant now = Instant.now();
+        int updated = scanJobRepository.redueAll(OWNER, now, "fp-new");
+        assertThat(updated).isEqualTo(1);
+
+        entityManager.clear();
+        ScanJob after = scanJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getClaimedAt()).isNull();
+        assertThat(after.getLocationFingerprint()).isEqualTo("fp-new");
+        assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
+        assertThat(after.getVersion()).isEqualTo(v0 + 1);
     }
 
     @Test

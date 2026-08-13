@@ -64,4 +64,23 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
     List<ScanJob> claimDue(@Param("now") Instant now,
                             @Param("leaseCutoff") Instant leaseCutoff,
                             @Param("batch") int batch);
+
+    /**
+     * Version-safe bulk re-due of every one of an owner's scan jobs: make them due-now and cleanly
+     * claimable (SCHEDULED, attempts reset, lease cleared) at the current location, and bump
+     * {@code version} so any poller holding one of these rows in-flight conflicts on its next
+     * {@code save()} (ScanPoller catches that and skips its stale reschedule) instead of silently
+     * overwriting this re-due. Used by ScanJobListener#onSettingsChanged and the manual "Scan now"
+     * button (ShowController#scanNow).
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE scan_job
+               SET next_due_at = :now, status = 'SCHEDULED', attempts = 0, claimed_at = NULL,
+                   location_fingerprint = :locationFingerprint, version = version + 1
+             WHERE owner = :owner
+            """, nativeQuery = true)
+    int redueAll(@Param("owner") String owner,
+                  @Param("now") Instant now,
+                  @Param("locationFingerprint") String locationFingerprint);
 }
