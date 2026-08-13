@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" th:fragment="page(title, active, content)">
+<html xmlns:th="http://www.thymeleaf.org" th:fragment="page(title, navActive, content)">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -12,9 +12,9 @@
     <div class="topbar-inner">
         <span class="brand"><span class="dot" aria-hidden="true"></span> Setlist Scout</span>
         <nav class="main" aria-label="Primary">
-            <a th:href="@{/}" th:attr="aria-current=${active == 'shows'} ? 'page' : null">Shows</a>
-            <a th:href="@{/artists}" th:attr="aria-current=${active == 'artists'} ? 'page' : null">Artists</a>
-            <a th:href="@{/#settings}" th:attr="aria-current=${active == 'settings'} ? 'page' : null">Settings</a>
+            <a th:href="@{/}" th:attr="aria-current=${navActive == 'shows'} ? 'page' : null">Shows</a>
+            <a th:href="@{/artists}" th:attr="aria-current=${navActive == 'artists'} ? 'page' : null">Artists</a>
+            <a th:href="@{/#settings}" th:attr="aria-current=${navActive == 'settings'} ? 'page' : null">Settings</a>
         </nav>
     </div>
 </header>
