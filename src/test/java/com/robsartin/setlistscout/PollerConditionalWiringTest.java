@@ -21,13 +21,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 /**
- * Phase B PR4a, Task 6: the paced claim-lease pollers must be genuinely absent by default, not
- * merely inert -- {@code @ConditionalOnProperty} means Spring never even attempts to construct
- * {@code ScanPoller}/{@code ExpandPoller} when {@code setlistscout.scan-poller-enabled} /
- * {@code expand-poller-enabled} is unset or false, so the old {@code ShowScanScheduler} batch is
- * the only thing driving scans/expansion this PR (behavior-unchanged) unless someone explicitly
- * opts in. The full real-path poller behavior (flag on, real claim/run/reschedule against
- * Postgres) is the next task -- this is just the wiring guard.
+ * Phase B PR4b: the paced claim-lease pollers are the sole driver of scans/expansion now that the
+ * whole-fleet {@code ShowScanScheduler} batch is deleted, and are on by default in shipped config
+ * ({@code application.yml}). {@code @ConditionalOnProperty} still genuinely gates bean creation --
+ * Spring never attempts to construct {@code ScanPoller}/{@code ExpandPoller} when
+ * {@code setlistscout.scan-poller-enabled}/{@code expand-poller-enabled} resolves to false. This
+ * test builds its own {@link ApplicationContextRunner} rather than loading {@code application.yml},
+ * so it sets each property explicitly (true/false) instead of leaning on the shipped yaml default,
+ * which this context never sees.
  */
 class PollerConditionalWiringTest {
 
@@ -39,7 +40,7 @@ class PollerConditionalWiringTest {
             .withBean(ArtistRepository.class, () -> mock(ArtistRepository.class))
             .withBean(PollerProperties.class, () -> new PollerProperties(
                     20, 20, Duration.ofMinutes(5).toMillis(),
-                    Duration.ofDays(14), Duration.ofDays(28), 6, Map.of()))
+                    Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(), true, Duration.ofHours(2)))
             // withUserConfiguration(ScanPoller.class, ...) or @Import(ScanPoller.class, ...) both
             // try to treat the imported class as a @Configuration instance the moment its
             // condition passes, which fails ("no default constructor found") since ScanPoller is
@@ -58,18 +59,23 @@ class PollerConditionalWiringTest {
     static class PollerScanConfig {}
 
     @Test
-    @DisplayName("both poller beans are absent by default (flags unset)")
-    void pollersAbsentByDefault() {
-        contextRunner.run(context -> assertThat(context)
-                .hasNotFailed()
-                .doesNotHaveBean(ScanPoller.class)
-                .doesNotHaveBean(ExpandPoller.class));
+    @DisplayName("both poller beans are absent when explicitly disabled")
+    void pollersAbsentWhenDisabled() {
+        contextRunner.withPropertyValues(
+                        "setlistscout.scan-poller-enabled=false",
+                        "setlistscout.expand-poller-enabled=false")
+                .run(context -> assertThat(context)
+                        .hasNotFailed()
+                        .doesNotHaveBean(ScanPoller.class)
+                        .doesNotHaveBean(ExpandPoller.class));
     }
 
     @Test
     @DisplayName("scan-poller-enabled=true creates only the scan poller bean")
     void scanPollerPresentWhenEnabled() {
-        contextRunner.withPropertyValues("setlistscout.scan-poller-enabled=true")
+        contextRunner.withPropertyValues(
+                        "setlistscout.scan-poller-enabled=true",
+                        "setlistscout.expand-poller-enabled=false")
                 .run(context -> assertThat(context)
                         .hasNotFailed()
                         .hasSingleBean(ScanPoller.class)
@@ -79,7 +85,9 @@ class PollerConditionalWiringTest {
     @Test
     @DisplayName("expand-poller-enabled=true creates only the expand poller bean")
     void expandPollerPresentWhenEnabled() {
-        contextRunner.withPropertyValues("setlistscout.expand-poller-enabled=true")
+        contextRunner.withPropertyValues(
+                        "setlistscout.scan-poller-enabled=false",
+                        "setlistscout.expand-poller-enabled=true")
                 .run(context -> assertThat(context)
                         .hasNotFailed()
                         .doesNotHaveBean(ScanPoller.class)

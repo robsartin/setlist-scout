@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.shared.JobStatus;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -29,14 +32,14 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * Testcontainers-backed round-trip of ScanJob through the real Postgres schema (Flyway V6),
  * not just the entity mapping -- proves the (owner, artist_id, source) unique constraint is
  * actually enforced by the database, not merely assumed. Boots the full context (like
- * ApplicationContextSmokeTest) rather than an @ApplicationModuleTest slice, since the scan
- * module's ShowScanScheduler pulls in ExpansionService and a STANDALONE module slice doesn't
- * wire that dependency graph.
+ * ApplicationContextSmokeTest) rather than an @ApplicationModuleTest slice, for consistency with
+ * this suite's other Testcontainers-backed repository tests.
  */
 @SpringBootTest
 @Testcontainers
@@ -57,6 +60,9 @@ class ScanJobRepositoryTest {
 
     @Autowired
     private ScanJobRepository scanJobRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     /**
      * claimDue has no owner filter (it's a poller-wide claim, not scoped to one caller), so a
@@ -98,6 +104,31 @@ class ScanJobRepositoryTest {
     }
 
     @Test
+    @DisplayName("a stale save is rejected once another writer has bumped the version")
+    void staleSaveThrowsOptimisticLockingFailure() {
+        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.SCHEDULED, 0,
+                Instant.now(), "fp-1");
+        job.setOwner(OWNER);
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+        scanJobRepository.flush();
+
+        // Two independent loads of the same row (simulating poller-in-flight vs. a SettingsChanged re-due).
+        ScanJob loadA = scanJobRepository.findById(id).orElseThrow();
+        ScanJob loadB = scanJobRepository.findById(id).orElseThrow();
+        entityManager.detach(loadA);
+        entityManager.detach(loadB);
+
+        // Writer B commits first -> version bumps in the DB.
+        loadB.setNextDueAt(Instant.now().plusSeconds(3600));
+        scanJobRepository.saveAndFlush(loadB);
+
+        // Writer A now holds a stale version -> its save must be rejected, not silently win.
+        loadA.setNextDueAt(Instant.now().plusSeconds(999));
+        assertThatThrownBy(() -> scanJobRepository.saveAndFlush(loadA))
+                .isInstanceOf(org.springframework.orm.ObjectOptimisticLockingFailureException.class);
+    }
+
+    @Test
     @DisplayName("the (owner, artist_id, source) unique constraint is enforced")
     void uniqueConstraintIsEnforced() {
         ScanJob first = new ScanJob(7L, "bandsintown", JobStatus.SCHEDULED, 0, Instant.now(), "fp1");
@@ -109,6 +140,56 @@ class ScanJobRepositoryTest {
 
         assertThatThrownBy(() -> scanJobRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("redueAll makes all of an owner's jobs due-now, claimable, and bumps version")
+    // redueAll returns int, so Spring Data routes it through EntityManager#executeUpdate (unlike
+    // claimDue's List<ScanJob>+RETURNING, which goes through getResultList and needs no ambient
+    // transaction). executeUpdate is a genuine JPA requirement for an active transaction -- in
+    // production that's supplied by ScanJobListener#onSettingsChanged running inside its own
+    // @ApplicationModuleListener transaction; here we supply one explicitly.
+    @Transactional
+    void redueAllResetsJobsAndBumpsVersion() {
+        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 4,
+                Instant.now().plus(java.time.Duration.ofDays(14)), "fp-old");
+        job.setOwner(OWNER);
+        job.setClaimedAt(Instant.now());
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+        long v0 = scanJobRepository.findById(id).orElseThrow().getVersion();
+
+        Instant now = Instant.now();
+        int updated = scanJobRepository.redueAll(OWNER, now, "fp-new");
+        assertThat(updated).isEqualTo(1);
+
+        entityManager.clear();
+        ScanJob after = scanJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getClaimedAt()).isNull();
+        assertThat(after.getLocationFingerprint()).isEqualTo("fp-new");
+        assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
+        assertThat(after.getVersion()).isEqualTo(v0 + 1);
+    }
+
+    @Test
+    @DisplayName("redueAll commits even with no ambient transaction, proving it is self-transactional "
+            + "-- this is the path ShowController#scanNow calls directly from a plain @PostMapping handler")
+    void redueAllCommitsWithoutAmbientTransaction() {
+        ScanJob job = new ScanJob(2L, "bandsintown", JobStatus.FAILED, 3,
+                Instant.now().plus(java.time.Duration.ofDays(7)), "fp-old");
+        job.setOwner(OWNER);
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+
+        Instant now = Instant.now();
+        int updated = scanJobRepository.redueAll(OWNER, now, "fp-new");
+        assertThat(updated).isEqualTo(1);
+
+        ScanJob after = scanJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getLocationFingerprint()).isEqualTo("fp-new");
+        assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
     }
 
     @Test

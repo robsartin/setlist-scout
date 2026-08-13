@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 /**
  * Second opinion on similar artists, useful for niche/regional acts that thin
  * structured databases (Last.fm, MusicBrainz) don't cover well. Cross-checked
- * against LastFmService in ExpansionService -- names found by both sources are
+ * against LastFmService during expansion -- names found by both sources are
  * flagged higher-confidence during review.
  */
 @Service

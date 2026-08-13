@@ -3,6 +3,8 @@
 Date: 2026-08-06
 Status: Accepted
 
+Superseded by [0023](0023-per-unit-event-driven-scan-work-model.md)
+
 ## Context
 
 The scheduled job re-runs expansion and show search on an interval. Too

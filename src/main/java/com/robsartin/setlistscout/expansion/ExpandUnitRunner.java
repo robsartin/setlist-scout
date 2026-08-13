@@ -24,7 +24,7 @@ import java.util.List;
  * <p>
  * {@link #run} itself is deliberately NOT {@code @Transactional}: the {@link RelationSource#related}
  * call is a slow external API/LLM hit and must not hold a DB connection open across it (the same
- * boundary {@code ExpansionService.expandAll} keeps). Query first, outside any transaction, then
+ * boundary the retired whole-fleet expander kept). Query first, outside any transaction, then
  * publish each result in a short transaction.
  */
 @Component

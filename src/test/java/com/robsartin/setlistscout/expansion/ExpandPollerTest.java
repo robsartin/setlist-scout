@@ -22,11 +22,13 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,7 +58,7 @@ class ExpandPollerTest {
     void setUp() {
         properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
-                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of());
+                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(), true, Duration.ofHours(2));
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         poller = new ExpandPoller(expandJobRepository, expandUnitRunner, artistRepository, properties, clock);
     }
@@ -158,7 +160,7 @@ class ExpandPollerTest {
     void perSourceIntervalOverrideWins() {
         properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
-                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(SOURCE, Duration.ofDays(7)));
+                Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(SOURCE, Duration.ofDays(7)), true, Duration.ofHours(2));
         poller = new ExpandPoller(expandJobRepository, expandUnitRunner, artistRepository, properties,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         ExpandJob job = job(0);
@@ -168,5 +170,72 @@ class ExpandPollerTest {
         poller.tick();
 
         assertThat(job.getNextDueAt()).isEqualTo(NOW.plus(Duration.ofDays(7)));
+    }
+
+    @Test
+    @DisplayName("a reschedule that loses an optimistic-lock race is swallowed; the tick continues")
+    void concurrentRedueDuringRunIsSkipped() {
+        ExpandJob job = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        // The unit runs fine, but the reschedule save loses to a concurrent redueAll:
+        when(expandJobRepository.save(job))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ExpandJob.class, 1L));
+
+        // Must not propagate out of tick():
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+        verify(expandUnitRunner).run(job.getOwner(), job.getArtistId(), job.getSource(), ARTIST_NAME);
+    }
+
+    @Test
+    @DisplayName("a conflict on one claimed job doesn't stop the rest of the batch from being processed")
+    void conflictOnOneJobDoesNotSkipRestOfBatch() {
+        ExpandJob conflicting = job(0);
+        ExpandJob ok = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(conflicting, ok));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        when(expandJobRepository.save(conflicting))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ExpandJob.class, 1L));
+
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+
+        verify(expandUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        verify(expandJobRepository).save(ok);
+        assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+    }
+
+    @Test
+    @DisplayName("a failure reschedule that loses an optimistic-lock race is swallowed; the tick continues")
+    void concurrentRedueDuringFailureRescheduleIsSkipped() {
+        ExpandJob job = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        // The unit fails, and the failure-path reschedule save loses to a concurrent redueAll:
+        doThrow(new RuntimeException("boom")).when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        when(expandJobRepository.save(job))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ExpandJob.class, 1L));
+
+        // Must not propagate out of tick():
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+        verify(expandUnitRunner).run(job.getOwner(), job.getArtistId(), job.getSource(), ARTIST_NAME);
+    }
+
+    @Test
+    @DisplayName("a conflict on the failure-path reschedule doesn't stop the rest of the batch")
+    void conflictOnFailureRescheduleDoesNotSkipRestOfBatch() {
+        ExpandJob conflicting = job(0);
+        ExpandJob ok = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(conflicting, ok));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        doThrow(new RuntimeException("boom")).doNothing()
+                .when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        when(expandJobRepository.save(conflicting))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ExpandJob.class, 1L));
+
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+
+        verify(expandUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        verify(expandJobRepository).save(ok);
+        assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
     }
 }

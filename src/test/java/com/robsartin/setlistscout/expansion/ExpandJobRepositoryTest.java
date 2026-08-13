@@ -100,6 +100,25 @@ class ExpandJobRepositoryTest {
     }
 
     @Test
+    @DisplayName("redueAll commits even with no ambient transaction, proving it is self-transactional "
+            + "-- this is the path ReviewController#expandNow calls directly from a plain @PostMapping handler")
+    void redueAllCommitsWithoutAmbientTransaction() {
+        ExpandJob job = new ExpandJob(3L, "discogs", JobStatus.FAILED, 2,
+                Instant.now().plus(java.time.Duration.ofDays(7)));
+        job.setOwner(OWNER);
+        Long id = expandJobRepository.saveAndFlush(job).getId();
+
+        Instant now = Instant.now();
+        int updated = expandJobRepository.redueAll(OWNER, now);
+        assertThat(updated).isEqualTo(1);
+
+        ExpandJob after = expandJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getNextDueAt()).isCloseTo(now, org.assertj.core.api.Assertions.within(1, ChronoUnit.SECONDS));
+    }
+
+    @Test
     @DisplayName("claimDue claims a due, unclaimed row and skips a not-yet-due one "
             + "(smoke test -- full behavioral coverage lives in ScanJobRepositoryTest#claimDue*)")
     void claimDueClaimsDueRowsAndSkipsNotYetDueOnes() {

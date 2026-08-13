@@ -16,11 +16,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Runs show search for exactly one (artist, source) pair -- the per-unit counterpart to
- * {@link ShowAggregationService#scanForShows}'s whole-fleet batch (Phase B PR4a). Owns the one
- * shared copy of {@link #resolveSiteUrl} (the one write -- band-site URL cache) and
- * {@link #persistNew}; {@code ShowAggregationService} delegates to this same class rather than
- * duplicating that logic.
+ * Runs show search for exactly one (artist, source) pair -- the per-unit replacement for the
+ * whole-fleet batch scanner retired in Phase B PR4b. Owns the one shared copy of
+ * {@link #resolveSiteUrl} (the one write -- band-site URL cache) and {@link #persistNew}.
  */
 @Service
 public class ScanUnitRunner {
@@ -91,8 +89,8 @@ public class ScanUnitRunner {
 
     /**
      * Builds the {@link ScanQuery} for one artist at the owner's location/window, resolving (and
-     * caching) the official-site URL along the way. The one copy of this construction -- both
-     * {@link #run} and {@link ShowAggregationService#scanForShows} call it.
+     * caching) the official-site URL along the way. The one copy of this construction -- {@link #run}
+     * calls it.
      */
     ScanQuery buildQuery(Artist artist, SearchSettings settings, LocalDateTime start, LocalDateTime end) {
         return new ScanQuery(artist.getName(), resolveSiteUrl(artist),

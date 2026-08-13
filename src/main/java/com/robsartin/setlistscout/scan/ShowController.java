@@ -22,26 +22,20 @@ public class ShowController {
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
 
-    /** Shown while a scan is running; the poll swaps in the results once it finishes. */
-    private static final String SCANNING_LABEL = "Scanning...";
-
     private final ShowRepository showRepository;
     private final ArtistRepository artistRepository;
-    private final AsyncScanRunner asyncScanRunner;
-    private final ScanStateService scanState;
+    private final ScanJobRepository scanJobRepository;
     private final SettingsService settingsService;
     private final CurrentUser currentUser;
 
     public ShowController(ShowRepository showRepository,
                            ArtistRepository artistRepository,
-                           AsyncScanRunner asyncScanRunner,
-                           ScanStateService scanState,
+                           ScanJobRepository scanJobRepository,
                            SettingsService settingsService,
                            CurrentUser currentUser) {
         this.showRepository = showRepository;
         this.artistRepository = artistRepository;
-        this.asyncScanRunner = asyncScanRunner;
-        this.scanState = scanState;
+        this.scanJobRepository = scanJobRepository;
         this.settingsService = settingsService;
         this.currentUser = currentUser;
     }
@@ -50,8 +44,6 @@ public class ShowController {
     public String shows(@RequestParam(defaultValue = "eventDate") String sort, Model model) {
         String owner = currentUser.email();
         populateShows(model, owner, sort);
-        model.addAttribute("scanning", scanState.isRunning(owner));
-        model.addAttribute("scanLabel", SCANNING_LABEL);
         return "shows";
     }
 
@@ -84,40 +76,20 @@ public class ShowController {
     }
 
     /**
-     * Manually trigger a show scan. The scan runs async on a background executor (a full scan can
-     * take a while), so this returns immediately: an htmx request gets the "Scanning" fragment that
-     * polls {@code /scan-status}; a no-JS request just redirects while the scan runs in the
-     * background. A second "Scan now" while one is already running is ignored (see AsyncScanRunner).
+     * Manually request a scan: mark all of this owner's scan jobs due-now (the paced poller picks
+     * them up within a tick) and confirm. There's no synchronous scan to wait on in the per-unit
+     * model, so this just queues -- newly found shows appear on later page loads as the poller drains.
      */
     @PostMapping("/scan-now")
     public String scanNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
-                          Model model) {
+                          @RequestParam(defaultValue = "eventDate") String sort, Model model) {
         String owner = currentUser.email();
-        asyncScanRunner.startScan(owner);
+        scanJobRepository.redueAll(owner, java.time.Instant.now(), settingsService.locationFingerprint(owner));
         if (hxRequest != null) {
-            model.addAttribute("scanning", true);
-            model.addAttribute("scanLabel", SCANNING_LABEL);
+            populateShows(model, owner, sort);
+            model.addAttribute("scanQueued", true);
             return "shows :: showsRegion";
         }
         return "redirect:/";
-    }
-
-    /**
-     * Polled by the "Scanning" fragment (every 10s). While the scan runs it returns the scanning
-     * fragment with one more dot; once it's done it returns the refreshed shows list, which htmx
-     * swaps in -- replacing the polling element and so ending the poll.
-     */
-    @GetMapping("/scan-status")
-    public String scanStatus(@RequestParam(defaultValue = "eventDate") String sort, Model model) {
-        String owner = currentUser.email();
-        if (scanState.isRunning(owner)) {
-            model.addAttribute("scanning", true);
-            model.addAttribute("scanLabel", SCANNING_LABEL);
-            return "shows :: showsRegion";
-        }
-        populateShows(model, owner, sort);
-        model.addAttribute("scanning", false);
-        model.addAttribute("justScanned", true);
-        return "shows :: showsRegion";
     }
 }

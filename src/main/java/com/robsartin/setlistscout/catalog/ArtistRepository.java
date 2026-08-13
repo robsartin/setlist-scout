@@ -8,6 +8,7 @@ import java.util.Optional;
 public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndStatus(String owner, ArtistStatus status);
     List<Artist> findByOwnerAndStatusIn(String owner, List<ArtistStatus> statuses);
+    List<Artist> findByStatusIn(List<ArtistStatus> statuses);
     List<Artist> findByOwnerAndSource(String owner, ArtistSource source);
     boolean existsByOwnerAndNameIgnoreCase(String owner, String name);
     Optional<Artist> findByIdAndOwner(Long id, String owner);

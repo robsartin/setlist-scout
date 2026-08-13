@@ -19,6 +19,10 @@ public class ScanJob {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     /** The user (email) who owns this job -- set at the persistence boundary. */
     @Column(nullable = false)
     private String owner;
@@ -67,6 +71,7 @@ public class ScanJob {
     }
 
     public Long getId() { return id; }
+    public long getVersion() { return version; }
     public String getOwner() { return owner; }
     public void setOwner(String owner) { this.owner = owner; }
     public Long getArtistId() { return artistId; }

@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -15,11 +16,11 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Paced claim-lease poller for {@code scan_job} (Phase B PR4a). Gated off by default via
- * {@code setlistscout.scan-poller-enabled} -- absent or {@code false} means this bean is never
- * created and the old whole-fleet {@code ShowScanScheduler} batch keeps driving everything
- * unchanged. Flipping the flag on lets this poller start draining {@code SCHEDULED} rows a
- * {@link PollerProperties#scanBatchSize batch} at a time instead.
+ * Paced claim-lease poller for {@code scan_job} (Phase B PR4a/PR4b) -- on by default via
+ * {@code setlistscout.scan-poller-enabled}, the sole driver of scans now that the old whole-fleet
+ * batch scheduler is retired. Setting the flag to {@code false} means this bean is never created
+ * (e.g. for a test slice that doesn't want a live poller running). Draining {@code SCHEDULED}
+ * rows happens a {@link PollerProperties#scanBatchSize batch} at a time.
  * <p>
  * Each tick claims due rows ({@code ScanJobRepository#claimDue}, an atomic
  * {@code FOR UPDATE SKIP LOCKED}), runs {@link ScanUnitRunner} for each one, and reschedules or
@@ -72,11 +73,8 @@ public class ScanPoller {
 
     /**
      * {@code initialDelayString} deliberately reuses {@code scan-tick-ms} rather than a separate
-     * {@code scan-initial-delay-ms} key: that name is already bound in application.yml to the old
-     * {@code ShowScanScheduler}'s 3-day whole-fleet cadence, so reusing it here for this poller's
-     * (much shorter) first-run delay would silently pick up the wrong default the moment both
-     * keys resolve against the same Environment entry. Waiting one tick before the first run is a
-     * perfectly good default anyway.
+     * initial-delay key -- waiting one tick before the first run is a perfectly good default, and
+     * it avoids a second property just for this.
      */
     @Scheduled(fixedDelayString = "${setlistscout.scan-tick-ms:90000}",
                initialDelayString = "${setlistscout.scan-tick-ms:90000}")
@@ -93,8 +91,23 @@ public class ScanPoller {
         try {
             scanUnitRunner.run(job.getOwner(), job.getArtistId(), job.getSource());
             recordSuccess(job, now);
+        } catch (OptimisticLockingFailureException concurrentChange) {
+            // The job was re-dued (SettingsChanged / manual "Scan now") or deleted (ArtistDeactivated)
+            // while we ran it. That writer's intent wins -- drop our stale reschedule and move on.
+            log.atInfo().addKeyValue("owner", job.getOwner()).addKeyValue("artistId", job.getArtistId())
+                    .addKeyValue("source", job.getSource())
+                    .log("scan job changed concurrently during run; skipping reschedule");
         } catch (RuntimeException ex) {
-            recordFailure(job, now, ex);
+            try {
+                recordFailure(job, now, ex);
+            } catch (OptimisticLockingFailureException concurrentChange) {
+                // Same race as above, but hit on the failure-reschedule save instead of the
+                // success-reschedule save: someone re-dued or deleted this job while the unit
+                // ran (and failed). Their write wins -- drop our stale failure bookkeeping.
+                log.atInfo().addKeyValue("owner", job.getOwner()).addKeyValue("artistId", job.getArtistId())
+                        .addKeyValue("source", job.getSource())
+                        .log("scan job changed concurrently during failure reschedule; skipping");
+            }
         }
     }
 
@@ -145,7 +158,8 @@ public class ScanPoller {
         if (attempts >= properties.pollerParkCap()) {
             return interval;
         }
-        Duration exponential = BACKOFF_BASE.multipliedBy(1L << attempts);
+        int shift = Math.min(attempts, 30);   // cap the shift; >2^30 * 10m already dwarfs any interval
+        Duration exponential = BACKOFF_BASE.multipliedBy(1L << shift);
         return exponential.compareTo(interval) < 0 ? exponential : interval;
     }
 

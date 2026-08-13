@@ -34,8 +34,9 @@
   Automated expansion (ADRs 0001, 0002) will produce false positives — loosely related artists, name collisions, or LLM suggestions that don't actually fit.
 - [0005: Output as a live web page, not file/email](0005-output-as-web-page.md)
   The service needs to present found shows in a usable form.
-- [0006: Scan frequency](0006-scan-frequency.md)
+- [0006: Scan frequency](0006-scan-frequency.md) — _Superseded by 0023_
   The scheduled job re-runs expansion and show search on an interval.
+  Related: [0023: Per-unit event-driven scan/expand work model](0023-per-unit-event-driven-scan-work-model.md)
 - [0007: Geographic scope, runtime-configurable](0007-geographic-scope-runtime-configurable.md)
   Initial scope was "anywhere in Texas," later narrowed to "near Austin only — even San Antonio is too far," with an explicit requirement that the scope be easy to change without redeploying.
 - [0008: Hosting on Render](0008-hosting-on-render.md) — _Superseded by 0016_
@@ -63,3 +64,6 @@
 - [0022: Event-driven inter-module communication](0022-event-driven-inter-module-communication.md) — _Accepted_
   Cross-module writes need durability and decoupling; Spring Modulith events with a JPA event-publication registry (Flyway `V4__event_publication.sql`) provide both. Phase A places the registry; Phase B activates publishing and listening.
   Related: [0020: Schema migrations via Flyway](0020-flyway-schema-migrations.md), [0021: Adopt Spring Modulith with enforced boundaries](#modularity)
+- [0023: Per-unit event-driven scan/expand work model](0023-per-unit-event-driven-scan-work-model.md) — _Accepted_
+  The old whole-fleet `@Scheduled` batch rescanned every artist on a fixed interval regardless of need; durable per-`(owner, artist, source)` jobs, enqueued/re-dued by catalog and settings domain events and drained by a paced claim-lease poller, replace it.
+  Related: [0006: Scan frequency](0006-scan-frequency.md), [0022: Event-driven inter-module communication](0022-event-driven-inter-module-communication.md)

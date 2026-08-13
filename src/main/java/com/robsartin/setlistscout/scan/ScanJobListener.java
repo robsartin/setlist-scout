@@ -52,11 +52,10 @@ public class ScanJobListener {
 
     @ApplicationModuleListener
     void onSettingsChanged(SettingsChanged e) {
+        // One version-bumping bulk UPDATE rather than load-all-and-save-each: re-dues every job to
+        // run now at the new location AND bumps version, so an in-flight poller reschedule conflicts
+        // instead of clobbering this back to the stale location (the PR4a review's lost-update fix).
         String locationFingerprint = settingsService.locationFingerprint(e.owner());
-        for (ScanJob job : scanJobRepository.findByOwner(e.owner())) {
-            job.setNextDueAt(Instant.now());
-            job.setLocationFingerprint(locationFingerprint);
-            scanJobRepository.save(job);
-        }
+        scanJobRepository.redueAll(e.owner(), Instant.now(), locationFingerprint);
     }
 }

@@ -44,14 +44,11 @@ server:
   port: ${PORT:8080} # Render sets PORT at runtime
 
 setlistscout:
-  scan-interval-ms: ${SCAN_INTERVAL_MS:259200000} # every 3 days by default -- "every few days"
-  scan-initial-delay-ms: ${SCAN_INITIAL_DELAY_MS:259200000} # first run one interval out, not at boot -- avoids a full scan on every deploy
-
-  # Phase B PR4a paced claim-lease pollers (scan.ScanPoller / expansion.ExpandPoller). Gated OFF
-  # by default -- the old whole-fleet ShowScanScheduler batch above keeps driving everything
-  # unchanged until these flags flip on. See PollerProperties for the full rationale.
-  scan-poller-enabled: ${SCAN_POLLER_ENABLED:false}
-  expand-poller-enabled: ${EXPAND_POLLER_ENABLED:false}
+  # Phase B PR4a/PR4b paced claim-lease pollers (scan.ScanPoller / expansion.ExpandPoller) are the
+  # driver now -- the old whole-fleet ShowScanScheduler batch has been deleted. See PollerProperties
+  # for the full rationale.
+  scan-poller-enabled: ${SCAN_POLLER_ENABLED:true}
+  expand-poller-enabled: ${EXPAND_POLLER_ENABLED:true}
   scan-tick-ms: ${SCAN_TICK_MS:90000} # also used as this poller's initial delay -- see ScanPoller
   expand-tick-ms: ${EXPAND_TICK_MS:90000}
   scan-batch-size: ${SCAN_BATCH_SIZE:20}
@@ -63,6 +60,8 @@ setlistscout:
   # Per-source cadence override, e.g. source-intervals.ticketmaster: 3d -- falls back to
   # scan-interval / expansion-interval above when a source has no entry. Empty by default.
   source-intervals: {}
+  job-backfill-enabled: ${JOB_BACKFILL_ENABLED:true} # startup reconciler: enqueue jobs for active artists that predate the job tables; idempotent (insertIfAbsent)
+  backfill-spread: ${BACKFILL_SPREAD:2h} # jitter window for backfilled next_due_at, so enabling the poller doesn't fire every job on the first tick
 
   auth:
     allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
