@@ -35,7 +35,7 @@
                         <!--/* Remove = reject: drops off the active list, stops scanning, reversible via Unreject.
                                Plain redirect since it updates both the active and rejected sections. */-->
                         <form class="inline remove" th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
-                            <button type="submit" class="btn-bad">Remove</button>
+                            <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${a.name}">Remove</button>
                         </form>
                     </td>
                 </tr>

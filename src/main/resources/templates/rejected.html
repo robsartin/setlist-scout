@@ -15,7 +15,7 @@
                     <td class="note" th:text="${a.note}">Note</td>
                     <td>
                         <form class="inline unreject" th:action="@{'/artists/' + ${a.id} + '/unreject'}" method="post">
-                            <button type="submit" class="btn-sm">Unreject</button>
+                            <button type="submit" class="btn-sm" th:aria-label="'Unreject ' + ${a.name}">Unreject</button>
                         </form>
                     </td>
                 </tr>

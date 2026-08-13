@@ -50,14 +50,16 @@
                         <input type="hidden" name="via" th:value="${g.via}"/>
                         <input type="hidden" name="type" th:value="${rg.source}"/>
                         <input type="hidden" name="decision" value="approve"/>
-                        <button type="submit" class="btn-good btn-sm">Approve all</button>
+                        <button type="submit" class="btn-good btn-sm"
+                                th:aria-label="'Approve all ' + ${rg.label} + ' from ' + ${g.via}">Approve all</button>
                     </form>
                     <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
                           th:action="@{/artists/candidates/group}" method="post">
                         <input type="hidden" name="via" th:value="${g.via}"/>
                         <input type="hidden" name="type" th:value="${rg.source}"/>
                         <input type="hidden" name="decision" value="reject"/>
-                        <button type="submit" class="btn-bad btn-sm">Reject all</button>
+                        <button type="submit" class="btn-bad btn-sm"
+                                th:aria-label="'Reject all ' + ${rg.label} + ' from ' + ${g.via}">Reject all</button>
                     </form>
                 </span>
             </summary>
@@ -66,7 +68,7 @@
                    "toggle once from:closest details" fires once, on the details element's own toggle
                    event -- verified against the vendored htmx build in CandidatesPageRenderTest (the
                    rows endpoint is independently GET-able either way). */-->
-            <div class="body"
+            <div class="body" aria-live="polite" aria-relevant="additions removals"
                  th:hx-get="@{/artists/candidates/rows(via=${g.via},type=${rg.source})}"
                  hx-trigger="toggle once from:closest details"
                  hx-target="this" hx-swap="innerHTML">
@@ -92,12 +94,12 @@
                 <form class="inline" th:action="@{/artists/{id}/approve(id=${a.id})}"
                       th:hx-post="@{/artists/{id}/approve(id=${a.id})}"
                       hx-target="closest .cand" hx-swap="outerHTML" method="post">
-                    <button type="submit" class="btn-good btn-sm">Approve</button>
+                    <button type="submit" class="btn-good btn-sm" th:aria-label="'Approve ' + ${a.name}">Approve</button>
                 </form>
                 <form class="inline" th:action="@{/artists/{id}/reject(id=${a.id})}"
                       th:hx-post="@{/artists/{id}/reject(id=${a.id})}"
                       hx-target="closest .cand" hx-swap="outerHTML" method="post">
-                    <button type="submit" class="btn-bad btn-sm">Reject</button>
+                    <button type="submit" class="btn-bad btn-sm" th:aria-label="'Reject ' + ${a.name}">Reject</button>
                 </form>
             </div>
             <p class="lazy-hint" th:if="${#lists.isEmpty(rows)}">Nothing here.</p>
