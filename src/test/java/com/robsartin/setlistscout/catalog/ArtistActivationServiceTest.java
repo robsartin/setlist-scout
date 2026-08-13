@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
@@ -42,6 +43,7 @@ class ArtistActivationServiceTest {
     @Test
     void pendingToApprovedPublishesArtistActivated() {
         Artist artist = artistWithStatus(ArtistStatus.PENDING_REVIEW);
+        ReflectionTestUtils.setField(artist, "id", 5L);
         when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist));
 
         service.changeStatus(ARTIST_ID, OWNER, ArtistStatus.APPROVED);
@@ -51,6 +53,18 @@ class ArtistActivationServiceTest {
         ArgumentCaptor<ArtistActivated> captor = ArgumentCaptor.forClass(ArtistActivated.class);
         verify(publisher).publishEvent(captor.capture());
         assertThat(captor.getValue()).isEqualTo(new ArtistActivated(OWNER, artist.getId(), artist.getName()));
+    }
+
+    @Test
+    void approvedToSeedPublishesNothing() {
+        Artist artist = artistWithStatus(ArtistStatus.APPROVED);
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist));
+
+        service.changeStatus(ARTIST_ID, OWNER, ArtistStatus.SEED);
+
+        assertThat(artist.getStatus()).isEqualTo(ArtistStatus.SEED);
+        verify(artistRepository).save(artist);
+        verify(publisher, never()).publishEvent(any());
     }
 
     @Test
@@ -104,6 +118,7 @@ class ArtistActivationServiceTest {
     @Test
     void onSeedCreatedPublishesArtistActivated() {
         Artist saved = artistWithStatus(ArtistStatus.SEED);
+        ReflectionTestUtils.setField(saved, "id", 5L);
 
         service.onSeedCreated(saved);
 

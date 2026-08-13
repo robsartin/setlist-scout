@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
@@ -31,6 +32,7 @@ public class ArtistActivationService {
      * Publishes {@link ArtistActivated} or {@link ArtistDeactivated} when the change crosses the
      * active/inactive boundary; publishes nothing otherwise.
      */
+    @Transactional
     public void changeStatus(Long id, String owner, ArtistStatus newStatus) {
         Optional<Artist> found = artistRepository.findByIdAndOwner(id, owner);
         if (found.isEmpty()) {
@@ -49,6 +51,7 @@ public class ArtistActivationService {
     }
 
     /** A newly created SEED artist is active from the start. */
+    @Transactional
     public void onSeedCreated(Artist saved) {
         publisher.publishEvent(new ArtistActivated(saved.getOwner(), saved.getId(), saved.getName()));
     }

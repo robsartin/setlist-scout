@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.shared.events.SettingsChanged;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Owns settings persistence + geocoding: the owner's default row and updates from the settings form. */
 @Service
@@ -35,6 +36,7 @@ public class SettingsService {
         });
     }
 
+    @Transactional
     public SearchSettings updateSettings(String owner, String postalCode, int radiusMiles, int monthsAhead) {
         SearchSettings settings = getOrCreateSettings(owner);
         settings.setPostalCode(postalCode);

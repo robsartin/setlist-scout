@@ -3,6 +3,7 @@ package com.robsartin.setlistscout.catalog;
 import com.robsartin.setlistscout.shared.events.CandidateDiscovered;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
@@ -38,10 +39,27 @@ public class CandidatePersistenceListener {
             return;
         }
         if (artistRepository.existsByOwnerAndNameIgnoreCase(e.owner(), name)) return; // already tracked for this user
-        Artist artist = new Artist(name, ArtistSource.valueOf(e.sourceType()), ArtistStatus.PENDING_REVIEW,
-                e.discoveredVia(), e.note());
+
+        ArtistSource source;
+        try {
+            source = ArtistSource.valueOf(e.sourceType());
+        } catch (IllegalArgumentException ex) {
+            log.atWarn().addKeyValue("sourceType", e.sourceType()).addKeyValue("name", name)
+                    .log("discarded candidate with unknown sourceType");
+            return;
+        }
+
+        Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, e.discoveredVia(), e.note());
         artist.setOwner(e.owner());
-        artistRepository.save(artist);
+        try {
+            artistRepository.save(artist);
+        } catch (DataIntegrityViolationException ex) {
+            // Lost a race against the (owner, name) unique constraint: another concurrent
+            // publication for the same candidate won. Same outcome as the dedup branch above,
+            // just discovered at insert time instead of the pre-check -- a no-op, not an error.
+            log.atDebug().addKeyValue("owner", e.owner()).addKeyValue("name", name)
+                    .log("candidate already persisted concurrently");
+        }
     }
 
     /**

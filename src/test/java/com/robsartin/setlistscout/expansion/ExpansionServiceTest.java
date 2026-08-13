@@ -18,11 +18,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -38,6 +42,7 @@ class ExpansionServiceTest {
     @Mock private SimilarLlmSource similarLlmSource;
     @Mock private TributeLlmSource tributeSource;
     @Mock private ApplicationEventPublisher publisher;
+    @Mock private TransactionTemplate transactionTemplate;
 
     private ExpansionService expansionService;
 
@@ -45,9 +50,19 @@ class ExpansionServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Run the "transaction" synchronously and inline, same as the real TransactionTemplate
+        // would for a caller with no active transaction -- lets the existing publisher-focused
+        // assertions below keep working unchanged.
+        // lenient(): not every test publishes an event, so not every test exercises this stub.
+        lenient().doAnswer(invocation -> {
+            Consumer<TransactionStatus> action = invocation.getArgument(0);
+            action.accept(null);
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+
         expansionService = new ExpansionService(
                 artistRepository, musicBrainzSource, discogsSource, lastFmSource, similarLlmSource, tributeSource,
-                publisher);
+                publisher, transactionTemplate);
     }
 
     private static Artist seedArtist(String name) {

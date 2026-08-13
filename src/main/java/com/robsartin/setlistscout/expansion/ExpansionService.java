@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.HashSet;
 import java.util.List;
@@ -26,6 +27,14 @@ import java.util.function.ToIntBiFunction;
  * search directly, and nothing here persists -- the catalog module's listener turns a
  * published event into a PENDING_REVIEW artist (see CandidatePersistenceListener), and a
  * human has to approve it from there (see ReviewController).
+ * <p>
+ * Each event is published inside its own short, committed transaction via
+ * {@link TransactionTemplate} -- {@code @ApplicationModuleListener} is
+ * {@code @TransactionalEventListener(phase = AFTER_COMMIT)}, so without an active,
+ * committing transaction around the publish call Modulith never registers the event and the
+ * listener never fires. {@link #expandAll} itself is deliberately NOT {@code @Transactional}:
+ * it makes slow external API calls (MusicBrainz/Discogs/LLM) in a loop and must not hold a DB
+ * connection open across them.
  */
 @Service
 public class ExpansionService {
@@ -39,6 +48,7 @@ public class ExpansionService {
     private final SimilarLlmSource similarLlmSource;
     private final TributeLlmSource tributeSource;
     private final ApplicationEventPublisher publisher;
+    private final TransactionTemplate transactionTemplate;
 
     public ExpansionService(ArtistRepository artistRepository,
                              MusicBrainzRelationSource musicBrainzSource,
@@ -46,7 +56,8 @@ public class ExpansionService {
                              LastFmSimilarSource lastFmSource,
                              SimilarLlmSource similarLlmSource,
                              TributeLlmSource tributeSource,
-                             ApplicationEventPublisher publisher) {
+                             ApplicationEventPublisher publisher,
+                             TransactionTemplate transactionTemplate) {
         this.artistRepository = artistRepository;
         this.musicBrainzSource = musicBrainzSource;
         this.discogsSource = discogsSource;
@@ -54,6 +65,7 @@ public class ExpansionService {
         this.similarLlmSource = similarLlmSource;
         this.tributeSource = tributeSource;
         this.publisher = publisher;
+        this.transactionTemplate = transactionTemplate;
     }
 
     public void expandAll(String owner) {
@@ -104,8 +116,10 @@ public class ExpansionService {
 
         int added = 0;
         for (String name : found) {
-            publisher.publishEvent(new CandidateDiscovered(owner, name, ArtistSource.MEMBER_EXPANSION.name(),
-                    base.getName(), "member/lineup relation of " + base.getName()));
+            if (name == null || name.isBlank()) continue;
+            transactionTemplate.executeWithoutResult(status -> publisher.publishEvent(
+                    new CandidateDiscovered(owner, name, ArtistSource.MEMBER_EXPANSION.name(),
+                            base.getName(), "member/lineup relation of " + base.getName())));
             added++;
         }
         log.atDebug().addKeyValue("artist", base.getName()).addKeyValue("members", added).log("member expansion");
@@ -122,12 +136,14 @@ public class ExpansionService {
 
         int added = 0;
         for (String name : all) {
+            if (name == null || name.isBlank()) continue;
             boolean confirmedByBoth = containsIgnoreCase(lastFmResults, name)
                     && containsIgnoreCase(llmResults, name);
             String note = "similar to " + base.getName()
                     + (confirmedByBoth ? " (confirmed by Last.fm + LLM)" : " (single-source match)");
-            publisher.publishEvent(new CandidateDiscovered(owner, name, ArtistSource.SIMILAR_EXPANSION.name(),
-                    base.getName(), note));
+            transactionTemplate.executeWithoutResult(status -> publisher.publishEvent(
+                    new CandidateDiscovered(owner, name, ArtistSource.SIMILAR_EXPANSION.name(),
+                            base.getName(), note)));
             added++;
         }
         log.atDebug().addKeyValue("artist", base.getName()).addKeyValue("similar", added).log("similar expansion");
@@ -137,8 +153,10 @@ public class ExpansionService {
     private int expandTributeBands(String owner, Artist base) {
         int added = 0;
         for (String name : tributeSource.related(base.getName())) {
-            publisher.publishEvent(new CandidateDiscovered(owner, name, ArtistSource.TRIBUTE_EXPANSION.name(),
-                    base.getName(), "tribute/cover act for " + base.getName()));
+            if (name == null || name.isBlank()) continue;
+            transactionTemplate.executeWithoutResult(status -> publisher.publishEvent(
+                    new CandidateDiscovered(owner, name, ArtistSource.TRIBUTE_EXPANSION.name(),
+                            base.getName(), "tribute/cover act for " + base.getName())));
             added++;
         }
         log.atDebug().addKeyValue("artist", base.getName()).addKeyValue("tributes", added).log("tribute expansion");
