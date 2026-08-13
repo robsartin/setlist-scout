@@ -1,32 +1,11 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
-<head>
-    <meta charset="UTF-8"/>
-    <title>Concert Finder</title>
-    <script th:src="@{/js/htmx.min.js}"></script>
-    <style>
-        body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
-        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
-        th a { color: inherit; text-decoration: none; }
-        th a:hover { text-decoration: underline; }
-        .settings { background: #f4f4f4; padding: 1rem; border-radius: 6px; }
-        .settings input { width: 5rem; }
-        form.inline { display: inline; }
-        nav a { margin-right: 1rem; }
-        .notice { color: #15803d; font-weight: 600; margin-top: 1rem; }
-        .tag { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
-        .tag-tribute { background: #7c3aed; color: #fff; }
-    </style>
-</head>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Upcoming Shows', 'shows', ~{::content})}">
 <body>
-    <nav>
-        <a href="/">Shows</a>
-        <a href="/artists">Artists</a>
-    </nav>
+<div th:fragment="content">
     <h1>Upcoming Shows</h1>
 
-    <div class="settings">
+    <div class="settings" id="settings">
         <form th:action="@{/settings}" method="post">
             Near ZIP
             <input type="text" name="postalCode" th:value="${settings.postalCode}" size="5" maxlength="5" pattern="[0-9]{5}" required/>
@@ -53,35 +32,38 @@
             Scan queued — newly found shows will appear here as they're picked up. Reload in a minute or two.
         </p>
 
-        <table>
-            <thead>
-            <tr>
-                <th><a href="?sort=artist">Band</a></th>
-                <th><a href="?sort=eventDate">Date / Time</a></th>
-                <th><a href="?sort=venue">Venue</a></th>
-                <th><a href="?sort=price">Price</a></th>
-                <th><a href="?sort=discoveredAt">Found</a></th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr th:each="show : ${shows}">
-                <td>
-                    <span th:text="${show.artistName}">Band</span>
-                    <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
-                          class="tag tag-tribute">Tribute</span>
-                </td>
-                <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
-                <td>
-                    <span th:text="${show.venueName}">Venue</span>
-                    <span th:if="${show.venueCity}" th:text="' (' + ${show.venueCity} + ')'"></span>
-                    <a th:if="${show.ticketUrl}" th:href="${show.ticketUrl}" target="_blank">tickets</a>
-                </td>
-                <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
-                <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
-            </tr>
-            </tbody>
-        </table>
+        <div style="overflow-x:auto">
+            <table>
+                <thead>
+                <tr>
+                    <th><a href="?sort=artist">Band</a></th>
+                    <th><a href="?sort=eventDate">Date / Time</a></th>
+                    <th><a href="?sort=venue">Venue</a></th>
+                    <th><a href="?sort=price">Price</a></th>
+                    <th><a href="?sort=discoveredAt">Found</a></th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="show : ${shows}">
+                    <td>
+                        <span th:text="${show.artistName}">Band</span>
+                        <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
+                              class="chip tribute">Tribute</span>
+                    </td>
+                    <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
+                    <td>
+                        <span th:text="${show.venueName}">Venue</span>
+                        <span th:if="${show.venueCity}" th:text="' (' + ${show.venueCity} + ')'"></span>
+                        <a th:if="${show.ticketUrl}" th:href="${show.ticketUrl}" target="_blank">tickets</a>
+                    </td>
+                    <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
+                    <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
         <p th:if="${#lists.isEmpty(shows)}">No shows found yet. Try "Scan now", or check back after the next scheduled scan.</p>
     </div>
+</div>
 </body>
 </html>
