@@ -18,8 +18,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -68,7 +70,27 @@ class ArtistPageRenderTest {
                 .andExpect(content().string(containsString("Cover / tribute acts")))
                 .andExpect(content().string(containsString("Damn the Torpedoes")))
                 .andExpect(content().string(containsString("Members")))
-                .andExpect(content().string(containsString("Approve all remaining (2)")));
+                .andExpect(content().string(containsString("Approve all remaining (2)")))
+                .andExpect(content().string(containsString("/css/app.css")))
+                .andExpect(content().string(containsString("aria-current=\"page\"")))
+                .andExpect(content().string(containsString(">Shows<")))
+                .andExpect(content().string(containsString("id=\"active-section\"")))
+                .andExpect(content().string(containsString("id=\"pending-section\"")));
+    }
+
+    @Test
+    void approveAllHtmxReturnsBarePendingSection() throws Exception {
+        String owner = "render-approve-all@example.com";
+        savePending(owner, "Some Pending Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "similar to Dawes");
+
+        String res = mockMvc.perform(post("/artists/approve-all-pending").header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        org.assertj.core.api.Assertions.assertThat(res).contains("pending-section");
+        org.assertj.core.api.Assertions.assertThat(res).doesNotContain("<head").doesNotContain("topbar");
     }
 
     @Test
