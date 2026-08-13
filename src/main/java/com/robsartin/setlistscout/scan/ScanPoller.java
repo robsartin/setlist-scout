@@ -101,7 +101,16 @@ public class ScanPoller {
                     .addKeyValue("source", job.getSource())
                     .log("scan job changed concurrently during run; skipping reschedule");
         } catch (RuntimeException ex) {
-            recordFailure(job, now, ex);
+            try {
+                recordFailure(job, now, ex);
+            } catch (OptimisticLockingFailureException concurrentChange) {
+                // Same race as above, but hit on the failure-reschedule save instead of the
+                // success-reschedule save: someone re-dued or deleted this job while the unit
+                // ran (and failed). Their write wins -- drop our stale failure bookkeeping.
+                log.atInfo().addKeyValue("owner", job.getOwner()).addKeyValue("artistId", job.getArtistId())
+                        .addKeyValue("source", job.getSource())
+                        .log("scan job changed concurrently during failure reschedule; skipping");
+            }
         }
     }
 

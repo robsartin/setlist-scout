@@ -203,4 +203,39 @@ class ExpandPollerTest {
         verify(expandJobRepository).save(ok);
         assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
     }
+
+    @Test
+    @DisplayName("a failure reschedule that loses an optimistic-lock race is swallowed; the tick continues")
+    void concurrentRedueDuringFailureRescheduleIsSkipped() {
+        ExpandJob job = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        // The unit fails, and the failure-path reschedule save loses to a concurrent redueAll:
+        doThrow(new RuntimeException("boom")).when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        when(expandJobRepository.save(job))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ExpandJob.class, 1L));
+
+        // Must not propagate out of tick():
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+        verify(expandUnitRunner).run(job.getOwner(), job.getArtistId(), job.getSource(), ARTIST_NAME);
+    }
+
+    @Test
+    @DisplayName("a conflict on the failure-path reschedule doesn't stop the rest of the batch")
+    void conflictOnFailureRescheduleDoesNotSkipRestOfBatch() {
+        ExpandJob conflicting = job(0);
+        ExpandJob ok = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(conflicting, ok));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        doThrow(new RuntimeException("boom")).doNothing()
+                .when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        when(expandJobRepository.save(conflicting))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ExpandJob.class, 1L));
+
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+
+        verify(expandUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+        verify(expandJobRepository).save(ok);
+        assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+    }
 }

@@ -200,4 +200,38 @@ class ScanPollerTest {
         verify(scanJobRepository).save(ok);
         assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
     }
+
+    @Test
+    @DisplayName("a failure reschedule that loses an optimistic-lock race is swallowed; the tick continues")
+    void concurrentRedueDuringFailureRescheduleIsSkipped() {
+        ScanJob job = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        // The unit fails, and the failure-path reschedule save loses to a concurrent redueAll:
+        when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE)).thenThrow(new RuntimeException("boom"));
+        when(scanJobRepository.save(job))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ScanJob.class, 1L));
+
+        // Must not propagate out of tick():
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+        verify(scanUnitRunner).run(job.getOwner(), job.getArtistId(), job.getSource());
+    }
+
+    @Test
+    @DisplayName("a conflict on the failure-path reschedule doesn't stop the rest of the batch")
+    void conflictOnFailureRescheduleDoesNotSkipRestOfBatch() {
+        ScanJob conflicting = job(0);
+        ScanJob ok = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(conflicting, ok));
+        when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE))
+                .thenThrow(new RuntimeException("boom"))
+                .thenReturn(0);
+        when(scanJobRepository.save(conflicting))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(ScanJob.class, 1L));
+
+        assertThatCode(() -> poller.tick()).doesNotThrowAnyException();
+
+        verify(scanUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE);
+        verify(scanJobRepository).save(ok);
+        assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+    }
 }
