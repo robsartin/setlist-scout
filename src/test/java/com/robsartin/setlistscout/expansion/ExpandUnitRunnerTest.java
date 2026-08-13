@@ -10,10 +10,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,6 +30,15 @@ class ExpandUnitRunnerTest {
 
     @Mock private ApplicationEventPublisher publisher;
     @Mock private RelationSource lastFmSource;
+    @Mock private TransactionTemplate transactionTemplate;
+
+    /** Runs the publish callback synchronously so the mocked publisher sees the event. */
+    private void runCallbacksInline() {
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Consumer.class).accept(null);
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+    }
 
     @Test
     @DisplayName("should publish one CandidateDiscovered per related name, skipping blanks")
@@ -34,8 +47,9 @@ class ExpandUnitRunnerTest {
         when(lastFmSource.classification()).thenReturn(ArtistSource.SIMILAR_EXPANSION);
         when(lastFmSource.note("Dawes")).thenReturn("similar to Dawes (via Last.fm)");
         when(lastFmSource.related("Dawes")).thenReturn(List.of("Nickel Creek", ""));
+        runCallbacksInline();
 
-        ExpandUnitRunner runner = new ExpandUnitRunner(List.of(lastFmSource), publisher);
+        ExpandUnitRunner runner = new ExpandUnitRunner(List.of(lastFmSource), publisher, transactionTemplate);
 
         runner.run(OWNER, 1L, "lastfm", "Dawes");
 
@@ -50,10 +64,10 @@ class ExpandUnitRunnerTest {
     void shouldNoOpForUnknownSourceId() {
         lenient().when(lastFmSource.id()).thenReturn("lastfm");
 
-        ExpandUnitRunner runner = new ExpandUnitRunner(List.of(lastFmSource), publisher);
+        ExpandUnitRunner runner = new ExpandUnitRunner(List.of(lastFmSource), publisher, transactionTemplate);
 
         runner.run(OWNER, 1L, "unknown-source", "Dawes");
 
-        verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+        verify(publisher, never()).publishEvent(any());
     }
 }
