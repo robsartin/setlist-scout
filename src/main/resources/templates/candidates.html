@@ -41,15 +41,19 @@
                 <span class="chip" th:classappend="${rg.chipClass}" th:text="${rg.label}">Label</span>
                 <span class="count" th:text="${rg.count}">0</span>
                 <span class="group-actions">
-                    <!--/* Task 4 implements /artists/candidates/group; rendered here so the controls
-                           exist and can be reviewed now, wired up in the next task. */-->
-                    <form class="inline" th:action="@{/artists/candidates/group}" method="post">
+                    <!--/* Per-group bulk decision: htmx swaps just #global-bar (its pendingCount is
+                           refreshed by NavModelAdvice on every request) so the running total stays
+                           correct; this group's own summary count re-syncs on the next full page
+                           load -- acceptable for v1 (see ReviewController#actionResult javadoc). */-->
+                    <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
+                          th:action="@{/artists/candidates/group}" method="post">
                         <input type="hidden" name="via" th:value="${g.via}"/>
                         <input type="hidden" name="type" th:value="${rg.source}"/>
                         <input type="hidden" name="decision" value="approve"/>
                         <button type="submit" class="btn-good btn-sm">Approve all</button>
                     </form>
-                    <form class="inline" th:action="@{/artists/candidates/group}" method="post">
+                    <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
+                          th:action="@{/artists/candidates/group}" method="post">
                         <input type="hidden" name="via" th:value="${g.via}"/>
                         <input type="hidden" name="type" th:value="${rg.source}"/>
                         <input type="hidden" name="decision" value="reject"/>
@@ -71,6 +75,12 @@
         </details>
     </div>
 
+    <!--/* rowDone: bare empty fragment returned by POST /artists/{id}/approve|reject on htmx requests.
+           Its form targets closest .cand with hx-swap="outerHTML", so swapping this empty span in
+           simply removes the row from view; the group's summary count and nav badge re-sync on the
+           next full page load -- acceptable for v1 (see ReviewController#rowResult javadoc). */-->
+    <span th:fragment="rowDone" class="cand-done" aria-hidden="true"></span>
+
     <!--/* groupRows: bare fragment returned by GET /artists/candidates/rows, both for a group's first
            lazy load (swapped into .body via innerHTML) and for "Show more" (swapped into the button
            itself via outerHTML, nesting a fresh .cand-list -- harmless for <div>s). */-->
@@ -79,13 +89,13 @@
             <div class="cand" th:each="a : ${rows}">
                 <span class="cand-name" th:text="${a.name}">Name</span>
                 <span class="note" th:text="${a.note}">Note</span>
-                <!--/* Task 4 implements /artists/{id}/approve and /artists/{id}/reject; rendered now
-                       so the review controls exist, wired up in the next task. */-->
-                <form class="inline" th:hx-post="@{'/artists/' + ${a.id} + '/approve'}"
+                <form class="inline" th:action="@{/artists/{id}/approve(id=${a.id})}"
+                      th:hx-post="@{/artists/{id}/approve(id=${a.id})}"
                       hx-target="closest .cand" hx-swap="outerHTML" method="post">
                     <button type="submit" class="btn-good btn-sm">Approve</button>
                 </form>
-                <form class="inline" th:hx-post="@{'/artists/' + ${a.id} + '/reject'}"
+                <form class="inline" th:action="@{/artists/{id}/reject(id=${a.id})}"
+                      th:hx-post="@{/artists/{id}/reject(id=${a.id})}"
                       hx-target="closest .cand" hx-swap="outerHTML" method="post">
                     <button type="submit" class="btn-bad btn-sm">Reject</button>
                 </form>

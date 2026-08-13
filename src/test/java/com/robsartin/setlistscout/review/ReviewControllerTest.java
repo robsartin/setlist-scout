@@ -15,13 +15,11 @@ import org.springframework.ui.ConcurrentModel;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,35 +76,62 @@ class ReviewControllerTest {
     }
 
     @Test
-    @DisplayName("review delegates accept/reject decisions to the activation service and skips later")
-    void reviewAppliesEachDecision() {
-        Artist accept = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
-        Artist reject = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 2L);
-        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 3L);
-        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
-                .thenReturn(List.of(accept, reject, later));
+    @DisplayName("approve delegates to the activation service and redirects (no-JS fallback)")
+    void approveRedirectsToCandidates() {
+        String view = controller.approve(1L, null, new ConcurrentModel());
 
-        String view = controller.review(Map.of(
-                "decision-1", "accept",
-                "decision-2", "reject",
-                "decision-3", "later"));
-
-        assertThat(view).isEqualTo("redirect:/artists");
+        assertThat(view).isEqualTo("redirect:/artists/candidates");
         verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
-        verify(activationService).changeStatus(2L, OWNER, ArtistStatus.REJECTED);
-        verify(activationService, never()).changeStatus(eq(3L), any(), any());
     }
 
     @Test
-    @DisplayName("an artist with no submitted decision defaults to Later (left pending)")
-    void reviewLeavesUndecidedPending() {
-        Artist later = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 7L);
-        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
-                .thenReturn(List.of(later));
+    @DisplayName("approve (htmx) delegates to the activation service and returns a bare row-removal fragment")
+    void approveHtmxReturnsRowDoneFragment() {
+        String view = controller.approve(1L, "hx", new ConcurrentModel());
 
-        controller.review(Map.of()); // nothing submitted for this artist
+        assertThat(view).isEqualTo("candidates :: rowDone");
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
+    }
 
-        verify(activationService, never()).changeStatus(eq(7L), any(), any());
+    @Test
+    @DisplayName("reject delegates to the activation service and redirects (no-JS fallback)")
+    void rejectRedirectsToCandidates() {
+        String view = controller.reject(2L, null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists/candidates");
+        verify(activationService).changeStatus(2L, OWNER, ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("reviewGroup approves every pending row in that (via, type) group and redirects")
+    void reviewGroupApprovesGroupAndRedirects() {
+        Artist member1 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
+        Artist member2 = pending("Benmont Tench", ArtistSource.MEMBER_EXPANSION, 2L);
+        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                OWNER, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION))
+                .thenReturn(List.of(member1, member2));
+
+        String view = controller.reviewGroup("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION,
+                "approve", null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists/candidates");
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
+        verify(activationService).changeStatus(2L, OWNER, ArtistStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("reviewGroup (htmx) rejects every pending row in that group and returns the global bar fragment")
+    void reviewGroupHtmxRejectsGroupAndReturnsFragment() {
+        Artist member1 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
+        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                OWNER, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION))
+                .thenReturn(List.of(member1));
+
+        String view = controller.reviewGroup("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION,
+                "reject", "hx", new ConcurrentModel());
+
+        assertThat(view).isEqualTo("candidates :: globalBar");
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.REJECTED);
     }
 
     @Test
