@@ -6,6 +6,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Objects;
+
 /** Owns settings persistence + geocoding: the owner's default row and updates from the settings form. */
 @Service
 public class SettingsService {
@@ -57,5 +59,14 @@ public class SettingsService {
             settings.setCity(geo.city());
             settings.setState(geo.state());
         });
+    }
+
+    /**
+     * Returns a stable hash of the owner's search location (postal code, radius, months ahead).
+     * Pure read; does not publish any event. Lets scan jobs detect a stale location on SettingsChanged.
+     */
+    public String locationFingerprint(String owner) {
+        SearchSettings settings = getOrCreateSettings(owner);
+        return Integer.toHexString(Objects.hash(settings.getPostalCode(), settings.getRadiusMiles(), settings.getMonthsAhead()));
     }
 }

@@ -84,4 +84,80 @@ class SettingsServiceTest {
 
         verify(publisher, never()).publishEvent(any());
     }
+
+    @Test
+    @DisplayName("locationFingerprint returns same hash for same settings")
+    void locationFingerprintIsStableForSameSettings() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        settings.setPostalCode("78701");
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+
+        String fingerprint1 = settingsService.locationFingerprint(OWNER);
+        String fingerprint2 = settingsService.locationFingerprint(OWNER);
+
+        assertThat(fingerprint1).isEqualTo(fingerprint2);
+    }
+
+    @Test
+    @DisplayName("locationFingerprint returns different hash for different radius")
+    void locationFingerprintDifferentForDifferentRadius() {
+        SearchSettings settings1 = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        settings1.setPostalCode("78701");
+        SearchSettings settings2 = new SearchSettings(OWNER, "Austin", "TX", 25, 6);
+        settings2.setPostalCode("78701");
+        when(settingsRepository.findByOwner(OWNER))
+                .thenReturn(Optional.of(settings1))
+                .thenReturn(Optional.of(settings2));
+
+        String fingerprint1 = settingsService.locationFingerprint(OWNER);
+        String fingerprint2 = settingsService.locationFingerprint(OWNER);
+
+        assertThat(fingerprint1).isNotEqualTo(fingerprint2);
+    }
+
+    @Test
+    @DisplayName("locationFingerprint returns different hash for different postal code")
+    void locationFingerprintDifferentForDifferentPostalCode() {
+        SearchSettings settings1 = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        settings1.setPostalCode("78701");
+        SearchSettings settings2 = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        settings2.setPostalCode("75001");
+        when(settingsRepository.findByOwner(OWNER))
+                .thenReturn(Optional.of(settings1))
+                .thenReturn(Optional.of(settings2));
+
+        String fingerprint1 = settingsService.locationFingerprint(OWNER);
+        String fingerprint2 = settingsService.locationFingerprint(OWNER);
+
+        assertThat(fingerprint1).isNotEqualTo(fingerprint2);
+    }
+
+    @Test
+    @DisplayName("locationFingerprint returns different hash for different months ahead")
+    void locationFingerprintDifferentForDifferentMonthsAhead() {
+        SearchSettings settings1 = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        settings1.setPostalCode("78701");
+        SearchSettings settings2 = new SearchSettings(OWNER, "Austin", "TX", 50, 12);
+        settings2.setPostalCode("78701");
+        when(settingsRepository.findByOwner(OWNER))
+                .thenReturn(Optional.of(settings1))
+                .thenReturn(Optional.of(settings2));
+
+        String fingerprint1 = settingsService.locationFingerprint(OWNER);
+        String fingerprint2 = settingsService.locationFingerprint(OWNER);
+
+        assertThat(fingerprint1).isNotEqualTo(fingerprint2);
+    }
+
+    @Test
+    @DisplayName("locationFingerprint does not publish any event")
+    void locationFingerprintDoesNotPublish() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        settings.setPostalCode("78701");
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
+
+        settingsService.locationFingerprint(OWNER);
+
+        verify(publisher, never()).publishEvent(any());
+    }
 }
