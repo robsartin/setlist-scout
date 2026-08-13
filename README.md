@@ -21,8 +21,10 @@ See [docs/adr/](docs/adr/README.md) for the reasoning behind each major design d
    (`setlistscout.scan-poller-enabled` / `expand-poller-enabled`, on by default) tick on
    an interval and drain whatever jobs are currently due, each on its own per-source
    cadence (`scan-interval` / `expansion-interval`, with optional per-source overrides).
-   Newly approved artists, added sources, and settings changes enqueue or re-due jobs
-   automatically. The "Scan now" / "Run expansion now" buttons just re-due your jobs to
+   Newly approved artists and settings changes enqueue or re-due jobs automatically; a
+   source newly added for an already-active artist is picked up by an idempotent startup
+   backfill sweep on the next deploy/restart. The "Scan now" / "Run expansion now" buttons
+   just re-due your jobs to
    "now" and queue them for the next poller tick — they don't run a scan synchronously,
    so the page shows a brief "queued" confirmation rather than results.
 

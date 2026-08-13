@@ -19,8 +19,8 @@ whole batch took.
 Phase B's move to Spring Modulith application events (ADR 0022) made it
 possible to drive work per unit — per `(owner, artist, source)` — instead of
 per fleet, triggered by the domain events that actually change what needs
-scanning (an artist approved, a source added, search settings changed) rather
-than by a blind timer.
+scanning (an artist approved, search settings changed) rather than by a blind
+timer.
 
 ## Decision
 
@@ -31,8 +31,8 @@ work items:
   of work for one owner/artist/source combination, with a `next_due_at`,
   status, attempt count, and a JPA `@Version` column for optimistic locking.
 - Jobs are enqueued, cancelled, and re-dued by catalog and settings domain
-  events (an artist becomes active, a source is added, an owner's search
-  settings change) rather than by a timer sweeping the whole fleet.
+  events (an artist becomes active or inactive, an owner's search settings
+  change) rather than by a timer sweeping the whole fleet.
 - A paced claim-lease poller per job type (`ScanPoller` / `ExpandPoller`)
   ticks on a fixed interval, claims a batch of due jobs with
   `SELECT ... FOR UPDATE SKIP LOCKED` (safe under concurrent pollers), and
@@ -51,7 +51,11 @@ work items:
 - A startup backfill reconciler enqueues jobs for artists that predate the
   job tables, idempotently (`insertIfAbsent`), with a jittered `next_due_at`
   spread (`backfill-spread`) so enabling the pollers doesn't fire every
-  backfilled job on the very first tick.
+  backfilled job on the very first tick. This same reconciler is also what
+  picks up a newly added source (sources are static Spring beans, not
+  runtime-addable, so there's no "source added" domain event) for
+  already-active artists — it runs idempotently on every startup, not just
+  the first.
 - The manual "Scan now" / "Run expansion now" buttons no longer run a
   synchronous scan; they simply re-due the owner's existing jobs to "now"
   and let the poller pick them up on its next tick.
