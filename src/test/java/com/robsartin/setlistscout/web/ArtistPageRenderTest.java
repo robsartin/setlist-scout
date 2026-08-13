@@ -75,7 +75,9 @@ class ArtistPageRenderTest {
                 .andExpect(content().string(containsString("aria-current=\"page\"")))
                 .andExpect(content().string(containsString(">Shows<")))
                 .andExpect(content().string(containsString("id=\"active-section\"")))
-                .andExpect(content().string(containsString("id=\"pending-section\"")));
+                .andExpect(content().string(containsString("id=\"pending-section\"")))
+                .andExpect(content().string(not(containsString("Why it was suggested"))))
+                .andExpect(content().string(not(containsString("unreject"))));
     }
 
     @Test

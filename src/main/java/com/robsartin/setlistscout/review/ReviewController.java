@@ -55,6 +55,14 @@ public class ReviewController {
         return "redirect:/artists";
     }
 
+    /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
+    @GetMapping("/rejected")
+    public String rejected(Model model) {
+        model.addAttribute("rejected",
+                artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.REJECTED));
+        return "rejected";
+    }
+
     /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
     @PostMapping("/{id}/unreject")
     public String unreject(@PathVariable Long id) {

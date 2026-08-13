@@ -39,7 +39,6 @@ public class ArtistController {
         String owner = currentUser.email();
         populateActive(model, owner);
         populatePending(model, owner);
-        model.addAttribute("rejected", artistRepository.findByOwnerAndStatus(owner, ArtistStatus.REJECTED));
         return "artists";
     }
 

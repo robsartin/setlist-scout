@@ -156,24 +156,6 @@
             Nothing pending. Run expansion to find more.
         </p>
     </div>
-
-    <h1>Rejected</h1>
-    <div class="table-scroll">
-        <table>
-            <thead><tr><th>Name</th><th>Why it was suggested</th><th>Actions</th></tr></thead>
-            <tbody>
-            <tr th:each="a : ${rejected}">
-                <td th:text="${a.name}">Name</td>
-                <td class="note" th:text="${a.note}">Note</td>
-                <td>
-                    <form class="inline unreject" th:action="@{'/artists/' + ${a.id} + '/unreject'}" method="post">
-                        <button type="submit">Unreject</button>
-                    </form>
-                </td>
-            </tr>
-            </tbody>
-        </table>
-    </div>
 </div>
 </body>
 </html>
