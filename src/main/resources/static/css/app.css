@@ -61,6 +61,9 @@ tbody tr:last-child td { border-bottom:0; }
 .chip.similar { background:var(--similar-bg); color:var(--similar-ink); }
 .chip.tribute { background:var(--tribute-bg); color:var(--tribute-ink); }
 
+fieldset.decision { border:0; margin:0; padding:0; }
+fieldset.decision label { margin-right:.6rem; white-space:nowrap; }
+
 /* Buttons */
 button, .btn { font:inherit; font-weight:600; cursor:pointer; border-radius:8px; padding:.4rem .8rem; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); font-size:.9rem; }
 button:hover, .btn:hover { border-color:var(--primary); }
