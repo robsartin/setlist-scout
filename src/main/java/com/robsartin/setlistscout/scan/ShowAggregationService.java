@@ -71,9 +71,7 @@ public class ShowAggregationService {
             if (artist.getName() == null || artist.getName().isBlank()) continue;
             searched++;
 
-            ScanQuery query = new ScanQuery(artist.getName(), scanUnitRunner.resolveSiteUrl(artist),
-                    settings.getPostalCode(), settings.getLatitude(), settings.getLongitude(),
-                    settings.getRadiusMiles(), settings.getCity(), start, end);
+            ScanQuery query = scanUnitRunner.buildQuery(artist, settings, start, end);
 
             List<Show> shows = new java.util.ArrayList<>();
             for (ShowSource source : showSources) {

@@ -84,11 +84,20 @@ public class ScanUnitRunner {
         LocalDateTime start = LocalDateTime.now();
         LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
 
-        ScanQuery query = new ScanQuery(artist.getName(), resolveSiteUrl(artist),
-                settings.getPostalCode(), settings.getLatitude(), settings.getLongitude(),
-                settings.getRadiusMiles(), settings.getCity(), start, end);
+        ScanQuery query = buildQuery(artist, settings, start, end);
 
         return persistNew(owner, source.search(query));
+    }
+
+    /**
+     * Builds the {@link ScanQuery} for one artist at the owner's location/window, resolving (and
+     * caching) the official-site URL along the way. The one copy of this construction -- both
+     * {@link #run} and {@link ShowAggregationService#scanForShows} call it.
+     */
+    ScanQuery buildQuery(Artist artist, SearchSettings settings, LocalDateTime start, LocalDateTime end) {
+        return new ScanQuery(artist.getName(), resolveSiteUrl(artist),
+                settings.getPostalCode(), settings.getLatitude(), settings.getLongitude(),
+                settings.getRadiusMiles(), settings.getCity(), start, end);
     }
 
     /**

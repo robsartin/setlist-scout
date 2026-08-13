@@ -144,6 +144,10 @@ class ScanUnitRunnerTest {
 
         assertThat(saved).isEqualTo(0);
         verify(showSource, never()).search(any());
+        // Source lookup happens before ScanQuery-building, so an unknown source never
+        // wastes a MusicBrainz call or writes the artist's cached site URL.
+        verify(musicBrainz, never()).findOfficialHomepage(any());
+        verify(artistRepository, never()).save(any());
     }
 
     @Test
