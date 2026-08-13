@@ -174,6 +174,26 @@ class ScanJobRepositoryTest {
     }
 
     @Test
+    @DisplayName("redueAll commits even with no ambient transaction, proving it is self-transactional "
+            + "-- this is the path ShowController#scanNow calls directly from a plain @PostMapping handler")
+    void redueAllCommitsWithoutAmbientTransaction() {
+        ScanJob job = new ScanJob(2L, "bandsintown", JobStatus.FAILED, 3,
+                Instant.now().plus(java.time.Duration.ofDays(7)), "fp-old");
+        job.setOwner(OWNER);
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+
+        Instant now = Instant.now();
+        int updated = scanJobRepository.redueAll(OWNER, now, "fp-new");
+        assertThat(updated).isEqualTo(1);
+
+        ScanJob after = scanJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getLocationFingerprint()).isEqualTo("fp-new");
+        assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
+    }
+
+    @Test
     @DisplayName("claimDue claims due, unclaimed rows: sets claimed_at + status RUNNING, and returns them")
     void claimDueClaimsDueUnclaimedRows() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);

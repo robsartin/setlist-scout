@@ -2,7 +2,6 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.settings.SettingsService;
-import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
 import com.robsartin.setlistscout.shared.events.SettingsChanged;
@@ -13,14 +12,10 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.within;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,20 +70,10 @@ class ScanJobListenerTest {
     }
 
     @Test
-    @DisplayName("settings-changed re-dues each of the owner's jobs and refreshes fingerprint")
+    @DisplayName("settings-changed re-dues each of the owner's jobs and refreshes fingerprint via one bulk redueAll")
     void settingsChangedReDuesJobs() {
-        ScanJob job1 = new ScanJob(ARTIST_ID, "ticketmaster", JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(3600), "stale-fp");
-        ScanJob job2 = new ScanJob(ARTIST_ID, "bandsintown", JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(3600), "stale-fp");
-        when(scanJobRepository.findByOwner(OWNER)).thenReturn(List.of(job1, job2));
-
         listener.onSettingsChanged(new SettingsChanged(OWNER));
 
-        assertThat(job1.getNextDueAt()).isCloseTo(Instant.now(), within(5, java.time.temporal.ChronoUnit.SECONDS));
-        assertThat(job1.getLocationFingerprint()).isEqualTo(FINGERPRINT);
-        assertThat(job2.getNextDueAt()).isCloseTo(Instant.now(), within(5, java.time.temporal.ChronoUnit.SECONDS));
-        assertThat(job2.getLocationFingerprint()).isEqualTo(FINGERPRINT);
-        verify(scanJobRepository).save(job1);
-        verify(scanJobRepository).save(job2);
-        verify(scanJobRepository, never()).deleteByOwnerAndArtistId(anyString(), anyLong());
+        verify(scanJobRepository).redueAll(eq(OWNER), any(Instant.class), eq(FINGERPRINT));
     }
 }

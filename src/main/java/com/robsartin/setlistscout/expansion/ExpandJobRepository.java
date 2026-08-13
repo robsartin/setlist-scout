@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -59,9 +60,12 @@ public interface ExpandJobRepository extends JpaRepository<ExpandJob, Long> {
     /**
      * Version-safe bulk re-due of every one of an owner's expand jobs (see ScanJobRepository#redueAll;
      * expansion isn't location-sensitive so there's no fingerprint). Used by the manual "Expand now"
-     * button (ReviewController#expandNow).
+     * button (ReviewController#expandNow). {@code @Transactional} makes this self-transactional
+     * regardless of caller: ReviewController#expandNow is a plain {@code @PostMapping} handler with
+     * no ambient transaction, and this {@code @Modifying} bulk query needs one to execute.
      */
     @Modifying
+    @Transactional
     @Query(value = """
             UPDATE expand_job
                SET next_due_at = :now, status = 'SCHEDULED', attempts = 0, claimed_at = NULL,

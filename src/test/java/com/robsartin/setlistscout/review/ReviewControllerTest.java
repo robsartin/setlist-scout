@@ -5,7 +5,7 @@ import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
-import com.robsartin.setlistscout.expansion.ExpansionService;
+import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.ui.ConcurrentModel;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -29,7 +30,7 @@ class ReviewControllerTest {
     private static final String OWNER = "rob@example.com";
 
     private ArtistRepository artistRepository;
-    private ExpansionService expansionService;
+    private ExpandJobRepository expandJobRepository;
     private CurrentUser currentUser;
     private ArtistActivationService activationService;
     private ReviewController controller;
@@ -37,11 +38,11 @@ class ReviewControllerTest {
     @BeforeEach
     void setUp() {
         artistRepository = mock(ArtistRepository.class);
-        expansionService = mock(ExpansionService.class);
+        expandJobRepository = mock(ExpandJobRepository.class);
         currentUser = mock(CurrentUser.class);
         activationService = mock(ArtistActivationService.class);
         when(currentUser.email()).thenReturn(OWNER);
-        controller = new ReviewController(artistRepository, expansionService, currentUser, activationService);
+        controller = new ReviewController(artistRepository, expandJobRepository, currentUser, activationService);
     }
 
     private static Artist pending(String name, ArtistSource source, long id) {
@@ -124,5 +125,25 @@ class ReviewControllerTest {
 
         assertThat(view).isEqualTo("redirect:/artists");
         verify(activationService).changeStatus(4L, OWNER, ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("expandNow re-dues the owner's expand jobs and redirects (no-JS fallback)")
+    void expandNowRedirects() {
+        String view = controller.expandNow(null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists");
+        verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("expandNow (htmx) re-dues the owner's expand jobs and returns the pending fragment")
+    void expandNowHtmxReturnsPendingFragment() {
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of());
+
+        String view = controller.expandNow("hx", new ConcurrentModel());
+
+        assertThat(view).isEqualTo("artists :: pendingSection");
+        verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
     }
 }

@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -71,9 +72,13 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
      * {@code version} so any poller holding one of these rows in-flight conflicts on its next
      * {@code save()} (ScanPoller catches that and skips its stale reschedule) instead of silently
      * overwriting this re-due. Used by ScanJobListener#onSettingsChanged and the manual "Scan now"
-     * button (ShowController#scanNow).
+     * button (ShowController#scanNow). {@code @Transactional} makes this self-transactional
+     * regardless of caller: ShowController#scanNow is a plain {@code @PostMapping} handler with no
+     * ambient transaction, and this {@code @Modifying} bulk query needs one to execute (Spring
+     * Data honors {@code @Transactional} on repository interface methods).
      */
     @Modifying
+    @Transactional
     @Query(value = """
             UPDATE scan_job
                SET next_due_at = :now, status = 'SCHEDULED', attempts = 0, claimed_at = NULL,

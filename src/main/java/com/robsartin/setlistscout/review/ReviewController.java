@@ -5,7 +5,7 @@ import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
-import com.robsartin.setlistscout.expansion.ExpansionService;
+import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -22,14 +22,14 @@ public class ReviewController {
     private static final String HX_REQUEST = "HX-Request";
 
     private final ArtistRepository artistRepository;
-    private final ExpansionService expansionService;
+    private final ExpandJobRepository expandJobRepository;
     private final CurrentUser currentUser;
     private final ArtistActivationService activationService;
 
-    public ReviewController(ArtistRepository artistRepository, ExpansionService expansionService,
+    public ReviewController(ArtistRepository artistRepository, ExpandJobRepository expandJobRepository,
                            CurrentUser currentUser, ArtistActivationService activationService) {
         this.artistRepository = artistRepository;
-        this.expansionService = expansionService;
+        this.expandJobRepository = expandJobRepository;
         this.currentUser = currentUser;
         this.activationService = activationService;
     }
@@ -92,11 +92,11 @@ public class ReviewController {
         return pendingResult(hxRequest, model);
     }
 
-    /** Manually trigger expansion instead of waiting for the scheduled scan. */
+    /** Manually request expansion: mark all of this owner's expand jobs due-now (the poller drains them). */
     @PostMapping("/expand-now")
     public String expandNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
-        expansionService.expandAll(currentUser.email());
+        expandJobRepository.redueAll(currentUser.email(), java.time.Instant.now());
         return pendingResult(hxRequest, model);
     }
 
