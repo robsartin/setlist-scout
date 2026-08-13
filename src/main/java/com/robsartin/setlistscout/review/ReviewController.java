@@ -7,6 +7,7 @@ import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +21,9 @@ public class ReviewController {
 
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
+
+    /** Page size for a lazy-loaded group's rows on the Candidates page. */
+    private static final int ROWS_PAGE = 25;
 
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
@@ -53,6 +57,38 @@ public class ReviewController {
             // "later" (or missing) -> leave it PENDING_REVIEW for a future pass
         }
         return "redirect:/artists";
+    }
+
+    /**
+     * The Candidates page: this owner's pending candidates grouped by base artist (discoveredVia)
+     * and relation type (member/similar/tribute), with counts only -- rows lazy-load per group via
+     * {@link #candidateRows}. {@code pendingCount} for the global bar comes from {@link NavModelAdvice}.
+     */
+    @GetMapping("/candidates")
+    public String candidates(Model model) {
+        var counts = artistRepository.countByStatusGroupedByViaAndSource(
+                currentUser.email(), ArtistStatus.PENDING_REVIEW);
+        model.addAttribute("groups", CandidateGroups.from(counts));
+        return "candidates";
+    }
+
+    /**
+     * One group's page of pending rows, loaded lazily when its {@code <details>} is first expanded
+     * (or via "Show more" for a subsequent page). Owner-scoped like everything else here.
+     */
+    @GetMapping("/candidates/rows")
+    public String candidateRows(@RequestParam String via, @RequestParam ArtistSource type,
+                                @RequestParam(defaultValue = "0") int offset, Model model) {
+        var rows = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type,
+                PageRequest.of(offset / ROWS_PAGE, ROWS_PAGE));
+        model.addAttribute("rows", rows);
+        model.addAttribute("via", via);
+        model.addAttribute("type", type);
+        model.addAttribute("nextOffset", offset + ROWS_PAGE);
+        // Simple heuristic: a full page might mean more remain. Good enough at ROWS_PAGE granularity.
+        model.addAttribute("hasMore", rows.size() == ROWS_PAGE);
+        return "candidates :: groupRows";
     }
 
     /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
@@ -113,20 +149,15 @@ public class ReviewController {
         activationService.changeStatus(id, currentUser.email(), status);
     }
 
-    /** htmx request -> swap just the pending section; otherwise a normal redirect (no-JS fallback). */
+    /**
+     * htmx request -> swap just the Candidates page's global bar (its pendingCount attribute comes
+     * from {@link NavModelAdvice}, already applied to the model for every request); otherwise a
+     * normal redirect to the Candidates page (no-JS fallback), where pending review now lives.
+     */
     private String pendingResult(String hxRequest, Model model) {
         if (hxRequest != null) {
-            populatePending(model, currentUser.email());
-            return "artists :: pendingSection";
+            return "candidates :: globalBar";
         }
-        return "redirect:/artists";
-    }
-
-    private void populatePending(Model model, String owner) {
-        List<Artist> pending = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW);
-        model.addAttribute("pendingTributes", pending.stream()
-                .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION).toList());
-        model.addAttribute("pendingOthers", pending.stream()
-                .filter(a -> a.getSource() != ArtistSource.TRIBUTE_EXPANSION).toList());
+        return "redirect:/artists/candidates";
     }
 }

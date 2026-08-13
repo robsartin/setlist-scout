@@ -128,22 +128,20 @@ class ReviewControllerTest {
     }
 
     @Test
-    @DisplayName("expandNow re-dues the owner's expand jobs and redirects (no-JS fallback)")
+    @DisplayName("expandNow re-dues the owner's expand jobs and redirects to Candidates (no-JS fallback)")
     void expandNowRedirects() {
         String view = controller.expandNow(null, new ConcurrentModel());
 
-        assertThat(view).isEqualTo("redirect:/artists");
+        assertThat(view).isEqualTo("redirect:/artists/candidates");
         verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
     }
 
     @Test
-    @DisplayName("expandNow (htmx) re-dues the owner's expand jobs and returns the pending fragment")
-    void expandNowHtmxReturnsPendingFragment() {
-        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of());
-
+    @DisplayName("expandNow (htmx) re-dues the owner's expand jobs and returns the Candidates global bar fragment")
+    void expandNowHtmxReturnsGlobalBarFragment() {
         String view = controller.expandNow("hx", new ConcurrentModel());
 
-        assertThat(view).isEqualTo("artists :: pendingSection");
+        assertThat(view).isEqualTo("candidates :: globalBar");
         verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
     }
 }

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Candidates', 'candidates', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <h1>Candidates</h1>
+    <p class="page-sub">Discovered via expansion, grouped by the base artist that led us here. Expand a group to review its rows.</p>
+
+    <!--/* globalBar is the htmx swap target for the bulk actions: approve-all/reject-all/expand-now
+           all return just this (pendingCount comes from NavModelAdvice on every request). */-->
+    <div th:fragment="globalBar" id="global-bar" class="globalbar card" aria-live="polite">
+        <span class="count-label">
+            <strong th:text="${pendingCount}">0</strong> pending
+        </span>
+        <form class="inline" th:if="${pendingCount != null and pendingCount > 0}"
+              hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
+              th:action="@{/artists/approve-all-pending}" method="post">
+            <button type="submit" class="btn-good">Approve all remaining</button>
+        </form>
+        <form class="inline" th:if="${pendingCount != null and pendingCount > 0}"
+              hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
+              th:action="@{/artists/reject-all-pending}" method="post">
+            <button type="submit" class="btn-bad btn-sm">Reject all remaining</button>
+        </form>
+        <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
+              th:action="@{/artists/expand-now}" method="post">
+            <button type="submit">Run expansion now</button>
+        </form>
+    </div>
+
+    <p th:if="${#lists.isEmpty(groups)}">Nothing pending. Run expansion to find more.</p>
+
+    <div class="artist-group card" th:each="g : ${groups}">
+        <div class="artist-group-header">
+            <h2 th:text="${g.via}">Base artist</h2>
+            <span class="count" th:text="${g.total}">0</span>
+        </div>
+
+        <details class="relgroup" th:each="rg : ${g.relationGroups}">
+            <summary>
+                <span class="chip" th:classappend="${rg.chipClass}" th:text="${rg.label}">Label</span>
+                <span class="count" th:text="${rg.count}">0</span>
+                <span class="group-actions">
+                    <!--/* Task 4 implements /artists/candidates/group; rendered here so the controls
+                           exist and can be reviewed now, wired up in the next task. */-->
+                    <form class="inline" th:action="@{/artists/candidates/group}" method="post">
+                        <input type="hidden" name="via" th:value="${g.via}"/>
+                        <input type="hidden" name="type" th:value="${rg.source}"/>
+                        <input type="hidden" name="decision" value="approve"/>
+                        <button type="submit" class="btn-good btn-sm">Approve all</button>
+                    </form>
+                    <form class="inline" th:action="@{/artists/candidates/group}" method="post">
+                        <input type="hidden" name="via" th:value="${g.via}"/>
+                        <input type="hidden" name="type" th:value="${rg.source}"/>
+                        <input type="hidden" name="decision" value="reject"/>
+                        <button type="submit" class="btn-bad btn-sm">Reject all</button>
+                    </form>
+                </span>
+            </summary>
+            <!--/* Lazy load: the body only fetches this group's rows the first time the <details>
+                   opens, so the initial page render carries counts only, not every candidate row.
+                   "toggle once from:closest details" fires once, on the details element's own toggle
+                   event -- verified against the vendored htmx build in CandidatesPageRenderTest (the
+                   rows endpoint is independently GET-able either way). */-->
+            <div class="body"
+                 th:hx-get="@{/artists/candidates/rows(via=${g.via},type=${rg.source})}"
+                 hx-trigger="toggle once from:closest details"
+                 hx-target="this" hx-swap="innerHTML">
+                <p class="lazy-hint">Loading&hellip;</p>
+            </div>
+        </details>
+    </div>
+
+    <!--/* groupRows: bare fragment returned by GET /artists/candidates/rows, both for a group's first
+           lazy load (swapped into .body via innerHTML) and for "Show more" (swapped into the button
+           itself via outerHTML, nesting a fresh .cand-list -- harmless for <div>s). */-->
+    <div th:fragment="groupRows">
+        <div class="cand-list">
+            <div class="cand" th:each="a : ${rows}">
+                <span class="cand-name" th:text="${a.name}">Name</span>
+                <span class="note" th:text="${a.note}">Note</span>
+                <!--/* Task 4 implements /artists/{id}/approve and /artists/{id}/reject; rendered now
+                       so the review controls exist, wired up in the next task. */-->
+                <form class="inline" th:hx-post="@{'/artists/' + ${a.id} + '/approve'}"
+                      hx-target="closest .cand" hx-swap="outerHTML" method="post">
+                    <button type="submit" class="btn-good btn-sm">Approve</button>
+                </form>
+                <form class="inline" th:hx-post="@{'/artists/' + ${a.id} + '/reject'}"
+                      hx-target="closest .cand" hx-swap="outerHTML" method="post">
+                    <button type="submit" class="btn-bad btn-sm">Reject</button>
+                </form>
+            </div>
+            <p class="lazy-hint" th:if="${#lists.isEmpty(rows)}">Nothing here.</p>
+            <button th:if="${hasMore}" type="button" class="btn-sm show-more"
+                    th:hx-get="@{/artists/candidates/rows(via=${via},type=${type},offset=${nextOffset})}"
+                    hx-target="this" hx-swap="outerHTML">
+                Show more
+            </button>
+        </div>
+    </div>
+</div>
+</body>
+</html>

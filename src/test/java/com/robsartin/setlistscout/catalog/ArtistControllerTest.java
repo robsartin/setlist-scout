@@ -45,20 +45,19 @@ class ArtistControllerTest {
     }
 
     @Test
-    @DisplayName("list() splits pending into tribute acts and everyone else")
-    void listGroupsPendingBySource() {
-        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).thenReturn(List.of(
-                pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION),
-                pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION),
-                pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION)));
+    @DisplayName("list() populates only the active (seed + approved) list -- pending review moved to Candidates")
+    void listPopulatesActiveOnly() {
+        Artist active = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+                .thenReturn(List.of(active));
 
         Model model = new ConcurrentModel();
         controller.list(model);
 
-        assertThat((List<Artist>) model.getAttribute("pendingTributes"))
-                .extracting(Artist::getName).containsExactly("Damn the Torpedoes");
-        assertThat((List<Artist>) model.getAttribute("pendingOthers"))
-                .extracting(Artist::getName).containsExactly("Mike Campbell", "Jackson Browne");
+        assertThat((List<Artist>) model.getAttribute("active"))
+                .extracting(Artist::getName).containsExactly("Wilco");
+        assertThat(model.getAttribute("pendingTributes")).isNull();
+        assertThat(model.getAttribute("pendingOthers")).isNull();
     }
 
     @Test
