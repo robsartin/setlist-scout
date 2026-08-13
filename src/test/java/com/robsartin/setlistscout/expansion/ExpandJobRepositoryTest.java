@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.shared.JobStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +48,15 @@ class ExpandJobRepositoryTest {
 
     @Autowired
     private ExpandJobRepository expandJobRepository;
+
+    /**
+     * claimDue has no owner filter (poller-wide claim), so start every test from an empty table
+     * -- see ScanJobRepositoryTest#clearScanJobs for the full rationale.
+     */
+    @BeforeEach
+    void clearExpandJobs() {
+        expandJobRepository.deleteAll();
+    }
 
     @Test
     @DisplayName("save + findByOwnerAndArtistIdAndSource round-trips all fields")
@@ -86,5 +97,33 @@ class ExpandJobRepositoryTest {
 
         assertThatThrownBy(() -> expandJobRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("claimDue claims a due, unclaimed row and skips a not-yet-due one "
+            + "(smoke test -- full behavioral coverage lives in ScanJobRepositoryTest#claimDue*)")
+    void claimDueClaimsDueRowsAndSkipsNotYetDueOnes() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant leaseCutoff = now.minus(5, ChronoUnit.MINUTES);
+
+        ExpandJob due = new ExpandJob(1L, "lastfm", JobStatus.SCHEDULED, 0, now.minus(1, ChronoUnit.MINUTES));
+        due.setOwner(OWNER);
+        expandJobRepository.save(due);
+
+        ExpandJob notYetDue = new ExpandJob(2L, "lastfm", JobStatus.SCHEDULED, 0, now.plus(1, ChronoUnit.HOURS));
+        notYetDue.setOwner(OWNER);
+        expandJobRepository.save(notYetDue);
+
+        List<ExpandJob> claimed = expandJobRepository.claimDue(now, leaseCutoff, 10);
+
+        assertThat(claimed).extracting(ExpandJob::getId)
+                .contains(due.getId())
+                .doesNotContain(notYetDue.getId());
+        ExpandJob reloadedDue = expandJobRepository.findById(due.getId()).orElseThrow();
+        assertThat(reloadedDue.getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(reloadedDue.getClaimedAt()).isEqualTo(now);
+        ExpandJob reloadedNotYetDue = expandJobRepository.findById(notYetDue.getId()).orElseThrow();
+        assertThat(reloadedNotYetDue.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(reloadedNotYetDue.getClaimedAt()).isNull();
     }
 }

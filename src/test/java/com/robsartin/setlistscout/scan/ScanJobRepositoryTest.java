@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.shared.JobStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +16,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -47,6 +57,17 @@ class ScanJobRepositoryTest {
 
     @Autowired
     private ScanJobRepository scanJobRepository;
+
+    /**
+     * claimDue has no owner filter (it's a poller-wide claim, not scoped to one caller), so a
+     * stray due row left behind by another test in this class would silently pollute the
+     * claimDue tests' counts. Starting every test from an empty table keeps them independent of
+     * execution order.
+     */
+    @BeforeEach
+    void clearScanJobs() {
+        scanJobRepository.deleteAll();
+    }
 
     @Test
     @DisplayName("save + findByOwnerAndArtistIdAndSource round-trips all fields")
@@ -88,5 +109,131 @@ class ScanJobRepositoryTest {
 
         assertThatThrownBy(() -> scanJobRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("claimDue claims due, unclaimed rows: sets claimed_at + status RUNNING, and returns them")
+    void claimDueClaimsDueUnclaimedRows() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant leaseCutoff = now.minus(5, ChronoUnit.MINUTES);
+        ScanJob due = persist(1L, "ticketmaster", now.minus(1, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED);
+
+        List<ScanJob> claimed = scanJobRepository.claimDue(now, leaseCutoff, 10);
+
+        assertThat(claimed).extracting(ScanJob::getId).containsExactly(due.getId());
+        ScanJob returned = claimed.get(0);
+        assertThat(returned.getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(returned.getClaimedAt()).isEqualTo(now);
+
+        ScanJob reloaded = scanJobRepository.findById(due.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(reloaded.getClaimedAt()).isEqualTo(now);
+    }
+
+    @Test
+    @DisplayName("claimDue does not claim a row that isn't due yet")
+    void claimDueSkipsNotYetDueRows() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant leaseCutoff = now.minus(5, ChronoUnit.MINUTES);
+        ScanJob notYetDue = persist(2L, "ticketmaster", now.plus(1, ChronoUnit.HOURS), null, JobStatus.SCHEDULED);
+
+        List<ScanJob> claimed = scanJobRepository.claimDue(now, leaseCutoff, 10);
+
+        assertThat(claimed).extracting(ScanJob::getId).doesNotContain(notYetDue.getId());
+        ScanJob reloaded = scanJobRepository.findById(notYetDue.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(reloaded.getClaimedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("claimDue skips a freshly-leased row but re-claims one whose lease has expired")
+    void claimDueRespectsLeaseCutoff() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant leaseCutoff = now.minus(5, ChronoUnit.MINUTES);
+        ScanJob freshlyLeased = persist(3L, "ticketmaster", now.minus(10, ChronoUnit.MINUTES),
+                now.minus(1, ChronoUnit.MINUTES), JobStatus.RUNNING);
+        ScanJob expiredLease = persist(4L, "ticketmaster", now.minus(10, ChronoUnit.MINUTES),
+                now.minus(10, ChronoUnit.MINUTES), JobStatus.RUNNING);
+
+        List<ScanJob> claimed = scanJobRepository.claimDue(now, leaseCutoff, 10);
+
+        assertThat(claimed).extracting(ScanJob::getId)
+                .contains(expiredLease.getId())
+                .doesNotContain(freshlyLeased.getId());
+
+        ScanJob reloadedFresh = scanJobRepository.findById(freshlyLeased.getId()).orElseThrow();
+        assertThat(reloadedFresh.getClaimedAt()).isEqualTo(now.minus(1, ChronoUnit.MINUTES));
+
+        ScanJob reloadedExpired = scanJobRepository.findById(expiredLease.getId()).orElseThrow();
+        assertThat(reloadedExpired.getClaimedAt()).isEqualTo(now);
+        assertThat(reloadedExpired.getStatus()).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    @DisplayName("claimDue respects the batch limit, leaving the rest unclaimed")
+    void claimDueRespectsBatchLimit() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant leaseCutoff = now.minus(5, ChronoUnit.MINUTES);
+        ScanJob a = persist(5L, "ticketmaster", now.minus(3, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED);
+        ScanJob b = persist(6L, "ticketmaster", now.minus(2, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED);
+        ScanJob c = persist(7L, "ticketmaster", now.minus(1, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED);
+
+        List<ScanJob> claimed = scanJobRepository.claimDue(now, leaseCutoff, 2);
+
+        assertThat(claimed).hasSize(2);
+        List<ScanJob> all = scanJobRepository.findAllById(List.of(a.getId(), b.getId(), c.getId()));
+        long runningCount = all.stream().filter(j -> j.getStatus() == JobStatus.RUNNING).count();
+        long scheduledCount = all.stream().filter(j -> j.getStatus() == JobStatus.SCHEDULED).count();
+        assertThat(runningCount).isEqualTo(2);
+        assertThat(scheduledCount).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("two concurrent claimDue calls over overlapping due rows never claim the same row (SKIP LOCKED)")
+    void claimDueIsSafeUnderConcurrency() throws Exception {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant leaseCutoff = now.minus(5, ChronoUnit.MINUTES);
+        List<Long> availableIds = List.of(
+                persist(10L, "ticketmaster", now.minus(3, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED).getId(),
+                persist(11L, "ticketmaster", now.minus(2, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED).getId(),
+                persist(12L, "ticketmaster", now.minus(1, ChronoUnit.MINUTES), null, JobStatus.SCHEDULED).getId());
+
+        // Each thread races the other via its own connection/transaction (a plain repository
+        // call outside any surrounding @Transactional gets its own), both gated on one latch so
+        // their claimDue statements overlap in Postgres rather than running sequentially -- the
+        // condition SKIP LOCKED is meant to handle.
+        CountDownLatch startLatch = new CountDownLatch(1);
+        Callable<List<Long>> claimTask = () -> {
+            startLatch.await();
+            return scanJobRepository.claimDue(now, leaseCutoff, 3).stream()
+                    .map(ScanJob::getId)
+                    .collect(Collectors.toList());
+        };
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<Long>> future1 = executor.submit(claimTask);
+            Future<List<Long>> future2 = executor.submit(claimTask);
+            startLatch.countDown();
+
+            List<Long> claimedByThread1 = future1.get(10, TimeUnit.SECONDS);
+            List<Long> claimedByThread2 = future2.get(10, TimeUnit.SECONDS);
+
+            List<Long> union = new ArrayList<>(claimedByThread1);
+            union.addAll(claimedByThread2);
+            assertThat(union).as("no row claimed by both threads").doesNotHaveDuplicates();
+            assertThat(union.size()).as("total claimed does not exceed what was available")
+                    .isLessThanOrEqualTo(availableIds.size());
+            assertThat(availableIds).as("every available row ended up claimed by exactly one thread")
+                    .containsExactlyInAnyOrderElementsOf(union);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private ScanJob persist(Long artistId, String source, Instant nextDueAt, Instant claimedAt, JobStatus status) {
+        ScanJob job = new ScanJob(artistId, source, status, 0, nextDueAt, "fp");
+        job.setOwner(OWNER);
+        job.setClaimedAt(claimedAt);
+        return scanJobRepository.save(job);
     }
 }

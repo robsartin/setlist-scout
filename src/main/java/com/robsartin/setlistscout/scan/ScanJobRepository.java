@@ -37,4 +37,31 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
                          @Param("source") String source,
                          @Param("nextDueAt") Instant nextDueAt,
                          @Param("locationFingerprint") String locationFingerprint);
+
+    /**
+     * Atomically claims up to {@code batch} due, unclaimed-or-stale-leased rows for the poller
+     * (PR4): {@code FOR UPDATE SKIP LOCKED} on the inner selection means two pollers racing this
+     * query concurrently never claim the same row -- each just skips whatever the other already
+     * has locked and picks the next candidate instead of blocking on it. A row is a candidate if
+     * it's due ({@code next_due_at <= :now}) and either never claimed or its lease has expired
+     * ({@code claimed_at < :leaseCutoff}), oldest-due first. {@code RETURNING *} maps straight
+     * back onto the entity via this native query -- verified against real Postgres in
+     * ScanJobRepositoryTest, since Spring Data's native-query-to-entity mapping for a RETURNING
+     * clause isn't guaranteed by the framework docs the way a plain SELECT is.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE scan_job SET claimed_at = :now, status = 'RUNNING'
+            WHERE id IN (
+                SELECT id FROM scan_job
+                WHERE next_due_at <= :now AND (claimed_at IS NULL OR claimed_at < :leaseCutoff)
+                ORDER BY next_due_at
+                LIMIT :batch
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+            """, nativeQuery = true)
+    List<ScanJob> claimDue(@Param("now") Instant now,
+                            @Param("leaseCutoff") Instant leaseCutoff,
+                            @Param("batch") int batch);
 }
