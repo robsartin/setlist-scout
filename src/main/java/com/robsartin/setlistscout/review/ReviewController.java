@@ -102,7 +102,15 @@ public class ReviewController {
     public String reviewGroup(@RequestParam String via, @RequestParam ArtistSource type,
                               @RequestParam String decision,
                               @RequestHeader(value = HX_REQUEST, required = false) String hxRequest, Model model) {
-        ArtistStatus status = "approve".equals(decision) ? ArtistStatus.APPROVED : ArtistStatus.REJECTED;
+        ArtistStatus status;
+        if ("approve".equals(decision)) {
+            status = ArtistStatus.APPROVED;
+        } else if ("reject".equals(decision)) {
+            status = ArtistStatus.REJECTED;
+        } else {
+            // Malformed decision: do nothing rather than silently defaulting to reject.
+            return actionResult(hxRequest, model);
+        }
         for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
                 currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type)) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);

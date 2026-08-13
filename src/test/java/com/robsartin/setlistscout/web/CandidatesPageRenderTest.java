@@ -103,6 +103,26 @@ class CandidatesPageRenderTest {
         assertThat(body).doesNotContain("Mike Campbell");
         assertThat(body).doesNotContain("Benmont Tench");
         assertThat(body).doesNotContain("Jackson Browne");
+
+        // Groups exist, so the rows-fragment empty state ("Nothing here.") must not leak onto the
+        // full page -- it lives inside groupRows, which isn't rendered on this response (rows=null).
+        assertThat(body).doesNotContain("Nothing here.");
+    }
+
+    @Test
+    void candidateRowsEndpointShowsNothingHereWhenGroupIsEmpty() throws Exception {
+        String owner = "render-candidates-empty-rows@example.com";
+        seedGroupedCandidates(owner);
+
+        // Tom Petty has no TRIBUTE_EXPANSION rows -- this group's page of rows is genuinely empty.
+        String body = mockMvc.perform(get("/artists/candidates/rows")
+                        .param("via", TOM_PETTY)
+                        .param("type", "TRIBUTE_EXPANSION")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Nothing here.");
     }
 
     @Test

@@ -135,6 +135,17 @@ class ReviewControllerTest {
     }
 
     @Test
+    @DisplayName("reviewGroup with a malformed decision does not mutate anything and still returns a result")
+    void reviewGroupWithMalformedDecisionDoesNothing() {
+        String view = controller.reviewGroup("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION,
+                "bogus", null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists/candidates");
+        verify(activationService, org.mockito.Mockito.never()).changeStatus(any(), any(), any());
+        org.mockito.Mockito.verifyNoInteractions(artistRepository);
+    }
+
+    @Test
     @DisplayName("unreject delegates to the activation service to move a rejected artist back to pending")
     void unrejectMovesBackToPending() {
         String view = controller.unreject(9L);

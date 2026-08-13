@@ -102,7 +102,7 @@
                     <button type="submit" class="btn-bad btn-sm" th:aria-label="'Reject ' + ${a.name}">Reject</button>
                 </form>
             </div>
-            <p class="lazy-hint" th:if="${#lists.isEmpty(rows)}">Nothing here.</p>
+            <p class="lazy-hint" th:if="${rows != null and #lists.isEmpty(rows)}">Nothing here.</p>
             <button th:if="${hasMore}" type="button" class="btn-sm show-more"
                     th:hx-get="@{/artists/candidates/rows(via=${via},type=${type},offset=${nextOffset})}"
                     hx-target="this" hx-swap="outerHTML">
