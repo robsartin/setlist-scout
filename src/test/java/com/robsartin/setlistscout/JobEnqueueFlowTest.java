@@ -3,6 +3,7 @@ package com.robsartin.setlistscout;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSeedService;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJob;
@@ -88,6 +89,9 @@ class JobEnqueueFlowTest {
     @Autowired
     private List<RelationSource> relationSources;
 
+    @Autowired
+    private ArtistSeedService artistSeedService;
+
     /**
      * The real ShowSource/RelationSource beans are left in the context (their id()s are what the
      * listeners fan out over -- exactly what's under test); only the external geocoder is
@@ -96,13 +100,29 @@ class JobEnqueueFlowTest {
     @MockBean
     private GeocodingService geocodingService;
 
+    /**
+     * The tribute-llm RelationSource is only ever enqueued for SEED artists (tribute/cover-band
+     * expansion doesn't make sense for an artist a user explicitly approved from search results),
+     * so an APPROVED artist gets one expand_job per RelationSource EXCEPT the tribute source. The
+     * SEED path getting all {@code relationSources.size()} expand jobs, including tribute, is
+     * covered by ExpandJobListenerTest's unit tests (and by
+     * {@link #seedingAnArtistEnqueuesAllExpandJobsIncludingTribute()} below end-to-end).
+     */
+    private List<String> nonTributeExpandSourceIds() {
+        return relationSources.stream()
+                .filter(s -> s.classification() != ArtistSource.TRIBUTE_EXPANSION)
+                .map(RelationSource::id)
+                .toList();
+    }
+
     @Test
     @DisplayName("changeStatus(APPROVED) publishes ArtistActivated in a committed tx, and the real "
-            + "listeners enqueue one SCHEDULED scan_job per ShowSource and one per RelationSource")
+            + "listeners enqueue one SCHEDULED scan_job per ShowSource and one per non-tribute RelationSource")
     void activatingAnArtistEnqueuesAllScanAndExpandJobs() {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         String owner = "enqueue-flow@example.com";
         Long artistId = persistArtist(owner, "Enqueue Flow Artist", ArtistStatus.PENDING_REVIEW);
+        List<String> expectedExpandSourceIds = nonTributeExpandSourceIds();
 
         artistActivationService.changeStatus(artistId, owner, ArtistStatus.APPROVED);
 
@@ -111,14 +131,34 @@ class JobEnqueueFlowTest {
                 jobs -> jobs.size() == showSources.size());
         List<ExpandJob> expandJobs = awaitUntil(
                 () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
-                jobs -> jobs.size() == relationSources.size());
+                jobs -> jobs.size() == expectedExpandSourceIds.size());
 
         assertThat(scanJobs).as("one scan_job per ShowSource").hasSize(showSources.size());
         assertThat(scanJobs).allMatch(j -> j.getStatus() == JobStatus.SCHEDULED);
         assertThat(scanJobs).extracting(ScanJob::getSource)
                 .containsExactlyInAnyOrderElementsOf(showSources.stream().map(ShowSource::id).toList());
 
-        assertThat(expandJobs).as("one expand_job per RelationSource").hasSize(relationSources.size());
+        // APPROVED artists get no tribute expand_job: tribute expansion is SEED-only.
+        assertThat(expandJobs).as("one expand_job per non-tribute RelationSource").hasSize(expectedExpandSourceIds.size());
+        assertThat(expandJobs).allMatch(j -> j.getStatus() == JobStatus.SCHEDULED);
+        assertThat(expandJobs).extracting(ExpandJob::getSource)
+                .containsExactlyInAnyOrderElementsOf(expectedExpandSourceIds);
+    }
+
+    @Test
+    @DisplayName("ArtistSeedService.addSeedIfNew publishes ArtistActivated(SEED) in a committed tx, "
+            + "and the real listener enqueues one expand_job per RelationSource, including tribute-llm")
+    void seedingAnArtistEnqueuesAllExpandJobsIncludingTribute() {
+        String owner = "seed-flow@example.com";
+        artistSeedService.addSeedIfNew(owner, "Seed Flow Artist");
+        Long artistId = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.SEED).get(0).getId();
+
+        List<ExpandJob> expandJobs = awaitUntil(
+                () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
+                jobs -> jobs.size() == relationSources.size());
+
+        assertThat(expandJobs).as("one expand_job per RelationSource, including tribute-llm for SEED")
+                .hasSize(relationSources.size());
         assertThat(expandJobs).allMatch(j -> j.getStatus() == JobStatus.SCHEDULED);
         assertThat(expandJobs).extracting(ExpandJob::getSource)
                 .containsExactlyInAnyOrderElementsOf(relationSources.stream().map(RelationSource::id).toList());
@@ -175,6 +215,7 @@ class JobEnqueueFlowTest {
                 Instant.now(), "pre-existing-fp");
         preExisting.setOwner(owner);
         scanJobRepository.save(preExisting);
+        List<String> expectedExpandSourceIds = nonTributeExpandSourceIds();
 
         artistActivationService.changeStatus(artistId, owner, ArtistStatus.APPROVED);
 
@@ -183,16 +224,17 @@ class JobEnqueueFlowTest {
                 jobs -> jobs.size() == showSources.size());
         List<ExpandJob> expandJobs = awaitUntil(
                 () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
-                jobs -> jobs.size() == relationSources.size());
+                jobs -> jobs.size() == expectedExpandSourceIds.size());
 
         assertThat(scanJobs).as("the pre-existing source wasn't duplicated, and the rest were enqueued")
                 .hasSize(showSources.size());
         assertThat(scanJobs).extracting(ScanJob::getSource)
                 .containsExactlyInAnyOrderElementsOf(showSources.stream().map(ShowSource::id).toList());
+        // APPROVED artists get no tribute expand_job: tribute expansion is SEED-only.
         assertThat(expandJobs).as("expand_job enqueue completed in the same pass, unaffected by the "
-                + "scan_job conflict").hasSize(relationSources.size());
+                + "scan_job conflict").hasSize(expectedExpandSourceIds.size());
         assertThat(expandJobs).extracting(ExpandJob::getSource)
-                .containsExactlyInAnyOrderElementsOf(relationSources.stream().map(RelationSource::id).toList());
+                .containsExactlyInAnyOrderElementsOf(expectedExpandSourceIds);
     }
 
     @Test
@@ -208,7 +250,7 @@ class JobEnqueueFlowTest {
                 jobs -> jobs.size() == showSources.size());
         awaitUntil(
                 () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
-                jobs -> jobs.size() == relationSources.size());
+                jobs -> jobs.size() == nonTributeExpandSourceIds().size());
 
         artistActivationService.changeStatus(artistId, owner, ArtistStatus.REJECTED);
 

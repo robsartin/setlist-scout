@@ -33,4 +33,26 @@ public interface ExpandJobRepository extends JpaRepository<ExpandJob, Long> {
                          @Param("artistId") Long artistId,
                          @Param("source") String source,
                          @Param("nextDueAt") Instant nextDueAt);
+
+    /**
+     * Atomically claims up to {@code batch} due, unclaimed-or-stale-leased rows for the poller
+     * (PR4). See scan.ScanJobRepository#claimDue for the full rationale (SKIP LOCKED semantics,
+     * lease-expiry re-claim, RETURNING-to-entity mapping) -- this mirrors it exactly for
+     * expand_job.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE expand_job SET claimed_at = :now, status = 'RUNNING'
+            WHERE id IN (
+                SELECT id FROM expand_job
+                WHERE next_due_at <= :now AND (claimed_at IS NULL OR claimed_at < :leaseCutoff)
+                ORDER BY next_due_at
+                LIMIT :batch
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+            """, nativeQuery = true)
+    List<ExpandJob> claimDue(@Param("now") Instant now,
+                              @Param("leaseCutoff") Instant leaseCutoff,
+                              @Param("batch") int batch);
 }

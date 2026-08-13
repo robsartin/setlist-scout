@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.expansion.source;
 
+import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.DiscogsService;
 import org.springframework.stereotype.Component;
 
@@ -23,5 +24,15 @@ public class DiscogsRelationSource implements RelationSource {
     @Override
     public List<String> related(String artistName) {
         return discogs.findRelatedArtists(artistName);
+    }
+
+    @Override
+    public ArtistSource classification() {
+        return ArtistSource.MEMBER_EXPANSION;
+    }
+
+    @Override
+    public String note(String baseArtist) {
+        return "member/lineup relation of " + baseArtist;
     }
 }

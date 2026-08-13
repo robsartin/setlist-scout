@@ -31,10 +31,11 @@ public class ShowAggregationService {
     private static final Logger log = LoggerFactory.getLogger(ShowAggregationService.class);
 
     private final ArtistRepository artistRepository;
-    private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
-    private final MusicBrainzService musicBrainz;
     private final List<ShowSource> showSources;
+    // Same-package helper: owns the one copy of resolveSiteUrl/persistNew, shared with ScanUnitRunner
+    // (Phase B PR4a's per-(artist,source) runner) so neither duplicates the other's logic.
+    private final ScanUnitRunner scanUnitRunner;
 
     public ShowAggregationService(ArtistRepository artistRepository,
                                    ShowRepository showRepository,
@@ -42,10 +43,10 @@ public class ShowAggregationService {
                                    MusicBrainzService musicBrainz,
                                    List<ShowSource> showSources) {
         this.artistRepository = artistRepository;
-        this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
-        this.musicBrainz = musicBrainz;
         this.showSources = showSources;
+        this.scanUnitRunner = new ScanUnitRunner(showSources, artistRepository, showRepository,
+                settingsRepository, musicBrainz);
     }
 
     public void scanForShows(String owner) {
@@ -70,9 +71,7 @@ public class ShowAggregationService {
             if (artist.getName() == null || artist.getName().isBlank()) continue;
             searched++;
 
-            ScanQuery query = new ScanQuery(artist.getName(), resolveSiteUrl(artist),
-                    settings.getPostalCode(), settings.getLatitude(), settings.getLongitude(),
-                    settings.getRadiusMiles(), settings.getCity(), start, end);
+            ScanQuery query = scanUnitRunner.buildQuery(artist, settings, start, end);
 
             List<Show> shows = new java.util.ArrayList<>();
             for (ShowSource source : showSources) {
@@ -85,7 +84,7 @@ public class ShowAggregationService {
                         .addKeyValue("count", sourceShows.size())
                         .log("artist source scanned");
             }
-            saved += persistNew(owner, shows);
+            saved += scanUnitRunner.persistNew(owner, shows);
         }
 
         log.atInfo()
@@ -94,37 +93,5 @@ public class ShowAggregationService {
                 .addKeyValue("showsSaved", saved)
                 .addKeyValue("durationMs", (System.nanoTime() - startNanos) / 1_000_000)
                 .log("scan finished");
-    }
-
-    /**
-     * The artist's official-site URL for band-site scraping (#22): the cached value, or a MusicBrainz
-     * "official homepage" lookup on first use, cached back onto the artist. This is the one write in the
-     * scan flow -- the show sources themselves are query-only.
-     */
-    private String resolveSiteUrl(Artist artist) {
-        String url = artist.getOfficialSiteUrl();
-        if (url == null) {
-            url = musicBrainz.findOfficialHomepage(artist.getName()).orElse(null);
-            if (url != null) {
-                artist.setOfficialSiteUrl(url);
-                artistRepository.save(artist);
-            }
-        }
-        return url;
-    }
-
-    private int persistNew(String owner, List<Show> shows) {
-        int saved = 0;
-        for (Show show : shows) {
-            if (show.getEventDateTime() == null) continue;
-            boolean exists = showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
-                    owner, show.getArtistName(), show.getEventDateTime(), show.getVenueName());
-            if (!exists) {
-                show.setOwner(owner);
-                showRepository.save(show);
-                saved++;
-            }
-        }
-        return saved;
     }
 }
