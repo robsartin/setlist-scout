@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.review;
 
 import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
@@ -23,12 +24,14 @@ public class ReviewController {
     private final ArtistRepository artistRepository;
     private final ExpansionService expansionService;
     private final CurrentUser currentUser;
+    private final ArtistActivationService activationService;
 
     public ReviewController(ArtistRepository artistRepository, ExpansionService expansionService,
-                           CurrentUser currentUser) {
+                           CurrentUser currentUser, ArtistActivationService activationService) {
         this.artistRepository = artistRepository;
         this.expansionService = expansionService;
         this.currentUser = currentUser;
+        this.activationService = activationService;
     }
 
     /**
@@ -43,11 +46,9 @@ public class ReviewController {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
             String decision = decisions.get("decision-" + a.getId());
             if ("accept".equals(decision)) {
-                a.setStatus(ArtistStatus.APPROVED);
-                artistRepository.save(a);
+                activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
             } else if ("reject".equals(decision)) {
-                a.setStatus(ArtistStatus.REJECTED);
-                artistRepository.save(a);
+                activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
             }
             // "later" (or missing) -> leave it PENDING_REVIEW for a future pass
         }
@@ -76,8 +77,7 @@ public class ReviewController {
     public String approveAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                     Model model) {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
-            a.setStatus(ArtistStatus.APPROVED);
-            artistRepository.save(a);
+            activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
         }
         return pendingResult(hxRequest, model);
     }
@@ -87,8 +87,7 @@ public class ReviewController {
     public String rejectAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                    Model model) {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
-            a.setStatus(ArtistStatus.REJECTED);
-            artistRepository.save(a);
+            activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
         }
         return pendingResult(hxRequest, model);
     }
@@ -103,10 +102,7 @@ public class ReviewController {
 
     /** Scoped by owner so a user can only change the status of their own artists. */
     private void setStatus(Long id, ArtistStatus status) {
-        artistRepository.findByIdAndOwner(id, currentUser.email()).ifPresent(a -> {
-            a.setStatus(status);
-            artistRepository.save(a);
-        });
+        activationService.changeStatus(id, currentUser.email(), status);
     }
 
     /** htmx request -> swap just the pending section; otherwise a normal redirect (no-JS fallback). */

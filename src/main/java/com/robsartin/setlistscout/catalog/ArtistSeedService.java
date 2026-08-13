@@ -12,9 +12,11 @@ import org.springframework.stereotype.Service;
 public class ArtistSeedService {
 
     private final ArtistRepository artistRepository;
+    private final ArtistActivationService activationService;
 
-    public ArtistSeedService(ArtistRepository artistRepository) {
+    public ArtistSeedService(ArtistRepository artistRepository, ArtistActivationService activationService) {
         this.artistRepository = artistRepository;
+        this.activationService = activationService;
     }
 
     /**
@@ -34,6 +36,7 @@ public class ArtistSeedService {
         Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
         artist.setOwner(owner);
         artistRepository.save(artist);
+        activationService.onSeedCreated(artist);
         return true;
     }
 }

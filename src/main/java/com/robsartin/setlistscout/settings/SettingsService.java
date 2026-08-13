@@ -1,7 +1,10 @@
 package com.robsartin.setlistscout.settings;
 
 import com.robsartin.setlistscout.AppProperties;
+import com.robsartin.setlistscout.shared.events.SettingsChanged;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Owns settings persistence + geocoding: the owner's default row and updates from the settings form. */
 @Service
@@ -10,13 +13,16 @@ public class SettingsService {
     private final SearchSettingsRepository settingsRepository;
     private final AppProperties appProperties;
     private final GeocodingService geocodingService;
+    private final ApplicationEventPublisher publisher;
 
     public SettingsService(SearchSettingsRepository settingsRepository,
                             AppProperties appProperties,
-                            GeocodingService geocodingService) {
+                            GeocodingService geocodingService,
+                            ApplicationEventPublisher publisher) {
         this.settingsRepository = settingsRepository;
         this.appProperties = appProperties;
         this.geocodingService = geocodingService;
+        this.publisher = publisher;
     }
 
     /** The user's settings, creating a default row (default ZIP, geocoded) on their first visit. */
@@ -30,6 +36,7 @@ public class SettingsService {
         });
     }
 
+    @Transactional
     public SearchSettings updateSettings(String owner, String postalCode, int radiusMiles, int monthsAhead) {
         SearchSettings settings = getOrCreateSettings(owner);
         settings.setPostalCode(postalCode);
@@ -39,6 +46,7 @@ public class SettingsService {
         // coordinates so a bad/temporary lookup doesn't blank out the search location.
         applyGeocode(settings, postalCode);
         settingsRepository.save(settings);
+        publisher.publishEvent(new SettingsChanged(owner));
         return settings;
     }
 
