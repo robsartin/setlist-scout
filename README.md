@@ -10,15 +10,21 @@ See [docs/adr/](docs/adr/README.md) for the reasoning behind each major design d
 
 1. **Seed list** — `src/main/resources/data/seed-bands.txt`, one band per line.
    Imported into the database on first startup. Add more later from the `/artists` page.
-2. **Expansion** — every scan, `ExpansionService` looks up each active (seed/approved)
-   artist's band members and side projects (MusicBrainz + Discogs) and taste-similar
-   artists (Last.fm + an LLM cross-check). Results land as **pending review** —
-   nothing gets searched for shows until you approve it on `/artists`.
-3. **Show search** — `ShowAggregationService` checks Ticketmaster + Bandsintown for
-   every seed/approved artist, filtered to your saved location/radius/window
+2. **Expansion** — each active (seed/approved) artist gets its own durable `expand_job`
+   per source, looking up band members and side projects (MusicBrainz + Discogs) and
+   taste-similar artists (Last.fm + an LLM cross-check). Results land as **pending
+   review** — nothing gets searched for shows until you approve it on `/artists`.
+3. **Show search** — each active artist/source pair gets its own durable `scan_job`
+   checking Ticketmaster + Bandsintown, filtered to your saved location/radius/window
    (editable live on the `/` page — no redeploy needed).
-4. **Schedule** — runs automatically every 3 days (`setlistscout.scan-interval-ms`),
-   or trigger manually with the "Scan now" / "Run expansion now" buttons.
+4. **Scheduling** — there's no whole-fleet batch job. Two paced pollers
+   (`setlistscout.scan-poller-enabled` / `expand-poller-enabled`, on by default) tick on
+   an interval and drain whatever jobs are currently due, each on its own per-source
+   cadence (`scan-interval` / `expansion-interval`, with optional per-source overrides).
+   Newly approved artists, added sources, and settings changes enqueue or re-due jobs
+   automatically. The "Scan now" / "Run expansion now" buttons just re-due your jobs to
+   "now" and queue them for the next poller tick — they don't run a scan synchronously,
+   so the page shows a brief "queued" confirmation rather than results.
 
 **Not yet wired up:** Austin-local sources (venue calendars, Austin Chronicle,
 Do512, KUTX) don't have clean JSON APIs, so they need scraping rather than a
