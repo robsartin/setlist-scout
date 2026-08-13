@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.expansion.source;
 
+import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.TributeLlmService;
 import org.springframework.stereotype.Component;
 
@@ -23,5 +24,15 @@ public class TributeLlmSource implements RelationSource {
     @Override
     public List<String> related(String artistName) {
         return tributeLlm.findTributeBands(artistName, 5);
+    }
+
+    @Override
+    public ArtistSource classification() {
+        return ArtistSource.TRIBUTE_EXPANSION;
+    }
+
+    @Override
+    public String note(String baseArtist) {
+        return "tribute/cover act for " + baseArtist;
     }
 }

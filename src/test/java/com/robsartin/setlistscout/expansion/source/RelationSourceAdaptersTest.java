@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.expansion.source;
 
+import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.DiscogsService;
 import com.robsartin.setlistscout.expansion.LastFmService;
 import com.robsartin.setlistscout.expansion.SimilarArtistLlmService;
@@ -22,6 +23,8 @@ class RelationSourceAdaptersTest {
         MusicBrainzRelationSource s = new MusicBrainzRelationSource(mb);
         assertThat(s.id()).isEqualTo("musicbrainz");
         assertThat(s.related("Dawes")).containsExactly("Taylor Goldsmith");
+        assertThat(s.classification()).isEqualTo(ArtistSource.MEMBER_EXPANSION);
+        assertThat(s.note("Dawes")).isEqualTo("member/lineup relation of Dawes");
     }
 
     @Test
@@ -31,6 +34,8 @@ class RelationSourceAdaptersTest {
         DiscogsRelationSource s = new DiscogsRelationSource(d);
         assertThat(s.id()).isEqualTo("discogs");
         assertThat(s.related("Dawes")).containsExactly("Middle Brother");
+        assertThat(s.classification()).isEqualTo(ArtistSource.MEMBER_EXPANSION);
+        assertThat(s.note("Dawes")).isEqualTo("member/lineup relation of Dawes");
     }
 
     @Test
@@ -40,6 +45,8 @@ class RelationSourceAdaptersTest {
         LastFmSimilarSource s = new LastFmSimilarSource(lf);
         assertThat(s.id()).isEqualTo("lastfm");
         assertThat(s.related("Dawes")).containsExactly("Nickel Creek");
+        assertThat(s.classification()).isEqualTo(ArtistSource.SIMILAR_EXPANSION);
+        assertThat(s.note("Dawes")).isEqualTo("similar to Dawes (via Last.fm)");
     }
 
     @Test
@@ -49,6 +56,8 @@ class RelationSourceAdaptersTest {
         SimilarLlmSource s = new SimilarLlmSource(llm);
         assertThat(s.id()).isEqualTo("similar-llm");
         assertThat(s.related("Dawes")).containsExactly("Nickel Creek");
+        assertThat(s.classification()).isEqualTo(ArtistSource.SIMILAR_EXPANSION);
+        assertThat(s.note("Dawes")).isEqualTo("similar to Dawes (via LLM)");
     }
 
     @Test
@@ -58,5 +67,7 @@ class RelationSourceAdaptersTest {
         TributeLlmSource s = new TributeLlmSource(t);
         assertThat(s.id()).isEqualTo("tribute-llm");
         assertThat(s.related("Iron Maiden")).containsExactly("The Iron Maidens");
+        assertThat(s.classification()).isEqualTo(ArtistSource.TRIBUTE_EXPANSION);
+        assertThat(s.note("Dawes")).isEqualTo("tribute/cover act for Dawes");
     }
 }
