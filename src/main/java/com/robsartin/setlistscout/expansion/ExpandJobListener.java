@@ -1,12 +1,8 @@
 package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.expansion.source.RelationSource;
-import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
@@ -22,8 +18,6 @@ import java.util.List;
 @Component
 public class ExpandJobListener {
 
-    private static final Logger log = LoggerFactory.getLogger(ExpandJobListener.class);
-
     private final ExpandJobRepository expandJobRepository;
     private final List<RelationSource> relationSources;
 
@@ -35,21 +29,13 @@ public class ExpandJobListener {
     @ApplicationModuleListener
     void onArtistActivated(ArtistActivated e) {
         for (RelationSource source : relationSources) {
-            if (expandJobRepository.existsByOwnerAndArtistIdAndSource(e.owner(), e.artistId(), source.id())) {
-                continue; // already enqueued for this (owner, artist, source)
-            }
-            ExpandJob job = new ExpandJob(e.artistId(), source.id(), JobStatus.SCHEDULED, 0, Instant.now());
-            job.setOwner(e.owner());
-            try {
-                expandJobRepository.save(job);
-            } catch (DataIntegrityViolationException ex) {
-                // Lost a race against the (owner, artist_id, source) unique constraint: a redelivery
-                // of this durable event (or a concurrent activation) already enqueued this job.
-                // Same outcome as the existsBy guard above, just discovered at insert time -- a
-                // no-op, not an error.
-                log.atDebug().addKeyValue("owner", e.owner()).addKeyValue("artistId", e.artistId())
-                        .addKeyValue("source", source.id()).log("expand job already enqueued concurrently");
-            }
+            // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than existsBy+save+catch:
+            // @ApplicationModuleListener runs this whole loop in one transaction, and on an
+            // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real unique-
+            // constraint race aborts the ENTIRE transaction for every later iteration too (Postgres
+            // "current transaction is aborted"). insertIfAbsent never throws on a duplicate, so the
+            // loop always completes in a single pass.
+            expandJobRepository.insertIfAbsent(e.owner(), e.artistId(), source.id(), Instant.now());
         }
     }
 

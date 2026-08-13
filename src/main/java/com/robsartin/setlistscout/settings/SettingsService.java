@@ -63,10 +63,21 @@ public class SettingsService {
 
     /**
      * Returns a stable hash of the owner's search location (postal code, radius, months ahead).
-     * Pure read; does not publish any event. Lets scan jobs detect a stale location on SettingsChanged.
+     * Pure read; does not publish any event, and -- unlike {@link #getOrCreateSettings} -- does
+     * NOT create a settings row for an owner who doesn't have one yet, hashing the configured
+     * defaults instead. This matters because {@code scan.ScanJobListener} calls this from an
+     * async {@code @ApplicationModuleListener} once per enqueued job: at startup, {@code
+     * CatalogSeeder} fires dozens of {@code ArtistActivated} events for the same seed owner in
+     * quick succession, and each one used to race the others through {@code getOrCreateSettings}'s
+     * non-atomic check-then-insert against the {@code search_settings} owner unique constraint.
+     * Lets scan jobs detect a stale location on SettingsChanged.
      */
     public String locationFingerprint(String owner) {
-        SearchSettings settings = getOrCreateSettings(owner);
-        return Integer.toHexString(Objects.hash(settings.getPostalCode(), settings.getRadiusMiles(), settings.getMonthsAhead()));
+        return settingsRepository.findByOwner(owner)
+                .map(s -> Integer.toHexString(Objects.hash(s.getPostalCode(), s.getRadiusMiles(), s.getMonthsAhead())))
+                .orElseGet(() -> {
+                    var d = appProperties.defaults();
+                    return Integer.toHexString(Objects.hash(d.postalCode(), d.radiusMiles(), d.monthsAhead()));
+                });
     }
 }

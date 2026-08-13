@@ -2,13 +2,9 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.settings.SettingsService;
-import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
 import com.robsartin.setlistscout.shared.events.SettingsChanged;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
@@ -22,8 +18,6 @@ import java.util.List;
  */
 @Component
 public class ScanJobListener {
-
-    private static final Logger log = LoggerFactory.getLogger(ScanJobListener.class);
 
     private final ScanJobRepository scanJobRepository;
     private final List<ShowSource> showSources;
@@ -40,22 +34,14 @@ public class ScanJobListener {
     void onArtistActivated(ArtistActivated e) {
         String locationFingerprint = settingsService.locationFingerprint(e.owner());
         for (ShowSource source : showSources) {
-            if (scanJobRepository.existsByOwnerAndArtistIdAndSource(e.owner(), e.artistId(), source.id())) {
-                continue; // already enqueued for this (owner, artist, source)
-            }
-            ScanJob job = new ScanJob(e.artistId(), source.id(), JobStatus.SCHEDULED, 0, Instant.now(),
+            // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than existsBy+save+catch:
+            // @ApplicationModuleListener runs this whole loop in one transaction, and on an
+            // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real unique-
+            // constraint race aborts the ENTIRE transaction for every later iteration too (Postgres
+            // "current transaction is aborted"). insertIfAbsent never throws on a duplicate, so the
+            // loop always completes in a single pass.
+            scanJobRepository.insertIfAbsent(e.owner(), e.artistId(), source.id(), Instant.now(),
                     locationFingerprint);
-            job.setOwner(e.owner());
-            try {
-                scanJobRepository.save(job);
-            } catch (DataIntegrityViolationException ex) {
-                // Lost a race against the (owner, artist_id, source) unique constraint: a redelivery
-                // of this durable event (or a concurrent activation) already enqueued this job.
-                // Same outcome as the existsBy guard above, just discovered at insert time -- a
-                // no-op, not an error.
-                log.atDebug().addKeyValue("owner", e.owner()).addKeyValue("artistId", e.artistId())
-                        .addKeyValue("source", source.id()).log("scan job already enqueued concurrently");
-            }
         }
     }
 

@@ -157,6 +157,45 @@ class JobEnqueueFlowTest {
     }
 
     @Test
+    @DisplayName("activation is idempotent against a pre-existing scan_job row: the real ON CONFLICT "
+            + "insert absorbs the conflicting source and still enqueues the rest, in one pass")
+    void activationIsIdempotentAgainstAPreExistingScanJob() {
+        when(geocodingService.geocode(any())).thenReturn(Optional.empty());
+        String owner = "idempotent-flow@example.com";
+        Long artistId = persistArtist(owner, "Idempotent Flow Artist", ArtistStatus.PENDING_REVIEW);
+
+        // Simulate a job that's already been enqueued for one source (e.g. a redelivered event, or
+        // a concurrent activation that beat this one to the punch) -- exactly the row that would
+        // make an existsBy+save+catch enqueue collide on the (owner, artist_id, source) unique
+        // constraint. On Postgres, a real DataIntegrityViolationException from a mid-loop save
+        // aborts the whole @ApplicationModuleListener transaction, so the earlier fix's catch block
+        // still lost every job after the one that conflicted -- this reproduces that exact shape
+        // against the real DB, which mocks can't.
+        ScanJob preExisting = new ScanJob(artistId, "ticketmaster", JobStatus.SCHEDULED, 0,
+                Instant.now(), "pre-existing-fp");
+        preExisting.setOwner(owner);
+        scanJobRepository.save(preExisting);
+
+        artistActivationService.changeStatus(artistId, owner, ArtistStatus.APPROVED);
+
+        List<ScanJob> scanJobs = awaitUntil(
+                () -> scanJobRepository.findByOwnerAndArtistId(owner, artistId),
+                jobs -> jobs.size() == showSources.size());
+        List<ExpandJob> expandJobs = awaitUntil(
+                () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
+                jobs -> jobs.size() == relationSources.size());
+
+        assertThat(scanJobs).as("the pre-existing source wasn't duplicated, and the rest were enqueued")
+                .hasSize(showSources.size());
+        assertThat(scanJobs).extracting(ScanJob::getSource)
+                .containsExactlyInAnyOrderElementsOf(showSources.stream().map(ShowSource::id).toList());
+        assertThat(expandJobs).as("expand_job enqueue completed in the same pass, unaffected by the "
+                + "scan_job conflict").hasSize(relationSources.size());
+        assertThat(expandJobs).extracting(ExpandJob::getSource)
+                .containsExactlyInAnyOrderElementsOf(relationSources.stream().map(RelationSource::id).toList());
+    }
+
+    @Test
     @DisplayName("changeStatus(REJECTED) publishes ArtistDeactivated in a committed tx, and the real "
             + "listeners delete the artist's scan_job and expand_job rows")
     void deactivatingAnArtistCancelsItsScanAndExpandJobs() {

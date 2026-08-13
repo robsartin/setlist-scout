@@ -1,7 +1,11 @@
 package com.robsartin.setlistscout.expansion;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -11,4 +15,22 @@ public interface ExpandJobRepository extends JpaRepository<ExpandJob, Long> {
     List<ExpandJob> findByOwner(String owner);
     void deleteByOwnerAndArtistId(String owner, Long artistId);
     boolean existsByOwnerAndArtistIdAndSource(String owner, Long artistId, String source);
+
+    /**
+     * DB-level idempotent enqueue: relies on the {@code expand_job_owner_artist_id_source_key}
+     * unique constraint via {@code ON CONFLICT ... DO NOTHING} so a racing redelivery (or
+     * concurrent activation) for the same (owner, artist_id, source) is a silent no-op instead of
+     * a {@code DataIntegrityViolationException}. See scan.ScanJobRepository#insertIfAbsent for why
+     * that matters inside an {@code @ApplicationModuleListener}'s single per-source-loop transaction.
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO expand_job (owner, artist_id, source, status, attempts, next_due_at)
+            VALUES (:owner, :artistId, :source, 'SCHEDULED', 0, :nextDueAt)
+            ON CONFLICT (owner, artist_id, source) DO NOTHING
+            """, nativeQuery = true)
+    void insertIfAbsent(@Param("owner") String owner,
+                         @Param("artistId") Long artistId,
+                         @Param("source") String source,
+                         @Param("nextDueAt") Instant nextDueAt);
 }

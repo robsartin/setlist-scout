@@ -160,4 +160,25 @@ class SettingsServiceTest {
 
         verify(publisher, never()).publishEvent(any());
     }
+
+    @Test
+    @DisplayName("locationFingerprint for an owner with no settings row hashes the configured "
+            + "defaults instead of creating one -- this is the fix for the PR3b startup race, "
+            + "where scan.ScanJobListener calls this once per enqueued job for every ArtistActivated "
+            + "event, and CatalogSeeder fires dozens of those for the same seed owner at boot")
+    void locationFingerprintForMissingSettingsHashesDefaultsWithoutCreating() {
+        AppProperties appProperties = mock(AppProperties.class);
+        AppProperties.Defaults defaults = new AppProperties.Defaults("73301", "Austin", "TX", 50, 6);
+        when(appProperties.defaults()).thenReturn(defaults);
+        settingsService = new SettingsService(settingsRepository, appProperties, geocodingService, publisher);
+        when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.empty());
+
+        String fingerprint = settingsService.locationFingerprint(OWNER);
+
+        String expected = Integer.toHexString(
+                java.util.Objects.hash(defaults.postalCode(), defaults.radiusMiles(), defaults.monthsAhead()));
+        assertThat(fingerprint).isEqualTo(expected);
+        verify(settingsRepository, never()).save(any());
+        verify(geocodingService, never()).geocode(any());
+    }
 }
