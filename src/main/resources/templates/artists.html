@@ -12,7 +12,7 @@
     <h1>Active list (seed + approved)</h1>
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload. */-->
     <div th:fragment="activeSection" id="active-section">
-        <div style="overflow-x:auto">
+        <div class="table-scroll">
             <table>
                 <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th><th>Actions</th></tr></thead>
                 <tbody>
@@ -96,7 +96,7 @@
             <!-- Cover / tribute acts, called out on their own -->
             <div class="group-tribute" th:if="${not #lists.isEmpty(pendingTributes)}">
                 <h2>&#127917; Cover / tribute acts</h2>
-                <div style="overflow-x:auto">
+                <div class="table-scroll">
                     <table>
                         <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Decision</th></tr></thead>
                         <tbody>
@@ -122,7 +122,7 @@
             <!-- Members & similar -->
             <div th:if="${not #lists.isEmpty(pendingOthers)}">
                 <h2>Members &amp; similar</h2>
-                <div style="overflow-x:auto">
+                <div class="table-scroll">
                     <table>
                         <thead><tr><th>Type</th><th>Name</th><th>Via</th><th>Why</th><th>Decision</th></tr></thead>
                         <tbody>
@@ -158,7 +158,7 @@
     </div>
 
     <h1>Rejected</h1>
-    <div style="overflow-x:auto">
+    <div class="table-scroll">
         <table>
             <thead><tr><th>Name</th><th>Why it was suggested</th><th>Actions</th></tr></thead>
             <tbody>
