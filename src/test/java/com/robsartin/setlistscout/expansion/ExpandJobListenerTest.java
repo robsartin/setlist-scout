@@ -1,7 +1,5 @@
 package com.robsartin.setlistscout.expansion;
 
-import com.robsartin.setlistscout.catalog.Artist;
-import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
@@ -13,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -29,7 +26,6 @@ class ExpandJobListenerTest {
     private static final Long ARTIST_ID = 42L;
 
     private ExpandJobRepository expandJobRepository;
-    private ArtistRepository artistRepository;
     private RelationSource musicBrainz;
     private RelationSource discogs;
     private RelationSource lastFm;
@@ -39,7 +35,6 @@ class ExpandJobListenerTest {
     @BeforeEach
     void setUp() {
         expandJobRepository = mock(ExpandJobRepository.class);
-        artistRepository = mock(ArtistRepository.class);
         musicBrainz = mock(RelationSource.class);
         discogs = mock(RelationSource.class);
         lastFm = mock(RelationSource.class);
@@ -58,23 +53,13 @@ class ExpandJobListenerTest {
         // Mirrors TributeLlmSource#appliesTo: SEED-only, matching production behavior.
         when(tributeLlm.appliesTo(any())).thenAnswer(inv -> inv.getArgument(0) == ArtistStatus.SEED);
 
-        listener = new ExpandJobListener(expandJobRepository, List.of(musicBrainz, discogs, lastFm, tributeLlm),
-                artistRepository);
-    }
-
-    private Artist artistWithStatus(ArtistStatus status) {
-        Artist artist = mock(Artist.class);
-        when(artist.getStatus()).thenReturn(status);
-        return artist;
+        listener = new ExpandJobListener(expandJobRepository, List.of(musicBrainz, discogs, lastFm, tributeLlm));
     }
 
     @Test
     @DisplayName("SEED artist activation enqueues every source, including tribute-llm")
     void seedArtistEnqueuesAllSources() {
-        Artist seedArtist = artistWithStatus(ArtistStatus.SEED);
-        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(seedArtist));
-
-        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes"));
+        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes", ArtistStatus.SEED.name()));
 
         for (String sourceId : List.of("musicbrainz", "discogs", "lastfm", "tribute-llm")) {
             verify(expandJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId),
@@ -86,10 +71,7 @@ class ExpandJobListenerTest {
     @Test
     @DisplayName("APPROVED artist activation enqueues non-tribute sources but never tribute-llm")
     void approvedArtistSkipsTributeSource() {
-        Artist approvedArtist = artistWithStatus(ArtistStatus.APPROVED);
-        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(approvedArtist));
-
-        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes"));
+        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes", ArtistStatus.APPROVED.name()));
 
         for (String sourceId : List.of("musicbrainz", "discogs", "lastfm")) {
             verify(expandJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId), any());
@@ -98,11 +80,11 @@ class ExpandJobListenerTest {
     }
 
     @Test
-    @DisplayName("artist-not-found activation skips tribute-llm but still enqueues other sources")
-    void artistNotFoundSkipsTributeSource() {
-        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.empty());
-
-        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes"));
+    @DisplayName("a null status (e.g. a legacy pre-#102 event replayed from the durable registry) "
+            + "doesn't throw -- tribute-llm is skipped but every other source is still enqueued, "
+            + "matching the old artist-not-found behavior")
+    void nullStatusSkipsTributeSourceWithoutThrowing() {
+        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes", null));
 
         for (String sourceId : List.of("musicbrainz", "discogs", "lastfm")) {
             verify(expandJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId), any());

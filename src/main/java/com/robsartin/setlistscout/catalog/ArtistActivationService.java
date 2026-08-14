@@ -44,7 +44,7 @@ public class ArtistActivationService {
         artistRepository.save(artist);
 
         if (isActive(newStatus) && !isActive(old)) {
-            publisher.publishEvent(new ArtistActivated(owner, artist.getId(), artist.getName()));
+            publisher.publishEvent(new ArtistActivated(owner, artist.getId(), artist.getName(), newStatus.name()));
         } else if (!isActive(newStatus) && isActive(old)) {
             publisher.publishEvent(new ArtistDeactivated(owner, artist.getId()));
         }
@@ -53,7 +53,8 @@ public class ArtistActivationService {
     /** A newly created SEED artist is active from the start. */
     @Transactional
     public void onSeedCreated(Artist saved) {
-        publisher.publishEvent(new ArtistActivated(saved.getOwner(), saved.getId(), saved.getName()));
+        publisher.publishEvent(new ArtistActivated(saved.getOwner(), saved.getId(), saved.getName(),
+                saved.getStatus().name()));
     }
 
     private static boolean isActive(ArtistStatus status) {

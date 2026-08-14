@@ -8,11 +8,12 @@ class EventRecordsTest {
 
 	@Test
 	void artistActivatedExposeComponentsCorrectly() {
-		var event = new ArtistActivated("owner", 5L, "Dawes");
+		var event = new ArtistActivated("owner", 5L, "Dawes", "SEED");
 
 		assertThat(event.owner()).isEqualTo("owner");
 		assertThat(event.artistId()).isEqualTo(5L);
 		assertThat(event.name()).isEqualTo("Dawes");
+		assertThat(event.status()).isEqualTo("SEED");
 	}
 
 	@Test
