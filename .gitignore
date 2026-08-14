@@ -10,3 +10,6 @@ application-local.yml
 .gradle/
 build/
 .claude/worktrees/
+
+# Superpowers/SDD agent scratch (ledgers, task reports, review packages)
+.superpowers/
