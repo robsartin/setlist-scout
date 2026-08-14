@@ -2,7 +2,7 @@ package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
-import com.robsartin.setlistscout.shared.events.CandidateDiscovered;
+import com.robsartin.setlistscout.shared.events.RelationDiscovered;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,9 +41,9 @@ class ExpandUnitRunnerTest {
     }
 
     @Test
-    @DisplayName("should publish one CandidateDiscovered per related name, skipping blanks")
-    void shouldPublishCandidatePerRelatedName() {
-        lenient().when(lastFmSource.id()).thenReturn("lastfm");
+    @DisplayName("should publish one RelationDiscovered per related name, skipping blanks")
+    void shouldPublishRelationPerRelatedName() {
+        when(lastFmSource.id()).thenReturn("lastfm");
         when(lastFmSource.classification()).thenReturn(ArtistSource.SIMILAR_EXPANSION);
         when(lastFmSource.note("Dawes")).thenReturn("similar to Dawes (via Last.fm)");
         when(lastFmSource.related("Dawes")).thenReturn(List.of("Nickel Creek", ""));
@@ -53,10 +53,10 @@ class ExpandUnitRunnerTest {
 
         runner.run(OWNER, 1L, "lastfm", "Dawes");
 
-        ArgumentCaptor<CandidateDiscovered> captor = ArgumentCaptor.forClass(CandidateDiscovered.class);
+        ArgumentCaptor<RelationDiscovered> captor = ArgumentCaptor.forClass(RelationDiscovered.class);
         verify(publisher).publishEvent(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new CandidateDiscovered(
-                OWNER, "Nickel Creek", "SIMILAR_EXPANSION", "Dawes", "similar to Dawes (via Last.fm)"));
+        assertThat(captor.getValue()).isEqualTo(new RelationDiscovered(
+                OWNER, 1L, "Dawes", "Nickel Creek", "SIMILAR_EXPANSION", "lastfm", "similar to Dawes (via Last.fm)"));
     }
 
     @Test

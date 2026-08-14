@@ -1,7 +1,7 @@
 package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.expansion.source.RelationSource;
-import com.robsartin.setlistscout.shared.events.CandidateDiscovered;
+import com.robsartin.setlistscout.shared.events.RelationDiscovered;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -12,9 +12,10 @@ import java.util.List;
 
 /**
  * Runs one expand job: queries a single {@link RelationSource} for one base artist and
- * publishes a {@link CandidateDiscovered} event per result. Nothing here persists -- the
- * catalog module's {@code @ApplicationModuleListener} turns each published event into a
- * PENDING_REVIEW artist (with its own name-guard + dedup).
+ * publishes a {@link RelationDiscovered} event per result. Nothing here persists -- the
+ * catalog module's {@code RelationDiscoveredListener} (an {@code @ApplicationModuleListener})
+ * turns each published event into a PENDING_REVIEW artist node (with its own name-guard +
+ * dedup) AND an {@code artist_edge} row recording the assertion, in one transaction.
  * <p>
  * Each event is published inside its own short, committed transaction via
  * {@link TransactionTemplate} -- {@code @ApplicationModuleListener} is
@@ -67,7 +68,7 @@ public class ExpandUnitRunner {
         for (String name : related) {
             if (name == null || name.isBlank()) continue;
             transactionTemplate.executeWithoutResult(status -> publisher.publishEvent(
-                    new CandidateDiscovered(owner, name, classification, artistName, note)));
+                    new RelationDiscovered(owner, artistId, artistName, name, classification, source.id(), note)));
         }
     }
 }

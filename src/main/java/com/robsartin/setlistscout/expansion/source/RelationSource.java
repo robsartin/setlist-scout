@@ -13,7 +13,7 @@ public interface RelationSource {
     /** Candidate related-artist names for the given base artist. */
     List<String> related(String artistName);
 
-    /** How candidates from this source should be classified when published as {@code CandidateDiscovered}. */
+    /** How candidates from this source should be classified when published as {@code RelationDiscovered}. */
     ArtistSource classification();
 
     /** Human-readable explanation of why a candidate from this source was discovered, for the given base artist. */

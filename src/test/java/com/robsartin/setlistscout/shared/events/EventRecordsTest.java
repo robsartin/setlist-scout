@@ -31,13 +31,15 @@ class EventRecordsTest {
 	}
 
 	@Test
-	void candidateDiscoveredExposeComponentsCorrectly() {
-		var event = new CandidateDiscovered("o", "n", "MEMBER_EXPANSION", "via", "note");
+	void relationDiscoveredExposeComponentsCorrectly() {
+		var event = new RelationDiscovered("o", 5L, "from", "to", "MEMBER_EXPANSION", "musicbrainz", "note");
 
 		assertThat(event.owner()).isEqualTo("o");
-		assertThat(event.name()).isEqualTo("n");
-		assertThat(event.sourceType()).isEqualTo("MEMBER_EXPANSION");
-		assertThat(event.discoveredVia()).isEqualTo("via");
+		assertThat(event.fromArtistId()).isEqualTo(5L);
+		assertThat(event.fromArtistName()).isEqualTo("from");
+		assertThat(event.toArtistName()).isEqualTo("to");
+		assertThat(event.type()).isEqualTo("MEMBER_EXPANSION");
+		assertThat(event.source()).isEqualTo("musicbrainz");
 		assertThat(event.note()).isEqualTo("note");
 	}
 }

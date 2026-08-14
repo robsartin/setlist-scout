@@ -20,17 +20,17 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Testcontainers-backed proof of {@link ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT
- * (owner, name) DO NOTHING} semantics against real Postgres -- the D1 fix (#95) for
- * {@code CandidatePersistenceListener}'s tx-poisoning bug. This is deliberately a
- * repository-level test rather than a full listener/event-flow one: the listener's own
- * case-insensitive {@code existsByOwnerAndNameIgnoreCase} pre-check would absorb any
- * exact-or-case-variant pre-existing duplicate before ever reaching {@code insertIfAbsent}, so a
- * full-flow test with a pre-existing row can't actually exercise the ON CONFLICT branch (that
- * only fires on a genuine check-then-insert race between two concurrent deliveries). Testing the
- * repository method directly against a real, already-committed conflicting row is what actually
- * proves the DB-level guard -- matching the {@code artist_owner_name_key} unique constraint from
- * {@code V1__baseline.sql} -- absorbs a duplicate insert without throwing or double-writing,
- * exactly like {@code scan.ScanJobRepository#insertIfAbsent}.
+ * (owner, name) DO NOTHING} semantics against real Postgres -- originally the D1 fix (#95) for
+ * {@code CandidatePersistenceListener}'s tx-poisoning bug; that listener was replaced by
+ * {@code RelationDiscoveredListener} in #109, which relies on this same guard and (unlike its
+ * predecessor) no longer has an app-layer {@code existsByOwnerAndNameIgnoreCase} pre-check in
+ * front of it -- every to-artist upsert, including a repeat one for an already-known artist,
+ * reaches this method, so the DB-level guard tested here is now the ONLY thing absorbing a
+ * duplicate (owner, name) insert, not just a race-only backstop. Testing the repository method
+ * directly against a real, already-committed conflicting row proves the DB-level guard --
+ * matching the {@code artist_owner_name_key} unique constraint from {@code V1__baseline.sql} --
+ * absorbs a duplicate insert without throwing or double-writing, exactly like
+ * {@code scan.ScanJobRepository#insertIfAbsent}.
  */
 @SpringBootTest
 @Testcontainers
@@ -84,7 +84,7 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
         artistRepository.saveAndFlush(preExisting);
 
         // A second, differently-classified discovery of the exact same (owner, name) -- the real
-        // race shape: two concurrent CandidateDiscovered deliveries for the same candidate, one
+        // race shape: two concurrent RelationDiscovered deliveries for the same candidate, one
         // of which already committed by the time this one's insert runs.
         assertThatCode(() -> artistRepository.insertIfAbsent(OWNER, "Discovered Candidate Band",
                 ArtistSource.SIMILAR_EXPANSION.name(), ArtistStatus.PENDING_REVIEW.name(),
