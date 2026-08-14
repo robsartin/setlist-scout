@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Quiets the harmless Hikari/Testcontainers/docker-java shutdown WARNs (connection-pool-closing
+  races, container teardown noise) that otherwise clutter every green build (#95 review, T5).
+  Includes Spring Boot's own base logback config first so root and com.robsartin keep their
+  normal levels (application.yml's logging.level.com.robsartin.setlistscout=INFO by default);
+  only these three noisy loggers are turned down.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <logger name="com.zaxxer.hikari" level="ERROR"/>
+    <logger name="org.testcontainers" level="ERROR"/>
+    <logger name="com.github.dockerjava" level="ERROR"/>
+</configuration>

@@ -28,15 +28,14 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
      */
     @Modifying
     @Query(value = """
-            INSERT INTO scan_job (owner, artist_id, source, status, attempts, next_due_at, location_fingerprint)
-            VALUES (:owner, :artistId, :source, 'SCHEDULED', 0, :nextDueAt, :locationFingerprint)
+            INSERT INTO scan_job (owner, artist_id, source, status, attempts, next_due_at)
+            VALUES (:owner, :artistId, :source, 'SCHEDULED', 0, :nextDueAt)
             ON CONFLICT (owner, artist_id, source) DO NOTHING
             """, nativeQuery = true)
     void insertIfAbsent(@Param("owner") String owner,
                          @Param("artistId") Long artistId,
                          @Param("source") String source,
-                         @Param("nextDueAt") Instant nextDueAt,
-                         @Param("locationFingerprint") String locationFingerprint);
+                         @Param("nextDueAt") Instant nextDueAt);
 
     /**
      * Atomically claims up to {@code batch} due, unclaimed-or-stale-leased rows for the poller
@@ -67,24 +66,23 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
 
     /**
      * Version-safe bulk re-due of every one of an owner's scan jobs: make them due-now and cleanly
-     * claimable (SCHEDULED, attempts reset, lease cleared) at the current location, and bump
-     * {@code version} so any poller holding one of these rows in-flight conflicts on its next
-     * {@code save()} (ScanPoller catches that and skips its stale reschedule) instead of silently
-     * overwriting this re-due. Used by ScanJobListener#onSettingsChanged and the manual "Scan now"
-     * button (ShowController#scanNow). {@code @Transactional} makes this self-transactional
-     * regardless of caller: ShowController#scanNow is a plain {@code @PostMapping} handler with no
-     * ambient transaction, and this {@code @Modifying} bulk query needs one to execute (Spring
-     * Data honors {@code @Transactional} on repository interface methods).
+     * claimable (SCHEDULED, attempts reset, lease cleared), and bump {@code version} so any poller
+     * holding one of these rows in-flight conflicts on its next {@code save()} (ScanPoller catches
+     * that and skips its stale reschedule) instead of silently overwriting this re-due. Used by
+     * ScanJobListener#onSettingsChanged and the manual "Scan now" button (ShowController#scanNow).
+     * {@code @Transactional} makes this self-transactional regardless of caller: ShowController#scanNow
+     * is a plain {@code @PostMapping} handler with no ambient transaction, and this
+     * {@code @Modifying} bulk query needs one to execute (Spring Data honors {@code @Transactional}
+     * on repository interface methods).
      */
     @Modifying
     @Transactional
     @Query(value = """
             UPDATE scan_job
                SET next_due_at = :now, status = 'SCHEDULED', attempts = 0, claimed_at = NULL,
-                   location_fingerprint = :locationFingerprint, version = version + 1
+                   version = version + 1
              WHERE owner = :owner
             """, nativeQuery = true)
     int redueAll(@Param("owner") String owner,
-                  @Param("now") Instant now,
-                  @Param("locationFingerprint") String locationFingerprint);
+                  @Param("now") Instant now);
 }

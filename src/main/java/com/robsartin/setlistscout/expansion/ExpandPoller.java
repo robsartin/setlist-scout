@@ -40,7 +40,12 @@ public class ExpandPoller {
 
     private static final Logger log = LoggerFactory.getLogger(ExpandPoller.class);
 
-    static final int LAST_ERROR_MAX_LEN = 255;
+    /**
+     * Generous truncation bound on the {@code text last_error} column (V9 widened it from
+     * {@code varchar(255)}) -- long enough to keep real API/LLM failure detail intact while still
+     * bounding row size.
+     */
+    static final int LAST_ERROR_MAX_LEN = 8000;
     static final Duration BACKOFF_BASE = Duration.ofMinutes(10);
 
     private final ExpandJobRepository expandJobRepository;

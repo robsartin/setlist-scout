@@ -79,7 +79,7 @@ class ScanJobRepositoryTest {
     @DisplayName("save + findByOwnerAndArtistIdAndSource round-trips all fields")
     void saveAndFindRoundTripsAllFields() {
         Instant nextDueAt = Instant.now().plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MICROS);
-        ScanJob job = new ScanJob(42L, "ticketmaster", JobStatus.SCHEDULED, 0, nextDueAt, "abc123");
+        ScanJob job = new ScanJob(42L, "ticketmaster", JobStatus.SCHEDULED, 0, nextDueAt);
         job.setOwner(OWNER);
         job.setLastError("boom");
         job.setLastRunAt(Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MICROS));
@@ -100,14 +100,12 @@ class ScanJobRepositoryTest {
         assertThat(loaded.getLastRunAt()).isEqualTo(job.getLastRunAt());
         assertThat(loaded.getNextDueAt()).isEqualTo(nextDueAt);
         assertThat(loaded.getClaimedAt()).isEqualTo(job.getClaimedAt());
-        assertThat(loaded.getLocationFingerprint()).isEqualTo("abc123");
     }
 
     @Test
     @DisplayName("a stale save is rejected once another writer has bumped the version")
     void staleSaveThrowsOptimisticLockingFailure() {
-        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.SCHEDULED, 0,
-                Instant.now(), "fp-1");
+        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.SCHEDULED, 0, Instant.now());
         job.setOwner(OWNER);
         Long id = scanJobRepository.saveAndFlush(job).getId();
         scanJobRepository.flush();
@@ -131,11 +129,11 @@ class ScanJobRepositoryTest {
     @Test
     @DisplayName("the (owner, artist_id, source) unique constraint is enforced")
     void uniqueConstraintIsEnforced() {
-        ScanJob first = new ScanJob(7L, "bandsintown", JobStatus.SCHEDULED, 0, Instant.now(), "fp1");
+        ScanJob first = new ScanJob(7L, "bandsintown", JobStatus.SCHEDULED, 0, Instant.now());
         first.setOwner(OWNER);
         scanJobRepository.saveAndFlush(first);
 
-        ScanJob duplicate = new ScanJob(7L, "bandsintown", JobStatus.SCHEDULED, 0, Instant.now(), "fp2");
+        ScanJob duplicate = new ScanJob(7L, "bandsintown", JobStatus.SCHEDULED, 0, Instant.now());
         duplicate.setOwner(OWNER);
 
         assertThatThrownBy(() -> scanJobRepository.saveAndFlush(duplicate))
@@ -152,14 +150,14 @@ class ScanJobRepositoryTest {
     @Transactional
     void redueAllResetsJobsAndBumpsVersion() {
         ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 4,
-                Instant.now().plus(java.time.Duration.ofDays(14)), "fp-old");
+                Instant.now().plus(java.time.Duration.ofDays(14)));
         job.setOwner(OWNER);
         job.setClaimedAt(Instant.now());
         Long id = scanJobRepository.saveAndFlush(job).getId();
         long v0 = scanJobRepository.findById(id).orElseThrow().getVersion();
 
         Instant now = Instant.now();
-        int updated = scanJobRepository.redueAll(OWNER, now, "fp-new");
+        int updated = scanJobRepository.redueAll(OWNER, now);
         assertThat(updated).isEqualTo(1);
 
         entityManager.clear();
@@ -167,7 +165,6 @@ class ScanJobRepositoryTest {
         assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
         assertThat(after.getAttempts()).isZero();
         assertThat(after.getClaimedAt()).isNull();
-        assertThat(after.getLocationFingerprint()).isEqualTo("fp-new");
         assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
         assertThat(after.getVersion()).isEqualTo(v0 + 1);
     }
@@ -177,18 +174,17 @@ class ScanJobRepositoryTest {
             + "-- this is the path ShowController#scanNow calls directly from a plain @PostMapping handler")
     void redueAllCommitsWithoutAmbientTransaction() {
         ScanJob job = new ScanJob(2L, "bandsintown", JobStatus.FAILED, 3,
-                Instant.now().plus(java.time.Duration.ofDays(7)), "fp-old");
+                Instant.now().plus(java.time.Duration.ofDays(7)));
         job.setOwner(OWNER);
         Long id = scanJobRepository.saveAndFlush(job).getId();
 
         Instant now = Instant.now();
-        int updated = scanJobRepository.redueAll(OWNER, now, "fp-new");
+        int updated = scanJobRepository.redueAll(OWNER, now);
         assertThat(updated).isEqualTo(1);
 
         ScanJob after = scanJobRepository.findById(id).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
         assertThat(after.getAttempts()).isZero();
-        assertThat(after.getLocationFingerprint()).isEqualTo("fp-new");
         assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
     }
 
@@ -312,7 +308,7 @@ class ScanJobRepositoryTest {
     }
 
     private ScanJob persist(Long artistId, String source, Instant nextDueAt, Instant claimedAt, JobStatus status) {
-        ScanJob job = new ScanJob(artistId, source, status, 0, nextDueAt, "fp");
+        ScanJob job = new ScanJob(artistId, source, status, 0, nextDueAt);
         job.setOwner(OWNER);
         job.setClaimedAt(claimedAt);
         return scanJobRepository.save(job);

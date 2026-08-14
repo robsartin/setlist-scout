@@ -4,7 +4,6 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.scan.source.ShowSource;
-import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.PollerProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,16 +34,13 @@ public class ScanJobBackfill implements ApplicationRunner {
     private final ArtistRepository artistRepository;
     private final ScanJobRepository scanJobRepository;
     private final List<ShowSource> showSources;
-    private final SettingsService settingsService;
     private final PollerProperties properties;
 
     public ScanJobBackfill(ArtistRepository artistRepository, ScanJobRepository scanJobRepository,
-                            List<ShowSource> showSources, SettingsService settingsService,
-                            PollerProperties properties) {
+                            List<ShowSource> showSources, PollerProperties properties) {
         this.artistRepository = artistRepository;
         this.scanJobRepository = scanJobRepository;
         this.showSources = showSources;
-        this.settingsService = settingsService;
         this.properties = properties;
     }
 
@@ -56,11 +52,9 @@ public class ScanJobBackfill implements ApplicationRunner {
         List<Artist> active = artistRepository.findByStatusIn(
                 List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
         for (Artist artist : active) {
-            String fingerprint = settingsService.locationFingerprint(artist.getOwner());
             for (ShowSource source : showSources) {
                 Instant dueAt = Instant.now().plusMillis(jitter(spreadMs));
-                scanJobRepository.insertIfAbsent(artist.getOwner(), artist.getId(), source.id(),
-                        dueAt, fingerprint);
+                scanJobRepository.insertIfAbsent(artist.getOwner(), artist.getId(), source.id(), dueAt);
                 enqueued++;
             }
         }

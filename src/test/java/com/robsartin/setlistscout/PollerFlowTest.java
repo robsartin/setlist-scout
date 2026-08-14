@@ -21,7 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -36,10 +36,16 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -117,14 +123,14 @@ class PollerFlowTest {
      * sources are never invoked. Stubbing {@code id()} in each test is required: an unstubbed Mockito
      * mock returns {@code null}, and the runner calls {@code s.id().equals(..)} on every source.
      */
-    @MockBean
+    @MockitoBean
     private TicketmasterShowSource ticketmasterShowSource;
 
-    @MockBean
+    @MockitoBean
     private LastFmSimilarSource lastFmSource;
 
     /** Stubbed empty so settings persistence never hits the network geocoder. */
-    @MockBean
+    @MockitoBean
     private GeocodingService geocodingService;
 
     @Test
@@ -202,6 +208,50 @@ class PollerFlowTest {
     }
 
     @Test
+    @DisplayName("expand poller: the real CandidateDiscovered -> CandidatePersistenceListener path "
+            + "completes cleanly (no exception, no duplicate) against a pre-existing (owner, name) "
+            + "artist row, end to end through the real production publisher (#95 D1)")
+    void expandCandidatePersistIsIdempotentAgainstAPreExistingArtist() {
+        when(geocodingService.geocode(any())).thenReturn(Optional.empty());
+        String owner = "expand-idempotent@example.com";
+        Long baseArtistId = persistArtist(owner, "Expand Idempotent Base Artist");
+
+        // Simulate a candidate that's already been persisted for this owner (e.g. a redelivered
+        // event, or a concurrent expansion that beat this one to the punch). End to end, the
+        // listener's existsByOwnerAndNameIgnoreCase pre-check absorbs this exact case; the DB-level
+        // ON CONFLICT guard this pre-check backs up is proven directly (bypassing the pre-check,
+        // which a real check-then-insert race would) by catalog.ArtistRepositoryTest.
+        Artist preExisting = new Artist("Discovered Candidate Band", ArtistSource.SIMILAR_EXPANSION,
+                ArtistStatus.PENDING_REVIEW, "Expand Idempotent Base Artist",
+                "similar to Expand Idempotent Base Artist");
+        preExisting.setOwner(owner);
+        artistRepository.save(preExisting);
+
+        when(lastFmSource.id()).thenReturn("lastfm");
+        when(lastFmSource.classification()).thenReturn(ArtistSource.SIMILAR_EXPANSION);
+        when(lastFmSource.note(any())).thenReturn("similar to Expand Idempotent Base Artist");
+        when(lastFmSource.related("Expand Idempotent Base Artist")).thenReturn(List.of("Discovered Candidate Band"));
+
+        ExpandJob job = enqueueExpandJob(owner, baseArtistId, "lastfm");
+
+        expandPoller.tick();
+
+        // The job reschedules cleanly -- proving the listener's transaction wasn't poisoned by
+        // the real (owner, name) unique-constraint conflict.
+        ExpandJob rescheduled = awaitUntil(
+                () -> expandJobRepository.findById(job.getId()).orElseThrow(),
+                j -> j.getStatus() == JobStatus.SCHEDULED);
+        assertThat(rescheduled.getStatus()).as("job completed and rescheduled without exception")
+                .isEqualTo(JobStatus.SCHEDULED);
+        assertThat(rescheduled.getAttempts()).isZero();
+
+        List<Artist> candidates = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW).stream()
+                .filter(a -> "Discovered Candidate Band".equals(a.getName()))
+                .toList();
+        assertThat(candidates).as("no duplicate row: the ON CONFLICT insert absorbed the race").hasSize(1);
+    }
+
+    @Test
     @DisplayName("scan poller: a source that throws leaves the job FAILED with attempts=1, a "
             + "populated last_error, and next_due_at backed off into the future")
     void scanFailureBacksOff() {
@@ -224,9 +274,9 @@ class PollerFlowTest {
         assertThat(failed.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(failed.getAttempts()).isEqualTo(1);
         assertThat(failed.getClaimedAt()).as("claim released even on failure").isNull();
-        assertThat(failed.getLastError()).as("failure detail captured (<=255 chars)")
+        assertThat(failed.getLastError()).as("failure detail captured (<=8000 chars)")
                 .isNotNull()
-                .hasSizeLessThanOrEqualTo(255)
+                .hasSizeLessThanOrEqualTo(8000)
                 .contains("ticketmaster boom");
         assertThat(failed.getNextDueAt()).as("backed off into the future")
                 .isAfter(Instant.now());
@@ -252,8 +302,76 @@ class PollerFlowTest {
         assertThat(failed.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(failed.getAttempts()).isEqualTo(1);
         assertThat(failed.getClaimedAt()).isNull();
-        assertThat(failed.getLastError()).isNotNull().hasSizeLessThanOrEqualTo(255).contains("lastfm boom");
+        assertThat(failed.getLastError()).isNotNull().hasSizeLessThanOrEqualTo(8000).contains("lastfm boom");
         assertThat(failed.getNextDueAt()).isAfter(Instant.now());
+    }
+
+    @Test
+    @DisplayName("scan poller: a real concurrent redueAll racing a claimed job's stale reschedule "
+            + "save -- redueAll's write wins in real Postgres and tick() swallows the resulting "
+            + "OptimisticLockingFailureException instead of throwing (#95 T1)")
+    void concurrentRedueDuringPollWinsOverStaleReschedule() throws Exception {
+        String owner = "scan-concurrent-redue@example.com";
+        Long artistId = persistArtist(owner, "Concurrent Redue Artist");
+        when(geocodingService.geocode(any())).thenReturn(Optional.empty());
+        settingsService.getOrCreateSettings(owner);
+
+        // Forces the real interleave: the poller thread blocks mid-run -- after claimDue has
+        // already loaded the job at its pre-race version into memory, but before its reschedule
+        // save -- so the main thread's redueAll below genuinely races a real in-flight claimed
+        // entity, not a mock.
+        CountDownLatch searchStarted = new CountDownLatch(1);
+        CountDownLatch releaseSearch = new CountDownLatch(1);
+        when(ticketmasterShowSource.id()).thenReturn("ticketmaster");
+        when(ticketmasterShowSource.search(any())).thenAnswer(invocation -> {
+            searchStarted.countDown();
+            releaseSearch.await(10, TimeUnit.SECONDS);
+            return List.of();
+        });
+
+        ScanJob job = enqueueScanJob(owner, artistId, "ticketmaster");
+        long versionBeforeRace = job.getVersion();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> tickRun = executor.submit(scanPoller::tick);
+
+            assertThat(searchStarted.await(10, TimeUnit.SECONDS))
+                    .as("poller claimed the job and is blocked mid-run, holding the stale entity")
+                    .isTrue();
+
+            // Real concurrent write against real Postgres -- exactly the race
+            // ScanJobRepository#redueAll's Javadoc describes: bumps version and re-dues the job
+            // due-now while a poller holds it in-flight at the old version.
+            Instant redueAt = Instant.now();
+            int updated = scanJobRepository.redueAll(owner, redueAt);
+            assertThat(updated).as("redueAll matched the in-flight job's row").isEqualTo(1);
+
+            releaseSearch.countDown();
+
+            // tick() must not throw: the poller's own stale save() loses the version race, and
+            // ScanPoller#runOne must swallow the resulting OptimisticLockingFailureException
+            // rather than letting it propagate out of tick().
+            assertThatCode(() -> tickRun.get(10, TimeUnit.SECONDS))
+                    .as("tick() swallowed the stale-save conflict instead of throwing")
+                    .doesNotThrowAnyException();
+
+            ScanJob afterRace = scanJobRepository.findById(job.getId()).orElseThrow();
+            assertThat(afterRace.getVersion())
+                    .as("redueAll's version bump stuck -- the poller's stale save lost the race")
+                    .isEqualTo(versionBeforeRace + 1);
+            assertThat(afterRace.getStatus())
+                    .as("redueAll's SCHEDULED write wins, not whatever the poller's own bookkeeping set")
+                    .isEqualTo(JobStatus.SCHEDULED);
+            assertThat(afterRace.getClaimedAt())
+                    .as("redueAll cleared the claim; the poller's stale save never landed").isNull();
+            assertThat(afterRace.getAttempts()).as("redueAll reset attempts to 0").isZero();
+            assertThat(afterRace.getNextDueAt())
+                    .as("due-now from redueAll, NOT the poller's own next_due_at + interval")
+                    .isBeforeOrEqualTo(redueAt.plusSeconds(5));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     /**
@@ -269,8 +387,7 @@ class PollerFlowTest {
 
     /** A due (next_due_at in the past), unclaimed, SCHEDULED scan_job for the poller to claim. */
     private ScanJob enqueueScanJob(String owner, Long artistId, String source) {
-        ScanJob job = new ScanJob(artistId, source, JobStatus.SCHEDULED, 0,
-                Instant.now().minusSeconds(60), "fp-" + owner);
+        ScanJob job = new ScanJob(artistId, source, JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(60));
         job.setOwner(owner);
         return scanJobRepository.save(job);
     }

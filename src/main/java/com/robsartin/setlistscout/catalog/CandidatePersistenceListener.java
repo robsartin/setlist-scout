@@ -3,9 +3,10 @@ package com.robsartin.setlistscout.catalog;
 import com.robsartin.setlistscout.shared.events.CandidateDiscovered;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
+
+import java.time.Instant;
 
 /**
  * Turns a {@link CandidateDiscovered} event into a PENDING_REVIEW {@link Artist}, applying the
@@ -49,17 +50,15 @@ public class CandidatePersistenceListener {
             return;
         }
 
-        Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, e.discoveredVia(), e.note());
-        artist.setOwner(e.owner());
-        try {
-            artistRepository.save(artist);
-        } catch (DataIntegrityViolationException ex) {
-            // Lost a race against the (owner, name) unique constraint: another concurrent
-            // publication for the same candidate won. Same outcome as the dedup branch above,
-            // just discovered at insert time instead of the pre-check -- a no-op, not an error.
-            log.atDebug().addKeyValue("owner", e.owner()).addKeyValue("name", name)
-                    .log("candidate already persisted concurrently");
-        }
+        // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than save()+catch: this
+        // listener's whole body runs in one @ApplicationModuleListener transaction, and on an
+        // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real (owner,
+        // name) race poisons that transaction -- Modulith's own AFTER_COMMIT completion write then
+        // fails too, leaving the event stuck for redelivery instead of a clean no-op. The
+        // case-insensitive existsBy check above is a best-effort pre-filter; this is the real,
+        // DB-enforced guard against the case-sensitive unique constraint.
+        artistRepository.insertIfAbsent(e.owner(), name, source.name(), ArtistStatus.PENDING_REVIEW.name(),
+                e.discoveredVia(), e.note(), Instant.now());
     }
 
     /**

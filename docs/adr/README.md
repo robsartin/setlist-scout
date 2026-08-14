@@ -67,3 +67,6 @@
 - [0023: Per-unit event-driven scan/expand work model](0023-per-unit-event-driven-scan-work-model.md) — _Accepted_
   The old whole-fleet `@Scheduled` batch rescanned every artist on a fixed interval regardless of need; durable per-`(owner, artist, source)` jobs, enqueued/re-dued by catalog and settings domain events and drained by a paced claim-lease poller, replace it.
   Related: [0006: Scan frequency](0006-scan-frequency.md), [0022: Event-driven inter-module communication](0022-event-driven-inter-module-communication.md)
+- [0024: Event and durable-write invariant](0024-event-and-durable-write-invariant.md) — _Accepted_
+  Two real Phase B production bugs — an event published outside a committing transaction, and an existsBy-then-catch idempotency check that poisoned a listener's Postgres transaction — established two non-obvious rules for every publisher and listener.
+  Related: [0022: Event-driven inter-module communication](0022-event-driven-inter-module-communication.md), [0023: Per-unit event-driven scan/expand work model](0023-per-unit-event-driven-scan-work-model.md)
