@@ -43,3 +43,7 @@ tooling (formatting, coverage, arch tests) can be applied the same way everywher
   silently change the build.
 - The pinned JDK must be available to Gradle (auto-provisioned or installed); a
   system-default JDK that Gradle can't launch on still needs an explicit workaround.
+- Concretely: the toolchain targets JDK 25 (see #43), but Gradle 8.14.3 itself can't launch
+  on JDK 25, so Gradle is always run with `JAVA_HOME` pointed at an installed JDK 21+ (the
+  launcher JVM); the toolchain then forks a separate JDK 25 process to compile and run tests.
+  Local dev, CI, and the Docker build stage all follow this same two-JDK shape.

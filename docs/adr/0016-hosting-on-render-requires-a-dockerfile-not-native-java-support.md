@@ -26,8 +26,14 @@ Add a multi-stage `Dockerfile` at the repo root:
   used instead of `./gradlew` so the build stage does not re-download a
   Gradle distribution -- a redundant, transient failure point. `./gradlew`
   remains the entry point for local and CI builds, where Gradle is not
-  preinstalled.
-- **Runtime stage** — `eclipse-temurin:21-jre-alpine`, copies out only the
+  preinstalled. Since #43, the stage also borrows a JDK 25 install from
+  `eclipse-temurin:25-jdk-noble` (Gradle 8.14.3 can't launch on JDK 25, but
+  the `java.toolchain` in `build.gradle.kts` targets 25 -- see ADR-0015) so
+  Gradle can fork it as the toolchain JDK. Gradle finds it via
+  `org.gradle.java.installations.fromEnv=JAVA_HOME_25_X64` in
+  `gradle.properties`, pointed at a `JAVA_HOME_25_X64` env var the Dockerfile
+  sets -- an explicit lookup, not a scan-root coincidence.
+- **Runtime stage** — `eclipse-temurin:25-jre-alpine`, copies out only the
   built jar. Keeps the deployed image to a JRE, not a full JDK + Gradle
   toolchain.
 
@@ -59,3 +65,8 @@ are left blank; the Dockerfile's `ENTRYPOINT` is what runs.
   a native runtime would not require.
 - Local `docker build .` can be used to reproduce the exact Render build
   environment for debugging, which a native-runtime deploy would not offer.
+- The runtime `ENTRYPOINT` also carries `-XX:+UseCompactObjectHeaders` (#43,
+  JEP 519 -- a product flag as of JDK 25, no `-XX:+UnlockExperimentalVMOptions`
+  needed) alongside the existing startup-tuning flags, shrinking object
+  headers from 12-16 bytes to 8 for roughly 10-22% less heap -- helpful
+  headroom on Render's 512MB free tier.
