@@ -1,13 +1,12 @@
 package com.robsartin.setlistscout.catalog;
 
+import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -35,17 +34,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  */
 @SpringBootTest
 @Testcontainers
-class ArtistRepositoryTest {
+class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
 
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void oauthProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.client.registration.google.client-id", () -> "test-client-id");
-        registry.add("spring.security.oauth2.client.registration.google.client-secret", () -> "test-client-secret");
-    }
 
     private static final String OWNER = "artist-repo-test@example.com";
 

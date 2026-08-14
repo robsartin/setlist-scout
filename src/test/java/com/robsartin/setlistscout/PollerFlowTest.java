@@ -17,21 +17,19 @@ import com.robsartin.setlistscout.scan.source.TicketmasterShowSource;
 import com.robsartin.setlistscout.settings.GeocodingService;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -41,8 +39,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -78,19 +74,11 @@ import static org.mockito.Mockito.when;
         // ExpandJobListener path this class doesn't otherwise exercise for those seeded artists.
         "setlistscout.job-backfill-enabled=false"
 })
-class PollerFlowTest {
+class PollerFlowTest extends AbstractPostgresIntegrationTest {
 
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void oauthProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.client.registration.google.client-id", () -> "test-client-id");
-        registry.add("spring.security.oauth2.client.registration.google.client-secret", () -> "test-client-secret");
-    }
-
-    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
 
     @Autowired
     private ScanPoller scanPoller;
@@ -398,26 +386,5 @@ class PollerFlowTest {
                 Instant.now().minusSeconds(60));
         job.setOwner(owner);
         return expandJobRepository.save(job);
-    }
-
-    /**
-     * Bounded manual poll -- no fixed sleep -- for an async effect to land. Mirrors
-     * JobEnqueueFlowTest's helper (Awaitility isn't a project dependency); returns the last fetched
-     * value regardless of whether {@code condition} was met, so a timeout still fails with a useful
-     * diff instead of a bare assertion.
-     */
-    private <T> T awaitUntil(Supplier<T> fetch, Predicate<T> condition) {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
-        T last = fetch.get();
-        while (!condition.test(last) && Instant.now().isBefore(deadline)) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
-            last = fetch.get();
-        }
-        return last;
     }
 }

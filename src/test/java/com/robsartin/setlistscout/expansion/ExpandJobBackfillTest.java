@@ -6,14 +6,13 @@ import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
 import com.robsartin.setlistscout.settings.GeocodingService;
+import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -34,17 +33,11 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest
 @Testcontainers
-class ExpandJobBackfillTest {
+class ExpandJobBackfillTest extends AbstractPostgresIntegrationTest {
 
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void oauthProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.client.registration.google.client-id", () -> "test-client-id");
-        registry.add("spring.security.oauth2.client.registration.google.client-secret", () -> "test-client-secret");
-    }
 
     private static final String OWNER = "expand-backfill-test@example.com";
 

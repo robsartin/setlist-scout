@@ -15,24 +15,20 @@ import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.settings.GeocodingService;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,19 +51,11 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest
 @Testcontainers
-class JobEnqueueFlowTest {
+class JobEnqueueFlowTest extends AbstractPostgresIntegrationTest {
 
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void oauthProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.security.oauth2.client.registration.google.client-id", () -> "test-client-id");
-        registry.add("spring.security.oauth2.client.registration.google.client-secret", () -> "test-client-secret");
-    }
-
-    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
 
     @Autowired
     private ArtistActivationService artistActivationService;
@@ -268,27 +256,5 @@ class JobEnqueueFlowTest {
         Artist artist = new Artist(name, ArtistSource.SEED_LIST, status, null, null);
         artist.setOwner(owner);
         return artistRepository.save(artist).getId();
-    }
-
-    /**
-     * Bounded manual poll -- no fixed sleep -- for an async {@code @ApplicationModuleListener} to
-     * finish its durable effect. Awaitility isn't a project dependency (see ExpansionEventFlowTest,
-     * PR3a); this mirrors that plain poll-loop helper. Returns the last fetched value regardless of
-     * whether {@code condition} was ever satisfied, so a timeout still fails with a useful diff
-     * instead of a bare "empty" assertion.
-     */
-    private <T> T awaitUntil(Supplier<T> fetch, Predicate<T> condition) {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
-        T last = fetch.get();
-        while (!condition.test(last) && Instant.now().isBefore(deadline)) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
-            last = fetch.get();
-        }
-        return last;
     }
 }
