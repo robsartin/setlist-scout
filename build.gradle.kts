@@ -7,17 +7,20 @@ plugins {
 group = "com.robsartin"
 version = "0.1.0"
 
-// Override the Spring-Boot-managed Flyway version (3.3.4 ships Flyway 10.17.x, which only
-// officially supports PostgreSQL <= 16 and WARNs on boot against Render's PG 18.4). 11.20.3
-// is the last stable Flyway 11.x and raises the supported-PostgreSQL ceiling to 18, clearing
-// the warning. This property flows to both flyway-core and flyway-database-postgresql (see #46).
+// Override the Spring-Boot-managed Flyway version (Boot 3.5.16 still only manages Flyway
+// 11.7.2, which only officially supports PostgreSQL <= 16 and WARNs on boot against Render's
+// PG 18.4). 11.20.3 is the last stable Flyway 11.x and raises the supported-PostgreSQL
+// ceiling to 18, clearing the warning. This property flows to both flyway-core and
+// flyway-database-postgresql (see #46).
 extra["flyway.version"] = "11.20.3"
 
 java {
     // JDK pinned via the toolchain so the build uses the same Java version everywhere,
-    // independent of whatever JDK happens to be on PATH.
+    // independent of whatever JDK happens to be on PATH. Gradle 8.14.3 itself can't launch on
+    // JDK 25, so it must be run with JAVA_HOME pointed at JDK 21 (or earlier); Gradle then
+    // forks a JDK 25 JVM for this toolchain to compile and run tests on (see ADR-0015 and #43).
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -26,10 +29,10 @@ repositories {
 }
 
 // Spring Modulith isn't in the Spring Boot BOM, so import its own BOM to align all
-// spring-modulith artifacts on 1.3.x (Boot-3.4-compatible); see the redesign spec.
+// spring-modulith artifacts on 1.4.x (Boot-3.5-compatible); see the redesign spec.
 dependencyManagement {
     imports {
-        mavenBom("org.springframework.modulith:spring-modulith-bom:1.3.12")
+        mavenBom("org.springframework.modulith:spring-modulith-bom:1.4.1")
     }
 }
 
