@@ -19,6 +19,19 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     Optional<Artist> findByIdAndOwner(Long id, String owner);
 
     /**
+     * Case-SENSITIVE exact-match lookup used by {@code RelationDiscoveredListener} to resolve the
+     * to-artist id right after an {@link #insertIfAbsent} upsert. Deliberately not
+     * case-insensitive: {@code insertIfAbsent}'s {@code ON CONFLICT (owner, name)} constraint is
+     * itself case-sensitive (see {@code ArtistRepositoryTest#uniqueConstraintIsCaseSensitive}), so
+     * an exact match on the same {@code name} string just passed to {@code insertIfAbsent} is
+     * guaranteed to resolve exactly the row that call just created or conflicted against -- a
+     * case-insensitive lookup could instead hit an unrelated case-variant duplicate for the same
+     * owner and return more than one row, throwing {@code IncorrectResultSizeDataAccessException}
+     * and poisoning this listener's transaction (the exact ADR-0024 failure mode this avoids).
+     */
+    Optional<Artist> findByOwnerAndName(String owner, String name);
+
+    /**
      * DB-level idempotent enqueue: relies on the {@code artist_owner_name_key} unique constraint
      * via {@code ON CONFLICT ... DO NOTHING} so a racing duplicate candidate for the same
      * (owner, name) is a silent no-op instead of a {@code DataIntegrityViolationException}. That
@@ -26,7 +39,7 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
      * transaction on an IDENTITY-keyed table: an uncaught constraint violation aborts the entire
      * transaction (Postgres "current transaction is aborted"), which then fails Modulith's own
      * AFTER_COMMIT completion write and leaves the event stuck for redelivery. See
-     * catalog.CandidatePersistenceListener#on -- mirrors scan.ScanJobRepository#insertIfAbsent.
+     * catalog.RelationDiscoveredListener#on -- mirrors scan.ScanJobRepository#insertIfAbsent.
      */
     @Modifying
     @Query(value = """

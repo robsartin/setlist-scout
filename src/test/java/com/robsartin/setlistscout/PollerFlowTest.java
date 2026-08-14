@@ -51,7 +51,7 @@ import static org.mockito.Mockito.when;
  * beans in the other integration tests) and drives the REAL claim-run-reschedule path against a
  * live Postgres -- enqueue a due job, invoke the poller's own {@code tick()}, and assert both the
  * durable domain effect (a persisted {@code show_event} row / a PENDING_REVIEW {@code artist}
- * from the real {@code CandidateDiscovered} -> {@code CandidatePersistenceListener} path) AND the
+ * from the real {@code RelationDiscovered} -> {@code RelationDiscoveredListener} path) AND the
  * job's own bookkeeping (rescheduled on success, backed off on failure).
  * <p>
  * Only the leaf source ports are mocked ({@link ShowSource}/{@link RelationSource} -- external
@@ -159,8 +159,8 @@ class PollerFlowTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("expand poller: claims a due expand_job, and the real CandidateDiscovered -> "
-            + "CandidatePersistenceListener path creates a PENDING_REVIEW artist; job reschedules")
+    @DisplayName("expand poller: claims a due expand_job, and the real RelationDiscovered -> "
+            + "RelationDiscoveredListener path creates a PENDING_REVIEW artist; job reschedules")
     void expandHappyPath() {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         String owner = "expand-happy@example.com";
@@ -196,19 +196,19 @@ class PollerFlowTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("expand poller: the real CandidateDiscovered -> CandidatePersistenceListener path "
+    @DisplayName("expand poller: the real RelationDiscovered -> RelationDiscoveredListener path "
             + "completes cleanly (no exception, no duplicate) against a pre-existing (owner, name) "
             + "artist row, end to end through the real production publisher (#95 D1)")
-    void expandCandidatePersistIsIdempotentAgainstAPreExistingArtist() {
+    void expandRelationPersistIsIdempotentAgainstAPreExistingArtist() {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         String owner = "expand-idempotent@example.com";
         Long baseArtistId = persistArtist(owner, "Expand Idempotent Base Artist");
 
         // Simulate a candidate that's already been persisted for this owner (e.g. a redelivered
-        // event, or a concurrent expansion that beat this one to the punch). End to end, the
-        // listener's existsByOwnerAndNameIgnoreCase pre-check absorbs this exact case; the DB-level
-        // ON CONFLICT guard this pre-check backs up is proven directly (bypassing the pre-check,
-        // which a real check-then-insert race would) by catalog.ArtistRepositoryTest.
+        // event, or a concurrent expansion that beat this one to the punch). The listener no
+        // longer short-circuits on an already-known to-artist (that's the #109 corroboration
+        // fix), so this exercises insertIfAbsent's real ON CONFLICT DO NOTHING guard directly --
+        // also proven in isolation by catalog.ArtistRepositoryTest.
         Artist preExisting = new Artist("Discovered Candidate Band", ArtistSource.SIMILAR_EXPANSION,
                 ArtistStatus.PENDING_REVIEW, "Expand Idempotent Base Artist",
                 "similar to Expand Idempotent Base Artist");
