@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,9 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndSource(String owner, ArtistSource source);
     boolean existsByOwnerAndNameIgnoreCase(String owner, String name);
     Optional<Artist> findByIdAndOwner(Long id, String owner);
+
+    /** Batch id -> name resolution for the graph-tool view (issue #111), owner-scoped. */
+    List<Artist> findByOwnerAndIdIn(String owner, Collection<Long> ids);
 
     /**
      * Case-SENSITIVE exact-match lookup used by {@code RelationDiscoveredListener} to resolve the

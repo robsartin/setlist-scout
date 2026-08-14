@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Artist graph', 'artists', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <p class="note"><a th:href="@{/artists}">&larr; Back to artists</a></p>
+    <h1 th:text="${artist.name}">Artist</h1>
+    <p class="note">Read-only graph-validation tool (issue #111) -- edge history and the 2-hop reachable set.</p>
+
+    <div class="card">
+        <h2>Outgoing edges</h2>
+        <p class="note" th:if="${#lists.isEmpty(outgoing)}">No outgoing edges.</p>
+        <div class="table-scroll" th:unless="${#lists.isEmpty(outgoing)}">
+            <table>
+                <thead><tr><th>&rarr; Artist</th><th>Type</th><th>Source</th><th>Note</th><th>Found</th></tr></thead>
+                <tbody>
+                <tr th:each="e : ${outgoing}">
+                    <td th:text="${e.otherArtistName}">Artist</td>
+                    <td><span class="chip" th:text="${e.type}">TYPE</span></td>
+                    <td th:text="${e.source}">source</td>
+                    <td class="note" th:text="${e.note}">note</td>
+                    <td th:text="${#temporals.format(e.createdAt, 'yyyy-MM-dd')}">date</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Incoming edges</h2>
+        <p class="note" th:if="${#lists.isEmpty(incoming)}">No incoming edges.</p>
+        <div class="table-scroll" th:unless="${#lists.isEmpty(incoming)}">
+            <table>
+                <thead><tr><th>&larr; Artist</th><th>Type</th><th>Source</th><th>Note</th><th>Found</th></tr></thead>
+                <tbody>
+                <tr th:each="e : ${incoming}">
+                    <td th:text="${e.otherArtistName}">Artist</td>
+                    <td><span class="chip" th:text="${e.type}">TYPE</span></td>
+                    <td th:text="${e.source}">source</td>
+                    <td class="note" th:text="${e.note}">note</td>
+                    <td th:text="${#temporals.format(e.createdAt, 'yyyy-MM-dd')}">date</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Reachable within 2 hops</h2>
+        <p class="note" th:if="${#lists.isEmpty(reachable)}">Nothing reachable.</p>
+        <ul th:unless="${#lists.isEmpty(reachable)}">
+            <li th:each="r : ${reachable}">
+                <span th:text="${r.name}">Artist</span>
+                <span class="note" th:text="'(depth ' + ${r.depth} + ')'">(depth 1)</span>
+            </li>
+        </ul>
+    </div>
+</div>
+</body>
+</html>

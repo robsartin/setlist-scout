@@ -40,4 +40,35 @@ public interface ArtistEdgeRepository extends JpaRepository<ArtistEdge, Long> {
                          @Param("note") String note,
                          @Param("weight") Double weight,
                          @Param("createdAt") Instant createdAt);
+
+    /**
+     * Read-only 2-hop (or N-hop) traversal from {@code startId}, owner-scoped, via a Postgres
+     * recursive CTE (issue #111 -- validating the graph model from #109 against real data before
+     * building a feature on it; shape recommended by
+     * {@code docs/explorations/2026-08-14-artist-graph-model.md} section 2). Walks outgoing edges
+     * only (from -> to), depth-first up to {@code maxDepth} hops, then collapses to one row per
+     * reachable artist at its shortest depth -- an artist reachable via both a 1-hop and a 2-hop
+     * path is reported once, at depth 1. The start artist itself is excluded from the result.
+     *
+     * <p>The anchor member's {@code :startId} is explicitly cast to {@code bigint} because
+     * Postgres can't otherwise infer a type for a bare parameter in the non-recursive term of a
+     * {@code UNION ALL} against the recursive term's {@code bigint} column.
+     */
+    @Query(value = """
+            WITH RECURSIVE reachable(artist_id, depth) AS (
+                SELECT CAST(:startId AS bigint), 0
+                UNION ALL
+                SELECT e.to_artist_id, r.depth + 1
+                  FROM artist_edge e
+                  JOIN reachable r ON e.from_artist_id = r.artist_id
+                 WHERE r.depth < :maxDepth AND e.owner = :owner
+            )
+            SELECT artist_id AS artistId, min(depth) AS depth
+              FROM reachable
+             WHERE artist_id <> CAST(:startId AS bigint)
+             GROUP BY artist_id
+            """, nativeQuery = true)
+    List<ReachableArtist> reachableWithin(@Param("owner") String owner,
+                                           @Param("startId") Long startId,
+                                           @Param("maxDepth") int maxDepth);
 }
