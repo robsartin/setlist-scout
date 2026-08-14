@@ -15,7 +15,6 @@ public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
     List<ScanJob> findByOwnerAndArtistId(String owner, Long artistId);
     List<ScanJob> findByOwner(String owner);
     void deleteByOwnerAndArtistId(String owner, Long artistId);
-    boolean existsByOwnerAndArtistIdAndSource(String owner, Long artistId, String source);
 
     /**
      * DB-level idempotent enqueue: relies on the {@code scan_job_owner_artist_id_source_key}

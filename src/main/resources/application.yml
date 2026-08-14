@@ -4,7 +4,9 @@ spring:
 
   # Faster startup on Render's throttled free-tier CPU (the boot was exceeding Render's
   # port-detection window). Lazy-init defers most bean creation so Tomcat binds its port
-  # quickly; the @Scheduled scanner is kept eager via @Lazy(false) so scans still register.
+  # quickly; the scan/expand pollers (scan.ScanPoller / expansion.ExpandPoller) still register
+  # on schedule because Spring's TaskSchedulingAutoConfiguration excludes @Scheduled beans from
+  # lazy-init automatically -- no @Lazy(false) needed.
   main:
     lazy-initialization: true
   jmx:

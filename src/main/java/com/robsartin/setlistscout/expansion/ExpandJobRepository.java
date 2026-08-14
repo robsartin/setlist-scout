@@ -15,7 +15,6 @@ public interface ExpandJobRepository extends JpaRepository<ExpandJob, Long> {
     List<ExpandJob> findByOwnerAndArtistId(String owner, Long artistId);
     List<ExpandJob> findByOwner(String owner);
     void deleteByOwnerAndArtistId(String owner, Long artistId);
-    boolean existsByOwnerAndArtistIdAndSource(String owner, Long artistId, String source);
 
     /**
      * DB-level idempotent enqueue: relies on the {@code expand_job_owner_artist_id_source_key}
