@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.TributeLlmService;
 import org.springframework.stereotype.Component;
 
@@ -34,5 +35,14 @@ public class TributeLlmSource implements RelationSource {
     @Override
     public String note(String baseArtist) {
         return "tribute/cover act for " + baseArtist;
+    }
+
+    /**
+     * Tribute expansion is SEED-only: it hunts for tribute/cover bands of an original act, which
+     * only makes sense for a hand-curated seed, not for an already-expanded artist.
+     */
+    @Override
+    public boolean appliesTo(ArtistStatus status) {
+        return status == ArtistStatus.SEED;
     }
 }
