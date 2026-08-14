@@ -70,3 +70,6 @@
 - [0024: Event and durable-write invariant](0024-event-and-durable-write-invariant.md) — _Accepted_
   Two real Phase B production bugs — an event published outside a committing transaction, and an existsBy-then-catch idempotency check that poisoned a listener's Postgres transaction — established two non-obvious rules for every publisher and listener.
   Related: [0022: Event-driven inter-module communication](0022-event-driven-inter-module-communication.md), [0023: Per-unit event-driven scan/expand work model](0023-per-unit-event-driven-scan-work-model.md)
+- [0025: Blueprint-managed hosting for auto-propagating DB credential rotation](0025-blueprint-managed-hosting-for-credential-rotation.md) — _Accepted_
+  A dashboard-linked Datastore URL is a snapshot, not a live reference — it doesn't follow Postgres credential rotation. Adopting Render Blueprint management (`render.yaml` + `fromDatabase` refs) makes rotation auto-propagate with no manual re-link.
+  Related: [0008: Hosting on Render](0008-hosting-on-render.md), [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md)

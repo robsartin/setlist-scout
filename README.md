@@ -63,6 +63,11 @@ connection automatically, so there's no JDBC URL to hand-format.
 - Set the Google OAuth **Authorized redirect URI** to
   `https://<your-render-url>/login/oauth2/code/google` (step 1).
 
+Migrating an already-running, hand-managed service (Option B below) to
+Blueprint management afterward, without losing its database, is a separate
+manual dashboard process — see
+[`docs/deploy/render-blueprint-migration.md`](docs/deploy/render-blueprint-migration.md).
+
 **Option B — Manual dashboard.**
 - render.com → New → Web Service → connect the repo. Environment: **Docker**. Leave
   Build/Start Command blank; the Dockerfile's `ENTRYPOINT` starts the app.

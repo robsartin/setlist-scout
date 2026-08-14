@@ -7,8 +7,18 @@
 # "connection to localhost refused" footgun can't happen). You are prompted once for the
 # secrets marked `sync: false`.
 #
-# This is for a fresh Blueprint-managed setup. It does NOT retroactively manage a web
-# service you already created by hand -- for that, set the env vars per the README.
+# ADOPTING THE EXISTING LIVE SERVICE (issue #85): Render matches Blueprint resources to
+# existing ones by the `name` field below, NOT by `databaseName`/`user` (those two are
+# write-once-at-creation and are ignored/irrelevant once a database already exists --
+# see Render's Blueprint spec docs). Before running "New -> Blueprint" against the live
+# service, confirm in the Render dashboard that:
+#   - the existing web service's name is exactly `setlist-scout`
+#   - the existing Postgres instance's name is exactly `setlist-scout-db`
+# If either differs, rename the dashboard resource (or edit the `name:` below) BEFORE
+# syncing -- a name that doesn't match causes Render to create a brand-new resource
+# instead of adopting the existing one, which for the database would mean standing up an
+# empty DB next to the real one. See docs/deploy/render-blueprint-migration.md for the
+# full adoption walkthrough.
 services:
   - type: web
     name: setlist-scout
@@ -16,9 +26,13 @@ services:
     plan: free
     region: oregon
     healthCheckPath: /actuator/health
-    autoDeploy: true
+    autoDeployTrigger: checksPass # matches the live service's "After CI Checks Pass" setting
     envVars:
-      # Database connection -- wired automatically from the managed database below.
+      # Database connection -- wired automatically from the managed database below via
+      # live `fromDatabase` references, so a future credential rotation propagates with
+      # no manual re-link (the problem #85 exists to solve). Matches the split-var
+      # fallback in application.yml (spring.datasource.url is composed from DB_HOST/
+      # DB_PORT/DB_NAME when DATABASE_URL itself isn't set).
       - key: DB_HOST
         fromDatabase:
           name: setlist-scout-db
@@ -39,9 +53,14 @@ services:
         fromDatabase:
           name: setlist-scout-db
           property: password
-      # Single-user gate.
-      - key: ALLOWED_EMAIL
-        value: rob.sartin@gmail.com
+      # Single-user (+ guest) gate. NOTE: the app reads ALLOWED_EMAILS (plural -- see
+      # setlistscout.auth.allowed-emails in application.yml); an earlier version of this
+      # file had the key wrong (ALLOWED_EMAIL, singular), which would have silently
+      # no-op'd to the rob.sartin@gmail.com default instead of actually setting the list.
+      # This is not a secret, so Blueprint sync will overwrite the live value with
+      # whatever's here -- verify it matches the live env var before adopting.
+      - key: ALLOWED_EMAILS
+        value: rob.sartin@gmail.com,davidbuley01@gmail.com
       # Secrets -- Render prompts for these on first Blueprint apply (never committed).
       - key: GOOGLE_CLIENT_ID
         sync: false
@@ -62,5 +81,14 @@ databases:
   - name: setlist-scout-db
     plan: free
     region: oregon
+    # databaseName/user below are ONLY applied if Render ends up CREATING a brand-new
+    # database (no existing resource named `setlist-scout-db` found). For the live,
+    # already-existing instance Render adopts by the `name:` field above and ignores
+    # these two entirely (they're write-once-at-creation on Render's side, and the
+    # username in particular rotates on every credential rotation -- committing today's
+    # rotated value here would both leak it into a public repo and go stale on the very
+    # next rotation, defeating the point of this issue). Left as generic defaults, not
+    # the live values -- the runtime username/password always come from the live
+    # `fromDatabase` refs above, never from this block.
     databaseName: setlistscout
     user: setlistscout
