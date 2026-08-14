@@ -29,7 +29,7 @@ class BandsintownShowSourceTest {
         List<Show> expected = List.of(mockShow);
         when(bandsintown.searchShows(eq("ZZ Top"), eq(30.26), eq(-97.74), eq(50), eq(start), eq(end)))
                 .thenReturn(expected);
-        ScanQuery q = new ScanQuery("ZZ Top", null, "78701", 30.26, -97.74, 50, "Austin", start, end);
+        ScanQuery q = new ScanQuery("ZZ Top", null, "78701", 30.26, -97.74, 50, "Austin", "TX", start, end);
 
         assertThat(source.search(q)).isSameAs(expected);
     }
