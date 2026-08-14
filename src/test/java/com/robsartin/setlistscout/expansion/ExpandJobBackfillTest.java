@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -62,7 +62,7 @@ class ExpandJobBackfillTest {
 
     /** Startup seeders (SettingsSeeder) geocode the seed owner's default ZIP; stub it out so
      * context startup doesn't depend on network access to Zippopotam.us. */
-    @MockBean
+    @MockitoBean
     private GeocodingService geocodingService;
 
     @Test

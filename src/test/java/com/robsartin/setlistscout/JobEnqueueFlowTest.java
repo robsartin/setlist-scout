@@ -19,7 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -40,8 +40,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * Drives the REAL production publisher methods -- {@link ArtistActivationService#changeStatus}
- * and {@link SettingsService#updateSettings} -- with no test-only transaction wrapper (unlike
- * {@code catalog.CandidateDiscoveredFlowTest}'s Modulith {@code Scenario}), through to the
+ * and {@link SettingsService#updateSettings} -- with no test-only transaction wrapper (unlike a
+ * Modulith {@code Scenario}, which wraps the publish in its own transaction -- see the #95
+ * design review's T2 finding for why that class was retired), through to the
  * durable effect the {@code scan.ScanJobListener} and {@code expansion.ExpandJobListener}
  * {@code @ApplicationModuleListener}s produce in {@code scan_job}/{@code expand_job}.
  * <p>
@@ -97,7 +98,7 @@ class JobEnqueueFlowTest {
      * listeners fan out over -- exactly what's under test); only the external geocoder is
      * stubbed out, so settings persistence doesn't depend on network access to Zippopotam.us.
      */
-    @MockBean
+    @MockitoBean
     private GeocodingService geocodingService;
 
     /**

@@ -21,7 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -36,10 +36,16 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -117,14 +123,14 @@ class PollerFlowTest {
      * sources are never invoked. Stubbing {@code id()} in each test is required: an unstubbed Mockito
      * mock returns {@code null}, and the runner calls {@code s.id().equals(..)} on every source.
      */
-    @MockBean
+    @MockitoBean
     private TicketmasterShowSource ticketmasterShowSource;
 
-    @MockBean
+    @MockitoBean
     private LastFmSimilarSource lastFmSource;
 
     /** Stubbed empty so settings persistence never hits the network geocoder. */
-    @MockBean
+    @MockitoBean
     private GeocodingService geocodingService;
 
     @Test
@@ -298,6 +304,74 @@ class PollerFlowTest {
         assertThat(failed.getClaimedAt()).isNull();
         assertThat(failed.getLastError()).isNotNull().hasSizeLessThanOrEqualTo(8000).contains("lastfm boom");
         assertThat(failed.getNextDueAt()).isAfter(Instant.now());
+    }
+
+    @Test
+    @DisplayName("scan poller: a real concurrent redueAll racing a claimed job's stale reschedule "
+            + "save -- redueAll's write wins in real Postgres and tick() swallows the resulting "
+            + "OptimisticLockingFailureException instead of throwing (#95 T1)")
+    void concurrentRedueDuringPollWinsOverStaleReschedule() throws Exception {
+        String owner = "scan-concurrent-redue@example.com";
+        Long artistId = persistArtist(owner, "Concurrent Redue Artist");
+        when(geocodingService.geocode(any())).thenReturn(Optional.empty());
+        settingsService.getOrCreateSettings(owner);
+
+        // Forces the real interleave: the poller thread blocks mid-run -- after claimDue has
+        // already loaded the job at its pre-race version into memory, but before its reschedule
+        // save -- so the main thread's redueAll below genuinely races a real in-flight claimed
+        // entity, not a mock.
+        CountDownLatch searchStarted = new CountDownLatch(1);
+        CountDownLatch releaseSearch = new CountDownLatch(1);
+        when(ticketmasterShowSource.id()).thenReturn("ticketmaster");
+        when(ticketmasterShowSource.search(any())).thenAnswer(invocation -> {
+            searchStarted.countDown();
+            releaseSearch.await(10, TimeUnit.SECONDS);
+            return List.of();
+        });
+
+        ScanJob job = enqueueScanJob(owner, artistId, "ticketmaster");
+        long versionBeforeRace = job.getVersion();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> tickRun = executor.submit(scanPoller::tick);
+
+            assertThat(searchStarted.await(10, TimeUnit.SECONDS))
+                    .as("poller claimed the job and is blocked mid-run, holding the stale entity")
+                    .isTrue();
+
+            // Real concurrent write against real Postgres -- exactly the race
+            // ScanJobRepository#redueAll's Javadoc describes: bumps version and re-dues the job
+            // due-now while a poller holds it in-flight at the old version.
+            Instant redueAt = Instant.now();
+            int updated = scanJobRepository.redueAll(owner, redueAt);
+            assertThat(updated).as("redueAll matched the in-flight job's row").isEqualTo(1);
+
+            releaseSearch.countDown();
+
+            // tick() must not throw: the poller's own stale save() loses the version race, and
+            // ScanPoller#runOne must swallow the resulting OptimisticLockingFailureException
+            // rather than letting it propagate out of tick().
+            assertThatCode(() -> tickRun.get(10, TimeUnit.SECONDS))
+                    .as("tick() swallowed the stale-save conflict instead of throwing")
+                    .doesNotThrowAnyException();
+
+            ScanJob afterRace = scanJobRepository.findById(job.getId()).orElseThrow();
+            assertThat(afterRace.getVersion())
+                    .as("redueAll's version bump stuck -- the poller's stale save lost the race")
+                    .isEqualTo(versionBeforeRace + 1);
+            assertThat(afterRace.getStatus())
+                    .as("redueAll's SCHEDULED write wins, not whatever the poller's own bookkeeping set")
+                    .isEqualTo(JobStatus.SCHEDULED);
+            assertThat(afterRace.getClaimedAt())
+                    .as("redueAll cleared the claim; the poller's stale save never landed").isNull();
+            assertThat(afterRace.getAttempts()).as("redueAll reset attempts to 0").isZero();
+            assertThat(afterRace.getNextDueAt())
+                    .as("due-now from redueAll, NOT the poller's own next_due_at + interval")
+                    .isBeforeOrEqualTo(redueAt.plusSeconds(5));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     /**
