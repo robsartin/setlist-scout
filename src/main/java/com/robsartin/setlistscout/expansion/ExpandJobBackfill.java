@@ -3,7 +3,6 @@ package com.robsartin.setlistscout.expansion;
 import com.robsartin.setlistscout.PollerProperties;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
-import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
 import org.slf4j.Logger;
@@ -56,8 +55,7 @@ public class ExpandJobBackfill implements ApplicationRunner {
                 List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
         for (Artist artist : active) {
             for (RelationSource source : relationSources) {
-                if (source.classification() == ArtistSource.TRIBUTE_EXPANSION
-                        && artist.getStatus() != ArtistStatus.SEED) {
+                if (!source.appliesTo(artist.getStatus())) {
                     continue;
                 }
                 Instant dueAt = Instant.now().plusMillis(jitter(spreadMs));

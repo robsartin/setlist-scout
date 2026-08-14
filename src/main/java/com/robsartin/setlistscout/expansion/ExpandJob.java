@@ -1,7 +1,10 @@
 package com.robsartin.setlistscout.expansion;
 
+import com.robsartin.setlistscout.shared.AbstractJob;
 import com.robsartin.setlistscout.shared.JobStatus;
-import jakarta.persistence.*;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 
@@ -13,74 +16,13 @@ import java.time.Instant;
  */
 @Entity
 @Table(name = "expand_job", uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "artist_id", "source"}))
-public class ExpandJob {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Version
-    @Column(nullable = false)
-    private long version;
-
-    /** The user (email) who owns this job -- set at the persistence boundary. */
-    @Column(nullable = false)
-    private String owner;
-
-    @Column(name = "artist_id", nullable = false)
-    private Long artistId;
-
-    /** Which relation source this job checks, e.g. "lastfm", "discogs", "similar-llm", "tribute-llm". */
-    @Column(nullable = false)
-    private String source;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private JobStatus status;
-
-    @Column(nullable = false)
-    private int attempts;
-
-    /** Detail from the most recent failed run, if any. */
-    @Column(columnDefinition = "text")
-    private String lastError;
-
-    private Instant lastRunAt;
-
-    @Column(name = "next_due_at", nullable = false)
-    private Instant nextDueAt;
-
-    /** Set while a worker holds this job; null when idle. */
-    private Instant claimedAt;
+public class ExpandJob extends AbstractJob {
 
     protected ExpandJob() {
         // JPA
     }
 
     public ExpandJob(Long artistId, String source, JobStatus status, int attempts, Instant nextDueAt) {
-        this.artistId = artistId;
-        this.source = source;
-        this.status = status;
-        this.attempts = attempts;
-        this.nextDueAt = nextDueAt;
+        super(artistId, source, status, attempts, nextDueAt);
     }
-
-    public Long getId() { return id; }
-    public long getVersion() { return version; }
-    public String getOwner() { return owner; }
-    public void setOwner(String owner) { this.owner = owner; }
-    public Long getArtistId() { return artistId; }
-    public String getSource() { return source; }
-    public JobStatus getStatus() { return status; }
-    public void setStatus(JobStatus status) { this.status = status; }
-    public int getAttempts() { return attempts; }
-    public void setAttempts(int attempts) { this.attempts = attempts; }
-    public String getLastError() { return lastError; }
-    public void setLastError(String lastError) { this.lastError = lastError; }
-    public Instant getLastRunAt() { return lastRunAt; }
-    public void setLastRunAt(Instant lastRunAt) { this.lastRunAt = lastRunAt; }
-    public Instant getNextDueAt() { return nextDueAt; }
-    public void setNextDueAt(Instant nextDueAt) { this.nextDueAt = nextDueAt; }
-    public Instant getClaimedAt() { return claimedAt; }
-    public void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
 }

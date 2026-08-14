@@ -46,12 +46,17 @@ class ExpandJobListenerTest {
         tributeLlm = mock(RelationSource.class);
         when(musicBrainz.id()).thenReturn("musicbrainz");
         when(musicBrainz.classification()).thenReturn(ArtistSource.MEMBER_EXPANSION);
+        when(musicBrainz.appliesTo(any())).thenReturn(true);
         when(discogs.id()).thenReturn("discogs");
         when(discogs.classification()).thenReturn(ArtistSource.MEMBER_EXPANSION);
+        when(discogs.appliesTo(any())).thenReturn(true);
         when(lastFm.id()).thenReturn("lastfm");
         when(lastFm.classification()).thenReturn(ArtistSource.SIMILAR_EXPANSION);
+        when(lastFm.appliesTo(any())).thenReturn(true);
         when(tributeLlm.id()).thenReturn("tribute-llm");
         when(tributeLlm.classification()).thenReturn(ArtistSource.TRIBUTE_EXPANSION);
+        // Mirrors TributeLlmSource#appliesTo: SEED-only, matching production behavior.
+        when(tributeLlm.appliesTo(any())).thenAnswer(inv -> inv.getArgument(0) == ArtistStatus.SEED);
 
         listener = new ExpandJobListener(expandJobRepository, List.of(musicBrainz, discogs, lastFm, tributeLlm),
                 artistRepository);

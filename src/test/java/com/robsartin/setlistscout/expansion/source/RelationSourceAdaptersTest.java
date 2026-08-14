@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.DiscogsService;
 import com.robsartin.setlistscout.expansion.LastFmService;
 import com.robsartin.setlistscout.expansion.SimilarArtistLlmService;
@@ -25,6 +26,9 @@ class RelationSourceAdaptersTest {
         assertThat(s.related("Dawes")).containsExactly("Taylor Goldsmith");
         assertThat(s.classification()).isEqualTo(ArtistSource.MEMBER_EXPANSION);
         assertThat(s.note("Dawes")).isEqualTo("member/lineup relation of Dawes");
+        // Default RelationSource#appliesTo: always eligible, regardless of artist status.
+        assertThat(s.appliesTo(ArtistStatus.SEED)).isTrue();
+        assertThat(s.appliesTo(ArtistStatus.APPROVED)).isTrue();
     }
 
     @Test
@@ -69,5 +73,10 @@ class RelationSourceAdaptersTest {
         assertThat(s.related("Iron Maiden")).containsExactly("The Iron Maidens");
         assertThat(s.classification()).isEqualTo(ArtistSource.TRIBUTE_EXPANSION);
         assertThat(s.note("Dawes")).isEqualTo("tribute/cover act for Dawes");
+        // Tribute expansion is SEED-only.
+        assertThat(s.appliesTo(ArtistStatus.SEED)).isTrue();
+        assertThat(s.appliesTo(ArtistStatus.APPROVED)).isFalse();
+        assertThat(s.appliesTo(ArtistStatus.PENDING_REVIEW)).isFalse();
+        assertThat(s.appliesTo(ArtistStatus.REJECTED)).isFalse();
     }
 }

@@ -1,7 +1,7 @@
 package com.robsartin.setlistscout.expansion;
 
+import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
-import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
@@ -34,14 +34,14 @@ public class ExpandJobListener {
 
     @ApplicationModuleListener
     void onArtistActivated(ArtistActivated e) {
-        // Tribute expansion is SEED-only: it hunts for tribute/cover bands of an original act,
-        // which only makes sense for a hand-curated seed, not for an already-expanded artist.
-        boolean isSeed = artistRepository.findByIdAndOwner(e.artistId(), e.owner())
-                .map(a -> a.getStatus() == ArtistStatus.SEED)
-                .orElse(false);
+        // Source eligibility (e.g. tribute expansion is SEED-only) is a property of the source
+        // itself -- see RelationSource#appliesTo.
+        ArtistStatus artistStatus = artistRepository.findByIdAndOwner(e.artistId(), e.owner())
+                .map(Artist::getStatus)
+                .orElse(null);
 
         for (RelationSource source : relationSources) {
-            if (source.classification() == ArtistSource.TRIBUTE_EXPANSION && !isSeed) {
+            if (!source.appliesTo(artistStatus)) {
                 continue;
             }
             // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than existsBy+save+catch:

@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 
 import java.util.List;
 
@@ -17,4 +18,9 @@ public interface RelationSource {
 
     /** Human-readable explanation of why a candidate from this source was discovered, for the given base artist. */
     String note(String baseArtist);
+
+    /** Whether this source should be expanded for an artist in the given status. Default: always. */
+    default boolean appliesTo(ArtistStatus status) {
+        return true;
+    }
 }
