@@ -100,7 +100,7 @@ public class ScanUnitRunner {
     ScanQuery buildQuery(Artist artist, SearchSettings settings, LocalDateTime start, LocalDateTime end) {
         return new ScanQuery(artist.getName(), resolveSiteUrl(artist),
                 settings.getPostalCode(), settings.getLatitude(), settings.getLongitude(),
-                settings.getRadiusMiles(), settings.getCity(), start, end);
+                settings.getRadiusMiles(), settings.getCity(), settings.getState(), start, end);
     }
 
     /**
