@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSiteUrlService;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.scan.source.ScanQuery;
@@ -34,6 +35,7 @@ class ScanUnitRunnerTest {
     private static final String SOURCE_ID = "ticketmaster";
 
     private ArtistRepository artistRepository;
+    private ArtistSiteUrlService artistSiteUrlService;
     private ShowRepository showRepository;
     private SearchSettingsRepository settingsRepository;
     private MusicBrainzService musicBrainz;
@@ -43,13 +45,14 @@ class ScanUnitRunnerTest {
     @BeforeEach
     void setUp() {
         artistRepository = mock(ArtistRepository.class);
+        artistSiteUrlService = mock(ArtistSiteUrlService.class);
         showRepository = mock(ShowRepository.class);
         settingsRepository = mock(SearchSettingsRepository.class);
         musicBrainz = mock(MusicBrainzService.class);
         showSource = mock(ShowSource.class);
         when(showSource.id()).thenReturn(SOURCE_ID);
         when(showSource.search(any())).thenReturn(List.of());
-        runner = new ScanUnitRunner(List.of(showSource), artistRepository, showRepository,
+        runner = new ScanUnitRunner(List.of(showSource), artistRepository, artistSiteUrlService, showRepository,
                 settingsRepository, musicBrainz);
 
         SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
@@ -88,7 +91,8 @@ class ScanUnitRunnerTest {
                         && "78701".equals(q.postalCode())
                         && q.radiusMiles() == 50
                         && "Austin".equals(q.city())));
-        verify(artistRepository).save(argThat(a -> "https://zztop.com".equals(a.getOfficialSiteUrl())));
+        verify(artistSiteUrlService).recordOfficialSiteUrl(zz.getId(), OWNER, "https://zztop.com");
+        verify(artistRepository, never()).save(any());
         verify(showRepository).save(show);
     }
 
@@ -147,7 +151,7 @@ class ScanUnitRunnerTest {
         // Source lookup happens before ScanQuery-building, so an unknown source never
         // wastes a MusicBrainz call or writes the artist's cached site URL.
         verify(musicBrainz, never()).findOfficialHomepage(any());
-        verify(artistRepository, never()).save(any());
+        verify(artistSiteUrlService, never()).recordOfficialSiteUrl(any(), any(), any());
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSiteUrlService;
 import com.robsartin.setlistscout.scan.source.ScanQuery;
 import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.settings.SearchSettings;
@@ -18,7 +19,8 @@ import java.util.Optional;
 /**
  * Runs show search for exactly one (artist, source) pair -- the per-unit replacement for the
  * whole-fleet batch scanner retired in Phase B PR4b. Owns the one shared copy of
- * {@link #resolveSiteUrl} (the one write -- band-site URL cache) and {@link #persistNew}.
+ * {@link #resolveSiteUrl} (triggers the one write in the scan flow -- the band-site URL cache,
+ * delegated to {@code catalog.ArtistSiteUrlService} since #102) and {@link #persistNew}.
  */
 @Service
 public class ScanUnitRunner {
@@ -27,17 +29,20 @@ public class ScanUnitRunner {
 
     private final List<ShowSource> showSources;
     private final ArtistRepository artistRepository;
+    private final ArtistSiteUrlService artistSiteUrlService;
     private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
     private final MusicBrainzService musicBrainz;
 
     public ScanUnitRunner(List<ShowSource> showSources,
                            ArtistRepository artistRepository,
+                           ArtistSiteUrlService artistSiteUrlService,
                            ShowRepository showRepository,
                            SearchSettingsRepository settingsRepository,
                            MusicBrainzService musicBrainz) {
         this.showSources = showSources;
         this.artistRepository = artistRepository;
+        this.artistSiteUrlService = artistSiteUrlService;
         this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
         this.musicBrainz = musicBrainz;
@@ -100,16 +105,17 @@ public class ScanUnitRunner {
 
     /**
      * The artist's official-site URL for band-site scraping (#22): the cached value, or a MusicBrainz
-     * "official homepage" lookup on first use, cached back onto the artist. This is the one write in the
-     * scan flow -- the show sources themselves are query-only.
+     * "official homepage" lookup on first use, cached back onto the artist via
+     * {@link ArtistSiteUrlService#recordOfficialSiteUrl} -- catalog owns the {@link Artist} aggregate,
+     * so {@code scan} calls into it rather than loading + saving the entity itself (#102). This is
+     * the one write the scan flow triggers -- the show sources themselves are query-only.
      */
     String resolveSiteUrl(Artist artist) {
         String url = artist.getOfficialSiteUrl();
         if (url == null) {
             url = musicBrainz.findOfficialHomepage(artist.getName()).orElse(null);
             if (url != null) {
-                artist.setOfficialSiteUrl(url);
-                artistRepository.save(artist);
+                artistSiteUrlService.recordOfficialSiteUrl(artist.getId(), artist.getOwner(), url);
             }
         }
         return url;

@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
@@ -45,7 +46,7 @@ class ScanJobListenerTest {
     @Test
     @DisplayName("activation issues one idempotent insertIfAbsent per source with SCHEDULED-shaped, due-now args")
     void activationEnqueuesOneJobPerSource() {
-        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes"));
+        listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes", ArtistStatus.SEED.name()));
 
         for (String sourceId : List.of("ticketmaster", "bandsintown", "band-site")) {
             verify(scanJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId),

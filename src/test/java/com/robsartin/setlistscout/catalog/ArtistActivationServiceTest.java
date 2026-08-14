@@ -52,7 +52,8 @@ class ArtistActivationServiceTest {
         verify(artistRepository).save(artist);
         ArgumentCaptor<ArtistActivated> captor = ArgumentCaptor.forClass(ArtistActivated.class);
         verify(publisher).publishEvent(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new ArtistActivated(OWNER, artist.getId(), artist.getName()));
+        assertThat(captor.getValue()).isEqualTo(
+                new ArtistActivated(OWNER, artist.getId(), artist.getName(), artist.getStatus().name()));
     }
 
     @Test
@@ -124,6 +125,7 @@ class ArtistActivationServiceTest {
 
         ArgumentCaptor<ArtistActivated> captor = ArgumentCaptor.forClass(ArtistActivated.class);
         verify(publisher).publishEvent(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new ArtistActivated(OWNER, saved.getId(), saved.getName()));
+        assertThat(captor.getValue()).isEqualTo(
+                new ArtistActivated(OWNER, saved.getId(), saved.getName(), saved.getStatus().name()));
     }
 }
