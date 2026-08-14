@@ -41,8 +41,12 @@ public class ScanPoller {
 
     private static final Logger log = LoggerFactory.getLogger(ScanPoller.class);
 
-    /** Cap on {@code varchar(255) last_error} (scan_job / expand_job schema, V6/V7). */
-    static final int LAST_ERROR_MAX_LEN = 255;
+    /**
+     * Generous truncation bound on the {@code text last_error} column (V9 widened it from
+     * {@code varchar(255)}) -- long enough to keep real API/LLM failure detail intact while still
+     * bounding row size.
+     */
+    static final int LAST_ERROR_MAX_LEN = 8000;
 
     /** First backoff step on failure; doubles per attempt up to the source's own interval. */
     static final Duration BACKOFF_BASE = Duration.ofMinutes(10);

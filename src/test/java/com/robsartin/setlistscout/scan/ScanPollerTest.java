@@ -57,7 +57,7 @@ class ScanPollerTest {
     }
 
     private static ScanJob job(int attempts) {
-        ScanJob job = new ScanJob(ARTIST_ID, SOURCE, JobStatus.RUNNING, attempts, NOW, null);
+        ScanJob job = new ScanJob(ARTIST_ID, SOURCE, JobStatus.RUNNING, attempts, NOW);
         job.setOwner(OWNER);
         job.setClaimedAt(NOW);
         return job;
@@ -92,10 +92,10 @@ class ScanPollerTest {
     }
 
     @Test
-    @DisplayName("a thrown RuntimeException backs off: attempts++, lastError set (truncated to 255), FAILED, nextDueAt backed off")
+    @DisplayName("a thrown RuntimeException backs off: attempts++, lastError set (truncated to 8000), FAILED, nextDueAt backed off")
     void failureBacksOff() {
         ScanJob job = job(0);
-        String longMessage = "boom: " + "x".repeat(300);
+        String longMessage = "boom: " + "x".repeat(8500);
         when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
         when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE)).thenThrow(new RuntimeException(longMessage));
 
@@ -104,7 +104,7 @@ class ScanPollerTest {
         assertThat(job.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(job.getAttempts()).isEqualTo(1);
         assertThat(job.getClaimedAt()).isNull();
-        assertThat(job.getLastError()).hasSize(255).isEqualTo(longMessage.substring(0, 255));
+        assertThat(job.getLastError()).hasSize(8000).isEqualTo(longMessage.substring(0, 8000));
         // attempts=1 -> 10m * 2^1 = 20m, well under the 14d interval cap
         assertThat(job.getNextDueAt()).isEqualTo(NOW.plus(Duration.ofMinutes(20)));
         verify(scanJobRepository).save(job);

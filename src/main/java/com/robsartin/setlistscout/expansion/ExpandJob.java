@@ -42,6 +42,7 @@ public class ExpandJob {
     private int attempts;
 
     /** Detail from the most recent failed run, if any. */
+    @Column(columnDefinition = "text")
     private String lastError;
 
     private Instant lastRunAt;

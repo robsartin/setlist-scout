@@ -42,6 +42,7 @@ public class ScanJob {
     private int attempts;
 
     /** Detail from the most recent failed run, if any. */
+    @Column(columnDefinition = "text")
     private String lastError;
 
     private Instant lastRunAt;
@@ -52,22 +53,16 @@ public class ScanJob {
     /** Set while a worker holds this job; null when idle. */
     private Instant claimedAt;
 
-    /** Stable hash of the owner's search location at last enqueue/re-due; see SettingsService.locationFingerprint. */
-    @Column(name = "location_fingerprint")
-    private String locationFingerprint;
-
     protected ScanJob() {
         // JPA
     }
 
-    public ScanJob(Long artistId, String source, JobStatus status, int attempts, Instant nextDueAt,
-                    String locationFingerprint) {
+    public ScanJob(Long artistId, String source, JobStatus status, int attempts, Instant nextDueAt) {
         this.artistId = artistId;
         this.source = source;
         this.status = status;
         this.attempts = attempts;
         this.nextDueAt = nextDueAt;
-        this.locationFingerprint = locationFingerprint;
     }
 
     public Long getId() { return id; }
@@ -88,6 +83,4 @@ public class ScanJob {
     public void setNextDueAt(Instant nextDueAt) { this.nextDueAt = nextDueAt; }
     public Instant getClaimedAt() { return claimedAt; }
     public void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
-    public String getLocationFingerprint() { return locationFingerprint; }
-    public void setLocationFingerprint(String locationFingerprint) { this.locationFingerprint = locationFingerprint; }
 }

@@ -121,10 +121,10 @@ class ExpandPollerTest {
     }
 
     @Test
-    @DisplayName("a thrown RuntimeException backs off: attempts++, lastError set (truncated to 255), FAILED, nextDueAt backed off")
+    @DisplayName("a thrown RuntimeException backs off: attempts++, lastError set (truncated to 8000), FAILED, nextDueAt backed off")
     void failureBacksOff() {
         ExpandJob job = job(0);
-        String longMessage = "boom: " + "x".repeat(300);
+        String longMessage = "boom: " + "x".repeat(8500);
         when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
         when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
         doThrow(new RuntimeException(longMessage)).when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
@@ -134,7 +134,7 @@ class ExpandPollerTest {
         assertThat(job.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(job.getAttempts()).isEqualTo(1);
         assertThat(job.getClaimedAt()).isNull();
-        assertThat(job.getLastError()).hasSize(255).isEqualTo(longMessage.substring(0, 255));
+        assertThat(job.getLastError()).hasSize(8000).isEqualTo(longMessage.substring(0, 8000));
         assertThat(job.getNextDueAt()).isEqualTo(NOW.plus(Duration.ofMinutes(20)));
         verify(expandJobRepository).save(job);
     }

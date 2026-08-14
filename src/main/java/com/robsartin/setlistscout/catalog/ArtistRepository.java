@@ -2,8 +2,11 @@ package com.robsartin.setlistscout.catalog;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +17,30 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndSource(String owner, ArtistSource source);
     boolean existsByOwnerAndNameIgnoreCase(String owner, String name);
     Optional<Artist> findByIdAndOwner(Long id, String owner);
+
+    /**
+     * DB-level idempotent enqueue: relies on the {@code artist_owner_name_key} unique constraint
+     * via {@code ON CONFLICT ... DO NOTHING} so a racing duplicate candidate for the same
+     * (owner, name) is a silent no-op instead of a {@code DataIntegrityViolationException}. That
+     * matters because {@code @ApplicationModuleListener} runs the whole listener body in one
+     * transaction on an IDENTITY-keyed table: an uncaught constraint violation aborts the entire
+     * transaction (Postgres "current transaction is aborted"), which then fails Modulith's own
+     * AFTER_COMMIT completion write and leaves the event stuck for redelivery. See
+     * catalog.CandidatePersistenceListener#on -- mirrors scan.ScanJobRepository#insertIfAbsent.
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO artist (owner, name, source, status, discovered_via, note, created_at)
+            VALUES (:owner, :name, :source, :status, :discoveredVia, :note, :createdAt)
+            ON CONFLICT (owner, name) DO NOTHING
+            """, nativeQuery = true)
+    void insertIfAbsent(@Param("owner") String owner,
+                         @Param("name") String name,
+                         @Param("source") String source,
+                         @Param("status") String status,
+                         @Param("discoveredVia") String discoveredVia,
+                         @Param("note") String note,
+                         @Param("createdAt") Instant createdAt);
 
     /**
      * One row per (discoveredVia, source) pair among an owner's candidates in the given status --

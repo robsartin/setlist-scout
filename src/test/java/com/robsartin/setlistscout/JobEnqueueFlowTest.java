@@ -166,7 +166,7 @@ class JobEnqueueFlowTest {
 
     @Test
     @DisplayName("updateSettings publishes SettingsChanged in a committed tx, and the real listener "
-            + "re-dues every scan_job for the owner and refreshes its location fingerprint")
+            + "re-dues every scan_job for the owner")
     void changingSettingsReDuesTheOwnersScanJobs() {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         String owner = "settings-flow@example.com";
@@ -175,25 +175,20 @@ class JobEnqueueFlowTest {
         List<ScanJob> initialJobs = awaitUntil(
                 () -> scanJobRepository.findByOwnerAndArtistId(owner, artistId),
                 jobs -> jobs.size() == showSources.size());
-        String originalFingerprint = initialJobs.get(0).getLocationFingerprint();
-        assertThat(initialJobs).as("all jobs share one fingerprint at enqueue time")
-                .allMatch(j -> originalFingerprint.equals(j.getLocationFingerprint()));
+        long initialVersion = initialJobs.get(0).getVersion();
 
         Instant beforeUpdate = Instant.now();
         settingsService.updateSettings(owner, "10001", 75, 3);
-        String expectedFingerprint = settingsService.locationFingerprint(owner);
-        assertThat(expectedFingerprint).as("changed location produces a different fingerprint")
-                .isNotEqualTo(originalFingerprint);
 
         List<ScanJob> reDuedJobs = awaitUntil(
                 () -> scanJobRepository.findByOwnerAndArtistId(owner, artistId),
                 jobs -> jobs.size() == showSources.size()
-                        && jobs.stream().allMatch(j -> expectedFingerprint.equals(j.getLocationFingerprint())));
+                        && jobs.stream().allMatch(j -> !j.getNextDueAt().isBefore(beforeUpdate)));
 
-        assertThat(reDuedJobs).as("every job's fingerprint refreshed")
-                .allMatch(j -> expectedFingerprint.equals(j.getLocationFingerprint()));
         assertThat(reDuedJobs).as("every job's nextDueAt advanced to (at or after) the settings change")
                 .allMatch(j -> !j.getNextDueAt().isBefore(beforeUpdate));
+        assertThat(reDuedJobs).as("redueAll's version bump proves this is a real re-due, not a "
+                + "coincidentally-already-scheduled job").allMatch(j -> j.getVersion() > initialVersion);
         assertThat(reDuedJobs).as("every job is SCHEDULED and cleanly claimable again (redueAll)")
                 .allMatch(j -> j.getStatus() == JobStatus.SCHEDULED
                         && j.getAttempts() == 0
@@ -215,8 +210,7 @@ class JobEnqueueFlowTest {
         // aborts the whole @ApplicationModuleListener transaction, so the earlier fix's catch block
         // still lost every job after the one that conflicted -- this reproduces that exact shape
         // against the real DB, which mocks can't.
-        ScanJob preExisting = new ScanJob(artistId, "ticketmaster", JobStatus.SCHEDULED, 0,
-                Instant.now(), "pre-existing-fp");
+        ScanJob preExisting = new ScanJob(artistId, "ticketmaster", JobStatus.SCHEDULED, 0, Instant.now());
         preExisting.setOwner(owner);
         scanJobRepository.save(preExisting);
         List<String> expectedExpandSourceIds = nonTributeExpandSourceIds();

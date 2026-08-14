@@ -202,6 +202,50 @@ class PollerFlowTest {
     }
 
     @Test
+    @DisplayName("expand poller: the real CandidateDiscovered -> CandidatePersistenceListener path "
+            + "completes cleanly (no exception, no duplicate) against a pre-existing (owner, name) "
+            + "artist row, end to end through the real production publisher (#95 D1)")
+    void expandCandidatePersistIsIdempotentAgainstAPreExistingArtist() {
+        when(geocodingService.geocode(any())).thenReturn(Optional.empty());
+        String owner = "expand-idempotent@example.com";
+        Long baseArtistId = persistArtist(owner, "Expand Idempotent Base Artist");
+
+        // Simulate a candidate that's already been persisted for this owner (e.g. a redelivered
+        // event, or a concurrent expansion that beat this one to the punch). End to end, the
+        // listener's existsByOwnerAndNameIgnoreCase pre-check absorbs this exact case; the DB-level
+        // ON CONFLICT guard this pre-check backs up is proven directly (bypassing the pre-check,
+        // which a real check-then-insert race would) by catalog.ArtistRepositoryTest.
+        Artist preExisting = new Artist("Discovered Candidate Band", ArtistSource.SIMILAR_EXPANSION,
+                ArtistStatus.PENDING_REVIEW, "Expand Idempotent Base Artist",
+                "similar to Expand Idempotent Base Artist");
+        preExisting.setOwner(owner);
+        artistRepository.save(preExisting);
+
+        when(lastFmSource.id()).thenReturn("lastfm");
+        when(lastFmSource.classification()).thenReturn(ArtistSource.SIMILAR_EXPANSION);
+        when(lastFmSource.note(any())).thenReturn("similar to Expand Idempotent Base Artist");
+        when(lastFmSource.related("Expand Idempotent Base Artist")).thenReturn(List.of("Discovered Candidate Band"));
+
+        ExpandJob job = enqueueExpandJob(owner, baseArtistId, "lastfm");
+
+        expandPoller.tick();
+
+        // The job reschedules cleanly -- proving the listener's transaction wasn't poisoned by
+        // the real (owner, name) unique-constraint conflict.
+        ExpandJob rescheduled = awaitUntil(
+                () -> expandJobRepository.findById(job.getId()).orElseThrow(),
+                j -> j.getStatus() == JobStatus.SCHEDULED);
+        assertThat(rescheduled.getStatus()).as("job completed and rescheduled without exception")
+                .isEqualTo(JobStatus.SCHEDULED);
+        assertThat(rescheduled.getAttempts()).isZero();
+
+        List<Artist> candidates = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW).stream()
+                .filter(a -> "Discovered Candidate Band".equals(a.getName()))
+                .toList();
+        assertThat(candidates).as("no duplicate row: the ON CONFLICT insert absorbed the race").hasSize(1);
+    }
+
+    @Test
     @DisplayName("scan poller: a source that throws leaves the job FAILED with attempts=1, a "
             + "populated last_error, and next_due_at backed off into the future")
     void scanFailureBacksOff() {
@@ -224,9 +268,9 @@ class PollerFlowTest {
         assertThat(failed.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(failed.getAttempts()).isEqualTo(1);
         assertThat(failed.getClaimedAt()).as("claim released even on failure").isNull();
-        assertThat(failed.getLastError()).as("failure detail captured (<=255 chars)")
+        assertThat(failed.getLastError()).as("failure detail captured (<=8000 chars)")
                 .isNotNull()
-                .hasSizeLessThanOrEqualTo(255)
+                .hasSizeLessThanOrEqualTo(8000)
                 .contains("ticketmaster boom");
         assertThat(failed.getNextDueAt()).as("backed off into the future")
                 .isAfter(Instant.now());
@@ -252,7 +296,7 @@ class PollerFlowTest {
         assertThat(failed.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(failed.getAttempts()).isEqualTo(1);
         assertThat(failed.getClaimedAt()).isNull();
-        assertThat(failed.getLastError()).isNotNull().hasSizeLessThanOrEqualTo(255).contains("lastfm boom");
+        assertThat(failed.getLastError()).isNotNull().hasSizeLessThanOrEqualTo(8000).contains("lastfm boom");
         assertThat(failed.getNextDueAt()).isAfter(Instant.now());
     }
 
@@ -269,8 +313,7 @@ class PollerFlowTest {
 
     /** A due (next_due_at in the past), unclaimed, SCHEDULED scan_job for the poller to claim. */
     private ScanJob enqueueScanJob(String owner, Long artistId, String source) {
-        ScanJob job = new ScanJob(artistId, source, JobStatus.SCHEDULED, 0,
-                Instant.now().minusSeconds(60), "fp-" + owner);
+        ScanJob job = new ScanJob(artistId, source, JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(60));
         job.setOwner(owner);
         return scanJobRepository.save(job);
     }

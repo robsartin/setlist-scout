@@ -28,7 +28,6 @@ import static org.mockito.Mockito.when;
 class ShowControllerTest {
 
     private static final String OWNER = "rob@example.com";
-    private static final String FINGERPRINT = "abc123";
 
     private ShowRepository showRepository;
     private ArtistRepository artistRepository;
@@ -46,7 +45,6 @@ class ShowControllerTest {
         when(currentUser.email()).thenReturn(OWNER);
         when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION))
                 .thenReturn(List.of());
-        when(settingsService.locationFingerprint(OWNER)).thenReturn(FINGERPRINT);
         controller = new ShowController(showRepository, artistRepository, scanJobRepository,
                 settingsService, currentUser);
     }
@@ -62,7 +60,7 @@ class ShowControllerTest {
 
         String view = controller.scanNow("hx", "eventDate", model);
 
-        verify(scanJobRepository).redueAll(eq(OWNER), any(Instant.class), eq(FINGERPRINT));
+        verify(scanJobRepository).redueAll(eq(OWNER), any(Instant.class));
         assertThat(view).isEqualTo("shows :: showsRegion");
         assertThat(model.getAttribute("scanQueued")).isEqualTo(true);
     }
@@ -74,7 +72,7 @@ class ShowControllerTest {
 
         String view = controller.scanNow(null, "eventDate", model);
 
-        verify(scanJobRepository).redueAll(eq(OWNER), any(Instant.class), eq(FINGERPRINT));
+        verify(scanJobRepository).redueAll(eq(OWNER), any(Instant.class));
         assertThat(view).isEqualTo("redirect:/");
     }
 

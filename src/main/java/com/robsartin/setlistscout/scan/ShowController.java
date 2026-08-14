@@ -84,7 +84,7 @@ public class ShowController {
     public String scanNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           @RequestParam(defaultValue = "eventDate") String sort, Model model) {
         String owner = currentUser.email();
-        scanJobRepository.redueAll(owner, java.time.Instant.now(), settingsService.locationFingerprint(owner));
+        scanJobRepository.redueAll(owner, java.time.Instant.now());
         if (hxRequest != null) {
             populateShows(model, owner, sort);
             model.addAttribute("scanQueued", true);
