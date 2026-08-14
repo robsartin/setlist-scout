@@ -1,6 +1,6 @@
 package com.robsartin.setlistscout.expansion;
 
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.robsartin.setlistscout.shared.JobRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -8,13 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
-public interface ExpandJobRepository extends JpaRepository<ExpandJob, Long> {
-    Optional<ExpandJob> findByOwnerAndArtistIdAndSource(String owner, Long artistId, String source);
-    List<ExpandJob> findByOwnerAndArtistId(String owner, Long artistId);
-    List<ExpandJob> findByOwner(String owner);
-    void deleteByOwnerAndArtistId(String owner, Long artistId);
+public interface ExpandJobRepository extends JobRepository<ExpandJob> {
 
     /**
      * DB-level idempotent enqueue: relies on the {@code expand_job_owner_artist_id_source_key}

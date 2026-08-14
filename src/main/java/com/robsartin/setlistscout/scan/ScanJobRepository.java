@@ -1,6 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.robsartin.setlistscout.shared.JobRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -8,13 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
-public interface ScanJobRepository extends JpaRepository<ScanJob, Long> {
-    Optional<ScanJob> findByOwnerAndArtistIdAndSource(String owner, Long artistId, String source);
-    List<ScanJob> findByOwnerAndArtistId(String owner, Long artistId);
-    List<ScanJob> findByOwner(String owner);
-    void deleteByOwnerAndArtistId(String owner, Long artistId);
+public interface ScanJobRepository extends JobRepository<ScanJob> {
 
     /**
      * DB-level idempotent enqueue: relies on the {@code scan_job_owner_artist_id_source_key}
