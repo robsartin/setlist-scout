@@ -11,17 +11,25 @@ import java.util.Optional;
 
 /**
  * Turns a {@link RelationDiscovered} event into BOTH a PENDING_REVIEW {@link Artist} node (if one
- * doesn't already exist for this owner) AND an {@link ArtistEdge} row recording the specific
- * assertion -- in one listener transaction, so there's no async ordering race between "the node
- * exists" and "the edge referencing it exists" (see
+ * doesn't already exist for this owner, under ANY spelling) AND an {@link ArtistEdge} row
+ * recording the specific assertion -- in one listener transaction, so there's no async ordering
+ * race between "the node exists" and "the edge referencing it exists" (see
  * {@code docs/explorations/2026-08-14-artist-graph-model.md} section "Modulith boundaries").
  * <p>
- * Deliberately does NOT short-circuit when the to-artist already exists for this owner (unlike
- * the retired {@code CandidatePersistenceListener} this replaces): the node is deduplicated via
- * {@link ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT DO NOTHING}, but the edge is
- * always attempted, so a second source corroborating an already-known relationship still gets its
- * own {@code artist_edge} row instead of being silently dropped -- the corroboration-loss defect
- * the graph model was built to fix.
+ * Does NOT short-circuit the EDGE write when the to-artist already exists for this owner (unlike
+ * the retired {@code CandidatePersistenceListener} this replaces): the edge is always attempted,
+ * so a second source corroborating an already-known relationship still gets its own {@code
+ * artist_edge} row instead of being silently dropped -- the corroboration-loss defect the graph
+ * model was built to fix.
+ * <p>
+ * DOES short-circuit the NODE write via {@link ArtistNameMatcher} (issue #118): {@link
+ * ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT (owner, name)} only catches an
+ * exact-string repeat, and the DB constraint behind it is case- and punctuation-SENSITIVE (see
+ * {@code ArtistRepositoryTest#uniqueConstraintIsCaseSensitive}) -- left alone, a rejected
+ * "Charlie Parker's Re-Boppers" does nothing to stop "Charlie Parker's Re-boppers" from a
+ * different source insertIfAbsent-ing its way in as a brand-new PENDING_REVIEW row. The matcher
+ * catches that case regardless of the existing row's status (including REJECTED), and this
+ * listener resolves the edge against whichever row already exists instead of creating a second one.
  */
 @Component
 public class RelationDiscoveredListener {
@@ -36,10 +44,13 @@ public class RelationDiscoveredListener {
 
     private final ArtistRepository artistRepository;
     private final ArtistEdgeRepository artistEdgeRepository;
+    private final ArtistNameMatcher artistNameMatcher;
 
-    public RelationDiscoveredListener(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository) {
+    public RelationDiscoveredListener(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
+                                       ArtistNameMatcher artistNameMatcher) {
         this.artistRepository = artistRepository;
         this.artistEdgeRepository = artistEdgeRepository;
+        this.artistNameMatcher = artistNameMatcher;
     }
 
     @ApplicationModuleListener
@@ -61,29 +72,55 @@ public class RelationDiscoveredListener {
             return;
         }
 
+        Long toArtistId = resolveOrCreateToArtist(e.owner(), toArtistName, type, e.fromArtistName(), e.note());
+        if (toArtistId == null) {
+            // Shouldn't happen -- either the matcher found an existing row, or insertIfAbsent just
+            // ensured one exists -- but guards against writing an edge with a null to_artist_id
+            // (the artist_edge FK is NOT NULL).
+            log.atWarn().addKeyValue("owner", e.owner()).addKeyValue("name", toArtistName)
+                    .log("could not resolve to-artist id; skipping edge write");
+            return;
+        }
+
+        // Same idempotent-upsert invariant as insertIfAbsent above, on the artist_edge_unique
+        // (owner, from_artist_id, to_artist_id, type, source) constraint -- and critically, source
+        // is part of that constraint, so a second source corroborating this exact relationship
+        // inserts a second, distinct edge rather than colliding with the first.
+        artistEdgeRepository.insertIfAbsent(e.owner(), e.fromArtistId(), toArtistId,
+                type.name(), e.source(), e.note(), null, Instant.now());
+    }
+
+    /**
+     * Resolves the to-artist id for the edge write, creating a new PENDING_REVIEW node only if
+     * none already exists for this owner under ANY spelling (issue #118). A normalized-name match
+     * against an existing row -- of ANY status, including REJECTED -- reuses that row's id instead
+     * of inserting a new one, so a re-suggestion of a previously rejected artist under a new
+     * spelling doesn't resurface as a fresh PENDING_REVIEW candidate.
+     */
+    private Long resolveOrCreateToArtist(String owner, String toArtistName, ArtistSource type,
+                                          String fromArtistName, String note) {
+        Optional<ArtistNameStatusView> existing = artistNameMatcher.findExistingMatch(owner, toArtistName);
+        if (existing.isPresent()) {
+            ArtistNameStatusView match = existing.get();
+            if (match.getStatus() == ArtistStatus.REJECTED) {
+                log.atInfo().addKeyValue("owner", owner).addKeyValue("name", toArtistName)
+                        .addKeyValue("matchedName", match.getName())
+                        .log("suppressed re-suggestion of a previously rejected artist under a new spelling");
+            }
+            return match.getId();
+        }
+
         // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than save()+catch: this
         // listener's whole body runs in one @ApplicationModuleListener transaction, and on an
         // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real (owner,
         // name) race poisons that transaction -- Modulith's own AFTER_COMMIT completion write then
-        // fails too, leaving the event stuck for redelivery instead of a clean no-op.
-        artistRepository.insertIfAbsent(e.owner(), toArtistName, type.name(), ArtistStatus.PENDING_REVIEW.name(),
-                e.fromArtistName(), e.note(), Instant.now());
+        // fails too, leaving the event stuck for redelivery instead of a clean no-op. This remains
+        // the backstop for a same-spelling race that slips past the matcher's read above (the
+        // matcher is a best-effort pre-check, same as the existsBy pre-check it supersedes).
+        artistRepository.insertIfAbsent(owner, toArtistName, type.name(), ArtistStatus.PENDING_REVIEW.name(),
+                fromArtistName, note, Instant.now());
 
-        Optional<Artist> toArtist = artistRepository.findByOwnerAndName(e.owner(), toArtistName);
-        if (toArtist.isEmpty()) {
-            // Shouldn't happen -- insertIfAbsent just ensured this row exists -- but guards
-            // against writing an edge with a null to_artist_id (the artist_edge FK is NOT NULL).
-            log.atWarn().addKeyValue("owner", e.owner()).addKeyValue("name", toArtistName)
-                    .log("could not resolve to-artist id after insertIfAbsent; skipping edge write");
-            return;
-        }
-
-        // Same idempotent-upsert invariant as above, on the artist_edge_unique (owner,
-        // from_artist_id, to_artist_id, type, source) constraint -- and critically, source is
-        // part of that constraint, so a second source corroborating this exact relationship
-        // inserts a second, distinct edge rather than colliding with the first.
-        artistEdgeRepository.insertIfAbsent(e.owner(), e.fromArtistId(), toArtist.get().getId(),
-                type.name(), e.source(), e.note(), null, Instant.now());
+        return artistRepository.findByOwnerAndName(owner, toArtistName).map(Artist::getId).orElse(null);
     }
 
     /**

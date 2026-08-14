@@ -145,4 +145,84 @@ class RelationDiscoveredFlowTest extends AbstractPostgresIntegrationTest {
                 .toList();
         assertThat(candidates).as("ONE deduplicated node, not one per source").hasSize(1);
     }
+
+    @Test
+    @DisplayName("issue #118: a rejected artist does not reappear as a new PENDING_REVIEW candidate "
+            + "when expansion discovers it again under a case/punctuation variant spelling")
+    void rejectedArtistDoesNotReappearUnderSpellingVariant() {
+        String rejectedName = "Charlie Parker's Re-Boppers";
+        String rediscoveredVariant = "Charlie Parker's Re-boppers"; // case variant, per the live issue example
+        Artist rejected = new Artist(rejectedName, ArtistSource.MEMBER_EXPANSION, ArtistStatus.REJECTED,
+                BASE_ARTIST_NAME, "previously reviewed and rejected");
+        rejected.setOwner(OWNER);
+        Long rejectedId = artistRepository.save(rejected).getId();
+
+        when(musicBrainzRelationSource.related(BASE_ARTIST_NAME)).thenReturn(List.of(rediscoveredVariant));
+
+        expandUnitRunner.run(OWNER, baseArtistId, "musicbrainz", BASE_ARTIST_NAME);
+
+        // The edge write is the reliable "the listener finished" signal for this async flow --
+        // wait on it before asserting on the (negative) outcome for the artist table.
+        List<ArtistEdge> edges = awaitUntil(
+                () -> artistEdgeRepository.findByOwnerAndFromArtistId(OWNER, baseArtistId),
+                l -> !l.isEmpty());
+        assertThat(edges).as("edge still written -- corroboration is preserved").hasSize(1);
+        assertThat(edges.get(0).getToArtistId())
+                .as("edge points at the existing rejected artist, not a new node")
+                .isEqualTo(rejectedId);
+
+        assertThat(artistRepository.findByOwnerAndName(OWNER, rediscoveredVariant))
+                .as("no new row was created under the rediscovered spelling").isEmpty();
+        List<Artist> allForOwner = artistRepository.findByOwnerAndStatusIn(OWNER,
+                List.of(ArtistStatus.PENDING_REVIEW, ArtistStatus.REJECTED, ArtistStatus.SEED, ArtistStatus.APPROVED));
+        assertThat(allForOwner).as("still just base + the one original rejected row -- no duplicate").hasSize(2);
+        Artist stillRejected = artistRepository.findByIdAndOwner(rejectedId, OWNER).orElseThrow();
+        assertThat(stillRejected.getStatus())
+                .as("the original row's status is untouched -- it stays REJECTED, not reset to PENDING_REVIEW")
+                .isEqualTo(ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("issue #118: two genuinely different artist names still both become distinct "
+            + "PENDING_REVIEW candidates -- the normalized-name guard must not over-merge")
+    void distinctArtistsStillCoexist() {
+        when(musicBrainzRelationSource.related(BASE_ARTIST_NAME))
+                .thenReturn(List.of("Radiohead", "Radioheads Tribute Band"));
+
+        expandUnitRunner.run(OWNER, baseArtistId, "musicbrainz", BASE_ARTIST_NAME);
+
+        List<ArtistEdge> edges = awaitUntil(
+                () -> artistEdgeRepository.findByOwnerAndFromArtistId(OWNER, baseArtistId),
+                l -> l.size() >= 2);
+        assertThat(edges).hasSize(2);
+
+        assertThat(artistRepository.findByOwnerAndName(OWNER, "Radiohead")).isPresent();
+        assertThat(artistRepository.findByOwnerAndName(OWNER, "Radioheads Tribute Band")).isPresent();
+    }
+
+    @Test
+    @DisplayName("issue #118: owner isolation -- one owner's rejected artist does not suppress "
+            + "another owner's candidate with the same (variant) name")
+    void ownerIsolationForRejectedNameMatching() {
+        String otherOwner = "other-owner@example.com";
+        Artist rejectedForOwner = new Artist("Foo Bar", ArtistSource.MEMBER_EXPANSION, ArtistStatus.REJECTED,
+                BASE_ARTIST_NAME, "rejected for OWNER only");
+        rejectedForOwner.setOwner(OWNER);
+        artistRepository.save(rejectedForOwner);
+
+        Artist otherBase = new Artist("Other Owner Base Artist", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        otherBase.setOwner(otherOwner);
+        Long otherBaseId = artistRepository.save(otherBase).getId();
+
+        when(musicBrainzRelationSource.related("Other Owner Base Artist")).thenReturn(List.of("foo bar"));
+
+        expandUnitRunner.run(otherOwner, otherBaseId, "musicbrainz", "Other Owner Base Artist");
+
+        Artist created = awaitUntil(
+                () -> artistRepository.findByOwnerAndName(otherOwner, "foo bar").orElse(null),
+                a -> a != null);
+        assertThat(created).as("other owner's candidate is created as a fresh PENDING_REVIEW row, "
+                + "unaffected by OWNER's rejected artist of a matching name").isNotNull();
+        assertThat(created.getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+    }
 }
