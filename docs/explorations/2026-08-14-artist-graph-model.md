@@ -472,3 +472,13 @@ pattern it already uses (`expansion/ExpandUnitRunner.java:67-71`).
   side — that's a real, deliberate tradeoff for honesty of provenance, not an oversight, but worth
   the team explicitly agreeing to before it becomes a "why didn't X show up as related to Y"
   surprise later.
+
+## Id strategy: UUID v7 considered, deferred (edges stay `bigint`)
+
+We weighed UUID v7 for the edge PK and, more broadly, for every id.
+
+- **The edge PK stays `bigint IDENTITY`** — consistent with every other table, and the edge's foreign keys reference `artist(id)` (a `bigint`) regardless, so a UUID edge id buys nothing the FKs can use. (The edge's real identity is its natural unique key anyway.)
+- **Migrating all ids to UUID v7 is deferred.** The cost is high: a heavy populated-DB migration remapping every PK *and* every FK across ~6 interdependent tables on the live ~1,444-artist DB (add-uuid → backfill a v7 from `created_at` → parallel FK columns → swap PKs → drop old), plus entity/native-query/controller/test churn app-wide. The benefits (distribution / merge-safety, offline id generation, opaque public ids) aren't needs for this single-instance, single-DB, owner-scoped app — and v7's one real edge over v4 (index locality) is already what sequential `bigint IDENTITY` gives us.
+- **Revisit only on a real driver** — a second instance/region, offline/mobile id generation, or a genuine need for opaque public ids. UUID v7 is the right choice *then*, generated via Postgres 18's native `uuidv7()` (prod/tests are on PG 16 today, so it'd be an app-side generator for now) as a deliberate migration.
+
+(Mixed id types already coexist fine: Spring Modulith's `event_publication` table uses a UUID PK today while the domain entities use `bigint`.)
