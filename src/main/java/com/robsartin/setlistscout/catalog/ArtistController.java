@@ -1,17 +1,24 @@
 package com.robsartin.setlistscout.catalog;
 
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Controller
 @RequestMapping("/artists")
@@ -23,13 +30,18 @@ public class ArtistController {
     /** Cap lines read from an uploaded artist file -- a guardrail against a runaway upload. */
     private static final int MAX_UPLOAD_LINES = 2000;
 
+    /** Hop count for the graph-validation page's reachable-set query (issue #111). */
+    private static final int GRAPH_MAX_DEPTH = 2;
+
     private final ArtistRepository artistRepository;
+    private final ArtistEdgeRepository artistEdgeRepository;
     private final CurrentUser currentUser;
     private final ArtistSeedService seedService;
 
-    public ArtistController(ArtistRepository artistRepository,
+    public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
                            CurrentUser currentUser, ArtistSeedService seedService) {
         this.artistRepository = artistRepository;
+        this.artistEdgeRepository = artistEdgeRepository;
         this.currentUser = currentUser;
         this.seedService = seedService;
     }
@@ -100,6 +112,53 @@ public class ArtistController {
             return "artists :: activeSection";
         }
         return "redirect:/artists";
+    }
+
+    /**
+     * Read-only artist-graph validation tool (issue #111): incoming + outgoing edge history and
+     * the 2-hop reachable set for one owner-scoped artist. Built to validate the graph model
+     * landed in #109 against real data before building a feature on it -- not a polished feature
+     * page. No writes; a foreign id (another owner's artist) 404s rather than leaking existence.
+     */
+    @GetMapping("/{id}/graph")
+    public String graph(@PathVariable Long id, Model model) {
+        String owner = currentUser.email();
+        Artist artist = artistRepository.findByIdAndOwner(id, owner)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+
+        List<ArtistEdge> outgoingEdges = artistEdgeRepository.findByOwnerAndFromArtistId(owner, id);
+        List<ArtistEdge> incomingEdges = artistEdgeRepository.findByOwnerAndToArtistId(owner, id);
+        List<ReachableArtist> reachableRows = artistEdgeRepository.reachableWithin(owner, id, GRAPH_MAX_DEPTH);
+
+        Set<Long> otherIds = new HashSet<>();
+        outgoingEdges.forEach(e -> otherIds.add(e.getToArtistId()));
+        incomingEdges.forEach(e -> otherIds.add(e.getFromArtistId()));
+        reachableRows.forEach(r -> otherIds.add(r.getArtistId()));
+        Map<Long, String> namesById = artistRepository.findByOwnerAndIdIn(owner, otherIds).stream()
+                .collect(Collectors.toMap(Artist::getId, Artist::getName));
+
+        List<ArtistEdgeView> outgoing = outgoingEdges.stream()
+                .map(e -> new ArtistEdgeView(nameOf(namesById, e.getToArtistId()), e.getType(), e.getSource(),
+                        e.getNote(), e.getCreatedAt()))
+                .toList();
+        List<ArtistEdgeView> incoming = incomingEdges.stream()
+                .map(e -> new ArtistEdgeView(nameOf(namesById, e.getFromArtistId()), e.getType(), e.getSource(),
+                        e.getNote(), e.getCreatedAt()))
+                .toList();
+        List<ReachableArtistView> reachable = reachableRows.stream()
+                .map(r -> new ReachableArtistView(nameOf(namesById, r.getArtistId()), r.getDepth()))
+                .sorted(Comparator.comparingInt(ReachableArtistView::depth).thenComparing(ReachableArtistView::name))
+                .toList();
+
+        model.addAttribute("artist", artist);
+        model.addAttribute("outgoing", outgoing);
+        model.addAttribute("incoming", incoming);
+        model.addAttribute("reachable", reachable);
+        return "artist-graph";
+    }
+
+    private static String nameOf(Map<Long, String> namesById, Long id) {
+        return namesById.getOrDefault(id, "(unknown artist #" + id + ")");
     }
 
     private void populateActive(Model model, String owner) {

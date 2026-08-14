@@ -156,4 +156,69 @@ class ArtistEdgeRepositoryTest extends AbstractPostgresIntegrationTest {
         assertThat(toFound).hasSize(1);
         assertThat(toFound.get(0).getOwner()).isEqualTo(OWNER);
     }
+
+    @Test
+    @DisplayName("reachableWithin walks the recursive CTE two hops out, dedupes to the shortest depth, "
+            + "and excludes the start artist itself (issue #111 graph-validation tool)")
+    @Transactional
+    void reachableWithinReturnsTwoHopSet() {
+        Long a = createArtist(OWNER, "A");
+        Long b = createArtist(OWNER, "B");
+        Long c = createArtist(OWNER, "C");
+        Long d = createArtist(OWNER, "D");
+
+        artistEdgeRepository.insertIfAbsent(OWNER, a, b, "MEMBER_OF", "musicbrainz", null, null, Instant.now());
+        artistEdgeRepository.insertIfAbsent(OWNER, a, c, "SIMILAR_TO", "lastfm", null, null, Instant.now());
+        artistEdgeRepository.insertIfAbsent(OWNER, b, d, "MEMBER_OF", "discogs", null, null, Instant.now());
+
+        List<ReachableArtist> reachable = artistEdgeRepository.reachableWithin(OWNER, a, 2);
+
+        assertThat(reachable).extracting(ReachableArtist::getArtistId, ReachableArtist::getDepth)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.api.Assertions.tuple(b, 1),
+                        org.assertj.core.api.Assertions.tuple(c, 1),
+                        org.assertj.core.api.Assertions.tuple(d, 2));
+        assertThat(reachable).as("start artist itself is excluded")
+                .extracting(ReachableArtist::getArtistId).doesNotContain(a);
+    }
+
+    @Test
+    @DisplayName("reachableWithin respects maxDepth: depth 1 only returns direct neighbors")
+    @Transactional
+    void reachableWithinRespectsMaxDepth() {
+        Long a = createArtist(OWNER, "A");
+        Long b = createArtist(OWNER, "B");
+        Long c = createArtist(OWNER, "C");
+        Long d = createArtist(OWNER, "D");
+
+        artistEdgeRepository.insertIfAbsent(OWNER, a, b, "MEMBER_OF", "musicbrainz", null, null, Instant.now());
+        artistEdgeRepository.insertIfAbsent(OWNER, a, c, "SIMILAR_TO", "lastfm", null, null, Instant.now());
+        artistEdgeRepository.insertIfAbsent(OWNER, b, d, "MEMBER_OF", "discogs", null, null, Instant.now());
+
+        List<ReachableArtist> reachable = artistEdgeRepository.reachableWithin(OWNER, a, 1);
+
+        assertThat(reachable).extracting(ReachableArtist::getArtistId)
+                .containsExactlyInAnyOrder(b, c);
+    }
+
+    @Test
+    @DisplayName("reachableWithin is owner-scoped: another owner's edges from an id-colliding artist "
+            + "are never traversed")
+    @Transactional
+    void reachableWithinIsOwnerScoped() {
+        Long a = createArtist(OWNER, "A");
+        Long b = createArtist(OWNER, "B");
+        Long otherA = createArtist(OTHER_OWNER, "A");
+        Long otherB = createArtist(OTHER_OWNER, "B");
+
+        artistEdgeRepository.insertIfAbsent(OWNER, a, b, "MEMBER_OF", "musicbrainz", null, null, Instant.now());
+        artistEdgeRepository.insertIfAbsent(OTHER_OWNER, otherA, otherB, "MEMBER_OF", "musicbrainz",
+                null, null, Instant.now());
+
+        List<ReachableArtist> reachable = artistEdgeRepository.reachableWithin(OWNER, a, 2);
+        assertThat(reachable).extracting(ReachableArtist::getArtistId).containsExactly(b);
+
+        List<ReachableArtist> otherReachable = artistEdgeRepository.reachableWithin(OTHER_OWNER, otherA, 2);
+        assertThat(otherReachable).extracting(ReachableArtist::getArtistId).containsExactly(otherB);
+    }
 }

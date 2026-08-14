@@ -20,6 +20,7 @@
                     <td>
                         <span th:text="${a.name}">Name</span>
                         <span th:if="${a.source.name() == 'TRIBUTE_EXPANSION'}" class="chip tribute">Tribute</span>
+                        <a th:href="@{'/artists/' + ${a.id} + '/graph'}" class="note">graph</a>
                     </td>
                     <td th:text="${a.source}">Source</td>
                     <td>
