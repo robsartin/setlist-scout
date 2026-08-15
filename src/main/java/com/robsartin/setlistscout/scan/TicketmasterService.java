@@ -69,15 +69,19 @@ public class TicketmasterService {
             response = Map.of();
         }
 
-        if (response == null) return shows;
-        Map<String, Object> embedded = (Map<String, Object>) response.get("_embedded");
-        if (embedded == null) return shows;
-        List<Map<String, Object>> events = (List<Map<String, Object>>) embedded.get("events");
-        if (events == null) return shows;
+        Map<String, Object> embedded = response != null
+                ? (Map<String, Object>) response.get("_embedded") : null;
+        List<Map<String, Object>> events = embedded != null
+                ? (List<Map<String, Object>>) embedded.get("events") : null;
 
-        for (Map<String, Object> event : events) {
-            if (!hasMatchingAttraction(artistName, event)) continue;
-            shows.add(parseEvent(artistName, event));
+        // Ticketmaster omits "_embedded" entirely on a legitimate zero-result search (not an
+        // error), so events being null here just means "nothing matched" -- fall through to the
+        // log-then-return below rather than early-returning past it.
+        if (events != null) {
+            for (Map<String, Object> event : events) {
+                if (!hasMatchingAttraction(artistName, event)) continue;
+                shows.add(parseEvent(artistName, event));
+            }
         }
         log.atDebug().addKeyValue("source", "ticketmaster").addKeyValue("artist", artistName)
                 .addKeyValue("count", shows.size()).log("show search");
