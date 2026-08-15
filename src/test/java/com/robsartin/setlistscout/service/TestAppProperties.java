@@ -11,7 +11,7 @@ public final class TestAppProperties {
 
     public static AppProperties withKeys() {
         return new AppProperties(
-                new AppProperties.Auth(List.of("owner@example.com"), "owner@example.com"),
+                new AppProperties.Auth(List.of("owner@example.com"), "owner@example.com", "owner@example.com"),
                 new AppProperties.Apis(
                         "tm-key", "bit-app-id", "TestAgent/1.0 ( test@example.com )",
                         "discogs-token", "lastfm-key", "anthropic-key"),

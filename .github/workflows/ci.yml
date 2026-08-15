@@ -40,6 +40,17 @@ jobs:
           JAVA_HOME: ${{ env.JAVA_HOME_21_X64 }}
         run: ./gradlew --no-daemon build
 
+      # Console output only shows exception type + line number, not the assertion message --
+      # upload the real JUnit XML so a CI-only failure can actually be diagnosed instead of
+      # guessed at.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/test-results/test/*.xml
+          retention-days: 7
+
   adr-compliance:
     name: ADR compliance
     runs-on: ubuntu-latest

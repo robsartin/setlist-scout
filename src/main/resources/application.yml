@@ -68,6 +68,7 @@ setlistscout:
   auth:
     allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
     seed-owner: ${SEED_OWNER:rob.sartin@gmail.com}
+    admin-email: ${ADMIN_EMAIL:rob.sartin@gmail.com}
   apis:
     ticketmaster-api-key: ${TICKETMASTER_API_KEY:}
     bandsintown-app-id: ${BANDSINTOWN_APP_ID:}

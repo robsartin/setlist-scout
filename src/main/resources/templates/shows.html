@@ -19,17 +19,35 @@
               hx-post="/scan-now" hx-target="#shows-region" hx-swap="outerHTML">
             <button type="submit">Scan now</button>
         </form>
+        <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
+               and only when there's another allow-listed user to pick -- see NavModelAdvice. The
+               server re-checks admin-ness itself (ShowController#requireAdmin); this th:if is a UI
+               convenience, not the access control. */-->
+        <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
+              th:action="@{/admin/scan-now}" method="post"
+              hx-post="/admin/scan-now" hx-target="#shows-region" hx-swap="outerHTML">
+            <label for="admin-scan-target">Admin: scan for</label>
+            <select id="admin-scan-target" name="targetOwner">
+                <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
+            </select>
+            <button type="submit">Scan now for user</button>
+        </form>
     </div>
 
     <!--/*
       showsRegion is the htmx swap target for "Scan now": it re-dues the owner's scan jobs and
       swaps in this fragment with a one-shot "queued" confirmation (scanQueued) -- the paced
       poller drains the jobs on its own cadence, so there's no synchronous scan to wait on here.
-      aria-live announces the confirmation for screen readers.
+      aria-live announces the confirmation for screen readers. scanQueuedFor is set only by the
+      admin cross-account action (#136) and names the owner the scan was actually queued for,
+      since that's not necessarily whoever's looking at this page.
     */-->
     <div th:fragment="showsRegion" id="shows-region" aria-live="polite">
-        <p th:if="${scanQueued}" class="notice" role="status">
+        <p th:if="${scanQueued == true and scanQueuedFor == null}" class="notice" role="status">
             Scan queued — newly found shows will appear here as they're picked up. Reload in a minute or two.
+        </p>
+        <p th:if="${scanQueuedFor != null}" class="notice" role="status">
+            Scan queued for <span th:text="${scanQueuedFor}">user</span>.
         </p>
 
         <div class="table-scroll">
