@@ -57,7 +57,13 @@ public class ArtistActivationService {
                 saved.getStatus().name()));
     }
 
-    private static boolean isActive(ArtistStatus status) {
+    /**
+     * Package-private (not private) so {@link ArtistSeedService} can reuse this exact
+     * active/inactive definition for its own status-transition decision (issue #124) rather than
+     * re-deriving it -- one definition of "active" in the module, same as {@link
+     * ArtistNameNormalizer}/{@link ArtistNameMatcher} are the one definition of "same name".
+     */
+    static boolean isActive(ArtistStatus status) {
         return status == ArtistStatus.SEED || status == ArtistStatus.APPROVED;
     }
 }

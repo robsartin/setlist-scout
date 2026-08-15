@@ -35,13 +35,27 @@ class ArtistControllerTest {
         artistRepository = mock(ArtistRepository.class);
         currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
-        // Real seed service over the mocked repo so add/upload still assert on repository interactions.
-        ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class));
+        // Real seed service AND real name matcher over the mocked repo, so add/upload still assert
+        // on repository interactions and exercise the actual normalized-name duplicate check
+        // (issue #124) rather than a stubbed existsBy call.
+        ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class),
+                new ArtistNameMatcher(artistRepository));
         controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService);
     }
 
     private static Artist pending(String name, ArtistSource source) {
         return new Artist(name, source, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", "note");
+    }
+
+    // ArtistNameMatcher scans every one of the owner's existing artists via ArtistRepository#findByOwner
+    // (issue #124/#118), so tests that need an existing name to match stub that instead of the retired
+    // existsByOwnerAndNameIgnoreCase pre-check. See ArtistNameMatcherTest's identical helper/ordering note.
+    private static ArtistNameStatusView existingArtist(Long id, String name, ArtistStatus status) {
+        ArtistNameStatusView v = mock(ArtistNameStatusView.class);
+        when(v.getId()).thenReturn(id);
+        when(v.getName()).thenReturn(name);
+        when(v.getStatus()).thenReturn(status);
+        return v;
     }
 
     @Test
@@ -63,8 +77,8 @@ class ArtistControllerTest {
     @Test
     @DisplayName("upload adds new distinct names as seeds, skipping blanks, comments and duplicates")
     void uploadAddsNewSeeds() {
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Dawes")).thenReturn(true);
+        ArtistNameStatusView dawes = existingArtist(1L, "Dawes", ArtistStatus.SEED);
+        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(dawes));
         String contents = "Wilco\n\n# a comment\nDawes\n"; // Wilco new; blank + comment skipped; Dawes exists
         MockMultipartFile file = new MockMultipartFile(
                 "file", "artists.txt", "text/plain", contents.getBytes(StandardCharsets.UTF_8));
@@ -94,8 +108,6 @@ class ArtistControllerTest {
     @Test
     @DisplayName("addSeed returns the active-section fragment for an htmx request")
     void addSeedReturnsFragmentForHtmx() {
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
-
         Model model = new ConcurrentModel();
         String view = controller.addSeed("Wilco", "true", model);
 
@@ -116,8 +128,6 @@ class ArtistControllerTest {
     @Test
     @DisplayName("addSeed trims surrounding whitespace before saving")
     void addSeedTrimsName() {
-        when(artistRepository.existsByOwnerAndNameIgnoreCase(OWNER, "Wilco")).thenReturn(false);
-
         controller.addSeed("  Wilco  ", null, new ConcurrentModel());
 
         ArgumentCaptor<Artist> saved = ArgumentCaptor.forClass(Artist.class);
