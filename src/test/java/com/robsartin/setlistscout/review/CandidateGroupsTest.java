@@ -65,4 +65,54 @@ class CandidateGroupsTest {
     void emptyCountsProduceNoGroups() {
         assertThat(CandidateGroups.from(List.of())).isEmpty();
     }
+
+    @Test
+    void resolveReturnsTheRequestedGroupAsCurrentAndEverythingElseAsOthers() {
+        List<CandidateGroupCount> counts = List.of(
+                new Row("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION, 5),
+                new Row("Wilco", ArtistSource.MEMBER_EXPANSION, 1));
+        List<CandidateGroups.BaseArtistGroup> groups = CandidateGroups.from(counts);
+
+        CandidateGroups.ResolvedGroups resolved = CandidateGroups.resolve(groups, "Wilco");
+
+        assertThat(resolved.current().via()).isEqualTo("Wilco");
+        assertThat(resolved.others()).extracting(CandidateGroups.BaseArtistGroup::via)
+                .containsExactly("Tom Petty and the Heartbreakers");
+    }
+
+    @Test
+    void resolveFallsBackToBiggestFirstWhenRequestedViaIsNull() {
+        List<CandidateGroupCount> counts = List.of(
+                new Row("Wilco", ArtistSource.MEMBER_EXPANSION, 1),
+                new Row("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION, 5));
+        List<CandidateGroups.BaseArtistGroup> groups = CandidateGroups.from(counts);
+
+        CandidateGroups.ResolvedGroups resolved = CandidateGroups.resolve(groups, null);
+
+        assertThat(resolved.current().via()).isEqualTo("Tom Petty and the Heartbreakers");
+        assertThat(resolved.others()).extracting(CandidateGroups.BaseArtistGroup::via)
+                .containsExactly("Wilco");
+    }
+
+    @Test
+    void resolveFallsBackToBiggestFirstWhenRequestedViaHasNoPendingRowsLeft() {
+        // This IS the auto-advance mechanism: after a group empties, it's no longer in `groups`
+        // (freshly re-queried), so asking to resolve it again falls back to whatever's biggest now.
+        List<CandidateGroupCount> counts = List.of(
+                new Row("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION, 5));
+        List<CandidateGroups.BaseArtistGroup> groups = CandidateGroups.from(counts);
+
+        CandidateGroups.ResolvedGroups resolved = CandidateGroups.resolve(groups, "Wilco");
+
+        assertThat(resolved.current().via()).isEqualTo("Tom Petty and the Heartbreakers");
+        assertThat(resolved.others()).isEmpty();
+    }
+
+    @Test
+    void resolveOnEmptyGroupsReturnsNullCurrentAndEmptyOthers() {
+        CandidateGroups.ResolvedGroups resolved = CandidateGroups.resolve(List.of(), "anything");
+
+        assertThat(resolved.current()).isNull();
+        assertThat(resolved.others()).isEmpty();
+    }
 }

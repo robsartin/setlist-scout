@@ -51,6 +51,26 @@ public final class CandidateGroups {
         return groups;
     }
 
+    /**
+     * Picks the "current" group to focus review on: {@code requestedVia} if it's still present in
+     * {@code groups} (has pending rows), otherwise the biggest group ({@code groups} is already
+     * sorted total-descending by {@link #from}). A {@code null} or stale/cleared {@code
+     * requestedVia} falling through to that same biggest-first pick is the whole auto-advance
+     * mechanism (issue #148) -- callers don't need a separate "is this group still there" check,
+     * just re-resolve against a freshly re-queried {@code groups} after any status change.
+     */
+    public static ResolvedGroups resolve(List<BaseArtistGroup> groups, String requestedVia) {
+        if (groups.isEmpty()) {
+            return new ResolvedGroups(null, List.of());
+        }
+        BaseArtistGroup current = groups.stream()
+                .filter(g -> g.via().equals(requestedVia))
+                .findFirst()
+                .orElse(groups.get(0));
+        List<BaseArtistGroup> others = groups.stream().filter(g -> g != current).toList();
+        return new ResolvedGroups(current, others);
+    }
+
     private static int relationOrderIndex(ArtistSource source) {
         int idx = RELATION_ORDER.indexOf(source);
         return idx == -1 ? RELATION_ORDER.size() : idx;
@@ -80,5 +100,9 @@ public final class CandidateGroups {
 
     /** One relation-type subgroup within a base-artist group. */
     public record RelationGroup(ArtistSource source, String label, String chipClass, long count) {
+    }
+
+    /** {@code current} is null only when there are no pending groups at all. */
+    public record ResolvedGroups(BaseArtistGroup current, List<BaseArtistGroup> others) {
     }
 }
