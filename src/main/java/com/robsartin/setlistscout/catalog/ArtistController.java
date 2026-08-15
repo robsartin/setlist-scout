@@ -37,13 +37,16 @@ public class ArtistController {
     private final ArtistEdgeRepository artistEdgeRepository;
     private final CurrentUser currentUser;
     private final ArtistSeedService seedService;
+    private final ArtistActivationService activationService;
 
     public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
-                           CurrentUser currentUser, ArtistSeedService seedService) {
+                           CurrentUser currentUser, ArtistSeedService seedService,
+                           ArtistActivationService activationService) {
         this.artistRepository = artistRepository;
         this.artistEdgeRepository = artistEdgeRepository;
         this.currentUser = currentUser;
         this.seedService = seedService;
+        this.activationService = activationService;
     }
 
     @GetMapping
@@ -107,6 +110,29 @@ public class ArtistController {
             a.setOfficialSiteUrl(url.isBlank() ? null : url.trim());
             artistRepository.save(a);
         });
+        if (hxRequest != null) {
+            populateActive(model, owner);
+            return "artists :: activeSection";
+        }
+        return "redirect:/artists";
+    }
+
+    /**
+     * Take a hand-curated {@code SEED} artist off the owner's active list (issue #117). Distinct
+     * from {@code ReviewController.remove}'s {@code REJECTED} transition -- see the design
+     * decision at the top of {@code docs/superpowers/plans/2026-08-14-remove-from-seed-list.md}
+     * for why REMOVED exists as its own terminal status rather than reusing REJECTED. Goes through
+     * {@link ArtistActivationService#changeStatus}, never a direct repository save, so {@code
+     * ArtistDeactivated} fires and the existing listener cancels the artist's scan_job/expand_job
+     * rows. Owner-scoped for free via {@code changeStatus}'s {@code findByIdAndOwner} no-op-if-
+     * absent behavior -- a foreign owner's id is silently ignored, not a leak.
+     */
+    @PostMapping("/{id}/remove-from-seed")
+    public String removeFromSeed(@PathVariable Long id,
+                                 @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                                 Model model) {
+        String owner = currentUser.email();
+        activationService.changeStatus(id, owner, ArtistStatus.REMOVED);
         if (hxRequest != null) {
             populateActive(model, owner);
             return "artists :: activeSection";

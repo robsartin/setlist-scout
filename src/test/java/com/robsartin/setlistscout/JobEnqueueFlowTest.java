@@ -190,6 +190,41 @@ class JobEnqueueFlowTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @DisplayName("issue #117: manually re-adding a name matching a REMOVED artist reactivates it "
+            + "to SEED through the real ArtistActivationService (not a direct repo save), and the "
+            + "real listener enqueues all expand jobs including tribute-llm -- proving the "
+            + "activation event actually fires. This is the only recovery path for an accidental "
+            + "remove-from-seed -- there is no dedicated un-remove button by design.")
+    void reAddingARemovedArtistsNameReactivatesItAndEnqueuesJobs() {
+        String owner = "reactivate-removed-flow@example.com";
+        Long artistId = persistArtist(owner, "Foo-Bar", ArtistStatus.REMOVED);
+
+        boolean added = artistSeedService.addSeedIfNew(owner, "Foo-Bar");
+
+        assertThat(added).as("the manual re-add is reported as effective").isTrue();
+        Artist reactivated = artistRepository.findByIdAndOwner(artistId, owner).orElseThrow();
+        assertThat(reactivated.getStatus())
+                .as("the existing row was reactivated to SEED, not duplicated or left REMOVED")
+                .isEqualTo(ArtistStatus.SEED);
+        assertThat(artistRepository.findByOwnerAndStatusIn(owner,
+                List.of(ArtistStatus.SEED, ArtistStatus.PENDING_REVIEW, ArtistStatus.APPROVED, ArtistStatus.REMOVED)))
+                .as("still just the one artist row -- no duplicate created")
+                .hasSize(1);
+
+        List<ExpandJob> expandJobs = awaitUntil(
+                () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
+                jobs -> jobs.size() == relationSources.size());
+
+        assertThat(expandJobs).as("reactivation enqueues one expand_job per RelationSource, including "
+                        + "tribute-llm for SEED -- proves changeStatus's ArtistActivated event actually "
+                        + "fired, which a direct repository save would not have published")
+                .hasSize(relationSources.size());
+        assertThat(expandJobs).allMatch(j -> j.getStatus() == JobStatus.SCHEDULED);
+        assertThat(expandJobs).extracting(ExpandJob::getSource)
+                .containsExactlyInAnyOrderElementsOf(relationSources.stream().map(RelationSource::id).toList());
+    }
+
+    @Test
     @DisplayName("updateSettings publishes SettingsChanged in a committed tx, and the real listener "
             + "re-dues every scan_job for the owner")
     void changingSettingsReDuesTheOwnersScanJobs() {

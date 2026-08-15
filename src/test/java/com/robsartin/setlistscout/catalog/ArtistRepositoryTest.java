@@ -115,4 +115,20 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
                 + "(the case-insensitive dedup is a best-effort application-layer pre-check only)")
                 .hasSize(2);
     }
+
+    @Test
+    @DisplayName("saving an Artist with status REMOVED does not violate artist_status_check")
+    @Transactional
+    void savingAnArtistWithRemovedStatusDoesNotViolateTheStatusCheckConstraint() {
+        Artist artist = new Artist("Formerly Seeded Band", ArtistSource.SEED_LIST, ArtistStatus.REMOVED, null, null);
+        artist.setOwner(OWNER);
+
+        assertThatCode(() -> artistRepository.saveAndFlush(artist))
+                .as("proves the migration widened artist_status_check to allow REMOVED")
+                .doesNotThrowAnyException();
+
+        List<Artist> found = artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.REMOVED);
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).getName()).isEqualTo("Formerly Seeded Band");
+    }
 }

@@ -117,6 +117,35 @@ class ArtistActivationServiceTest {
     }
 
     @Test
+    void approvedToRemovedPublishesArtistDeactivated() {
+        Artist artist = artistWithStatus(ArtistStatus.APPROVED);
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist));
+
+        service.changeStatus(ARTIST_ID, OWNER, ArtistStatus.REMOVED);
+
+        assertThat(artist.getStatus()).isEqualTo(ArtistStatus.REMOVED);
+        verify(artistRepository).save(artist);
+        ArgumentCaptor<ArtistDeactivated> captor = ArgumentCaptor.forClass(ArtistDeactivated.class);
+        verify(publisher).publishEvent(captor.capture());
+        assertThat(captor.getValue()).isEqualTo(new ArtistDeactivated(OWNER, artist.getId()));
+    }
+
+    // isActive is package-private specifically so this test (and ArtistSeedServiceTest) can pin
+    // the one definition of "active" directly, rather than only asserting it indirectly through
+    // changeStatus's event-publishing side effects above.
+    @Test
+    void isActiveClassifiesEachStatus() {
+        assertThat(ArtistActivationService.isActive(ArtistStatus.SEED)).isTrue();
+        assertThat(ArtistActivationService.isActive(ArtistStatus.APPROVED)).isTrue();
+        assertThat(ArtistActivationService.isActive(ArtistStatus.PENDING_REVIEW)).isFalse();
+        assertThat(ArtistActivationService.isActive(ArtistStatus.REJECTED)).isFalse();
+        assertThat(ArtistActivationService.isActive(ArtistStatus.REMOVED))
+                .as("REMOVED is a terminal, inactive status distinct from REJECTED -- a curated "
+                        + "seed the owner no longer wants, not a reviewed-and-rejected candidate")
+                .isFalse();
+    }
+
+    @Test
     void onSeedCreatedPublishesArtistActivated() {
         Artist saved = artistWithStatus(ArtistStatus.SEED);
         ReflectionTestUtils.setField(saved, "id", 5L);

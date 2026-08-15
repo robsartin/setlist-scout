@@ -28,6 +28,7 @@ class ArtistControllerTest {
 
     private ArtistRepository artistRepository;
     private CurrentUser currentUser;
+    private ArtistActivationService activationService;
     private ArtistController controller;
 
     @BeforeEach
@@ -35,12 +36,14 @@ class ArtistControllerTest {
         artistRepository = mock(ArtistRepository.class);
         currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
+        activationService = mock(ArtistActivationService.class);
         // Real seed service AND real name matcher over the mocked repo, so add/upload still assert
         // on repository interactions and exercise the actual normalized-name duplicate check
         // (issue #124) rather than a stubbed existsBy call.
         ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class),
                 new ArtistNameMatcher(artistRepository));
-        controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService);
+        controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService,
+                activationService);
     }
 
     private static Artist pending(String name, ArtistSource source) {
@@ -133,5 +136,36 @@ class ArtistControllerTest {
         ArgumentCaptor<Artist> saved = ArgumentCaptor.forClass(Artist.class);
         verify(artistRepository).save(saved.capture());
         assertThat(saved.getValue().getName()).isEqualTo("Wilco");
+    }
+
+    @Test
+    @DisplayName("removeFromSeed transitions the artist to REMOVED via ArtistActivationService, "
+            + "not a direct repository save")
+    void removeFromSeedInvokesActivationService() {
+        controller.removeFromSeed(7L, null, new ConcurrentModel());
+
+        verify(activationService).changeStatus(7L, OWNER, ArtistStatus.REMOVED);
+        verify(artistRepository, never()).save(any(Artist.class));
+    }
+
+    @Test
+    @DisplayName("removeFromSeed returns the active-section fragment for an htmx request")
+    void removeFromSeedReturnsFragmentForHtmx() {
+        Model model = new ConcurrentModel();
+        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+                .thenReturn(List.of());
+
+        String view = controller.removeFromSeed(7L, "true", model);
+
+        assertThat(view).isEqualTo("artists :: activeSection");
+        assertThat(model.getAttribute("active")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("removeFromSeed redirects to /artists for a non-htmx request")
+    void removeFromSeedRedirectsForNonHtmx() {
+        String view = controller.removeFromSeed(7L, null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists");
     }
 }
