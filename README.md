@@ -99,6 +99,43 @@ manual dashboard process — see
 
 - Deploy. Visit the Render URL, sign in with Google — only rob.sartin@gmail.com gets past the login.
 
+## Disabling a source
+
+Each of the 8 external-service sources (3 show-search sources: Ticketmaster, Bandsintown,
+band-site scraping; 5 relation sources: MusicBrainz, Discogs, Last.fm, and two LLM-backed ones)
+can be switched off independently with a single Render environment variable on the web service --
+no redeploy of anything else, no effect on the other 7. Setting one to `false` means Spring never
+creates that source's bean, so it just drops out of scanning/expansion the same way an already-
+unrecognized source ID does today (a WARN log line, existing jobs for it simply stop being picked
+up) -- never a crash. These are **opt-out, not opt-in**: leaving a variable unset (or setting
+anything other than `false`) keeps that source on, so nothing needs to change to keep today's
+behavior.
+
+**The immediate case this exists for:** to turn off Bandsintown (e.g. because its API is down or
+misbehaving in production), set on the web service:
+```
+SETLISTSCOUT_SOURCES_BANDSINTOWN=false
+```
+
+The full list:
+
+| Source | Env var to disable |
+|---|---|
+| Ticketmaster | `SETLISTSCOUT_SOURCES_TICKETMASTER=false` |
+| Bandsintown | `SETLISTSCOUT_SOURCES_BANDSINTOWN=false` |
+| Band's official site (scraped) | `SETLISTSCOUT_SOURCES_BANDSITE=false` |
+| MusicBrainz | `SETLISTSCOUT_SOURCES_MUSICBRAINZ=false` |
+| Discogs | `SETLISTSCOUT_SOURCES_DISCOGS=false` |
+| Last.fm | `SETLISTSCOUT_SOURCES_LASTFM=false` |
+| Similar-artist LLM cross-check | `SETLISTSCOUT_SOURCES_SIMILARLLM=false` |
+| Tribute-band LLM search | `SETLISTSCOUT_SOURCES_TRIBUTELLM=false` |
+
+> **Get the spelling exactly right for the three hyphenated names above.** Spring Boot's
+> environment-variable binding *removes* a hyphen inside a property segment rather than turning
+> it into an underscore, so `band-site` becomes `BANDSITE`, not `BAND_SITE` (same rule as
+> `similar-llm` -> `SIMILARLLM` and `tribute-llm` -> `TRIBUTELLM`) -- verified directly against
+> Spring's binder rather than guessed (see `SourceEnvVarBindingTest`).
+
 ## Changing the search location later
 Go to `/`, edit the "Near ___, within ___ miles, next ___ months" fields, hit
 Save. Takes effect on the next scan — no redeploy, no code change.

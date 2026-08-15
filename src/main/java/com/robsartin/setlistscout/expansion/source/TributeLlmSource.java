@@ -3,12 +3,19 @@ package com.robsartin.setlistscout.expansion.source;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.TributeLlmService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** Tribute bands from LLM (limit 5) behind the {@link RelationSource} port. */
+/**
+ * Tribute bands from LLM (limit 5) behind the {@link RelationSource} port. On by default
+ * ({@code matchIfMissing = true}) -- set {@code setlistscout.sources.tribute-llm=false} (Render
+ * env var {@code SETLISTSCOUT_SOURCES_TRIBUTELLM=false}) to opt this source out with zero effect
+ * on the other 7 (issue #139).
+ */
 @Component
+@ConditionalOnProperty(name = "setlistscout.sources.tribute-llm", havingValue = "true", matchIfMissing = true)
 public class TributeLlmSource implements RelationSource {
 
     private final TributeLlmService tributeLlm;

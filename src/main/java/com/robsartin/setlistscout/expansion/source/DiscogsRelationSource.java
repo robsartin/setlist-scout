@@ -2,12 +2,18 @@ package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.DiscogsService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** Related artists from Discogs behind the {@link RelationSource} port. */
+/**
+ * Related artists from Discogs behind the {@link RelationSource} port. On by default
+ * ({@code matchIfMissing = true}) -- {@code setlistscout.sources.discogs=false} opts this source
+ * out with zero effect on the other 7 (issue #139).
+ */
 @Component
+@ConditionalOnProperty(name = "setlistscout.sources.discogs", havingValue = "true", matchIfMissing = true)
 public class DiscogsRelationSource implements RelationSource {
 
     private final DiscogsService discogs;

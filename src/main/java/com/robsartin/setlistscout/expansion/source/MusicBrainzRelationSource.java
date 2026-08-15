@@ -2,12 +2,18 @@ package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.shared.MusicBrainzService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** Member/lineup relations from MusicBrainz behind the {@link RelationSource} port. */
+/**
+ * Member/lineup relations from MusicBrainz behind the {@link RelationSource} port. On by default
+ * ({@code matchIfMissing = true}) -- {@code setlistscout.sources.musicbrainz=false} opts this
+ * source out with zero effect on the other 7 (issue #139).
+ */
 @Component
+@ConditionalOnProperty(name = "setlistscout.sources.musicbrainz", havingValue = "true", matchIfMissing = true)
 public class MusicBrainzRelationSource implements RelationSource {
 
     private final MusicBrainzService musicBrainz;
