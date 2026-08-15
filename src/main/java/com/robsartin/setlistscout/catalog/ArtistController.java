@@ -38,15 +38,17 @@ public class ArtistController {
     private final CurrentUser currentUser;
     private final ArtistSeedService seedService;
     private final ArtistActivationService activationService;
+    private final ArtistConnectionsService connectionsService;
 
     public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
                            CurrentUser currentUser, ArtistSeedService seedService,
-                           ArtistActivationService activationService) {
+                           ArtistActivationService activationService, ArtistConnectionsService connectionsService) {
         this.artistRepository = artistRepository;
         this.artistEdgeRepository = artistEdgeRepository;
         this.currentUser = currentUser;
         this.seedService = seedService;
         this.activationService = activationService;
+        this.connectionsService = connectionsService;
     }
 
     @GetMapping
@@ -185,6 +187,21 @@ public class ArtistController {
 
     private static String nameOf(Map<Long, String> namesById, Long id) {
         return namesById.getOrDefault(id, "(unknown artist #" + id + ")");
+    }
+
+    /**
+     * The Connections page (issue #112, graph phase 3): an AGGREGATE 2-hop traversal of the
+     * artist_edge graph starting from every one of the owner's active artists at once, unlike
+     * {@link #graph}'s single-artist debug view -- surfacing PENDING_REVIEW artists reachable
+     * that way as genuinely new discovery material, grouped by which seed(s)/path(s) reach them
+     * with each connecting edge's type/source shown for transparency. See {@link
+     * ArtistConnectionsService} for the traversal approach and exactly what "genuinely new"
+     * means here. Read-only: no write actions on this page.
+     */
+    @GetMapping("/connections")
+    public String connections(Model model) {
+        model.addAttribute("discovered", connectionsService.discoverConnections(currentUser.email()));
+        return "artist-connections";
     }
 
     private void populateActive(Model model, String owner) {
