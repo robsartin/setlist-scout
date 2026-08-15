@@ -132,6 +132,10 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("Seed Artist");
         assertThat(body).contains("Remove from seed list");
         assertThat(body).contains("/remove-from-seed");
+        // Must NOT also render the plain Remove button (APPROVED-only, sets REJECTED) --
+        // its th:action is the "/remove" URL, not the button label (whose text overlaps
+        // "Remove from seed list").
+        assertThat(body).doesNotContain("/remove\"");
     }
 
     @Test
@@ -147,5 +151,7 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("Remove Approved Artist");
         assertThat(body).contains("/artists");
         assertThat(body).contains("/remove\"");
+        // Must NOT also render the SEED-only "Remove from seed list" button.
+        assertThat(body).doesNotContain("Remove from seed list");
     }
 }
