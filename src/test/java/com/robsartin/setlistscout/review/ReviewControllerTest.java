@@ -6,6 +6,7 @@ import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
+import com.robsartin.setlistscout.catalog.CandidateGroupCount;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.service.TestAppProperties;
 import com.robsartin.setlistscout.shared.CurrentUser;
@@ -53,6 +54,13 @@ class ReviewControllerTest {
         return artist;
     }
 
+    /** Test double for the grouped-count projection, matching CandidateGroupsTest's own pattern. */
+    private record GroupCountRow(String via, ArtistSource source, long count) implements CandidateGroupCount {
+        @Override public String getVia() { return via; }
+        @Override public ArtistSource getSource() { return source; }
+        @Override public long getCount() { return count; }
+    }
+
     @Test
     @DisplayName("approveAllPending delegates to the activation service for every pending artist")
     void approveAllPendingApprovesEveryone() {
@@ -85,6 +93,21 @@ class ReviewControllerTest {
         String view = controller.approve(1L, null, new ConcurrentModel());
 
         assertThat(view).isEqualTo("redirect:/artists/candidates");
+        verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("approve (no-JS fallback) URL-encodes a via with spaces into the redirect Location")
+    void approveRedirectUrlEncodesViaWithSpaces() {
+        // Unlike approveRedirectsToCandidates above, the mocked repo here returns a non-empty
+        // group -- CandidateGroups.resolve then picks it as current, giving actionResult's
+        // resolvedVia != null branch a real value to URLEncoder.encode into the redirect.
+        when(artistRepository.countByStatusGroupedByViaAndSource(OWNER, ArtistStatus.PENDING_REVIEW))
+                .thenReturn(List.of(new GroupCountRow("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION, 1)));
+
+        String view = controller.approve(1L, null, new ConcurrentModel());
+
+        assertThat(view).isEqualTo("redirect:/artists/candidates?via=Tom+Petty+and+the+Heartbreakers");
         verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
     }
 
@@ -150,7 +173,7 @@ class ReviewControllerTest {
         // auto-advance) via populateCandidates, which legitimately reads countByStatusGroupedByViaAndSource
         // even on a no-op decision. What still must never happen is the mutation loop's own query.
         verify(artistRepository, org.mockito.Mockito.never()).findByOwnerAndStatusAndDiscoveredViaAndSource(
-                any(String.class), any(ArtistStatus.class), any(String.class), any(ArtistSource.class));
+                any(), any(), any(), any());
     }
 
     @Test
