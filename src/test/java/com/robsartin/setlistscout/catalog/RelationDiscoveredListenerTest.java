@@ -26,13 +26,17 @@ class RelationDiscoveredListenerTest {
 
     private ArtistRepository artistRepository;
     private ArtistEdgeRepository artistEdgeRepository;
+    private ArtistNameMatcher artistNameMatcher;
     private RelationDiscoveredListener listener;
 
     @BeforeEach
     void setUp() {
         artistRepository = mock(ArtistRepository.class);
         artistEdgeRepository = mock(ArtistEdgeRepository.class);
-        listener = new RelationDiscoveredListener(artistRepository, artistEdgeRepository);
+        artistNameMatcher = mock(ArtistNameMatcher.class);
+        // Default: no existing near-duplicate for any name, matching the common case in these tests.
+        when(artistNameMatcher.findExistingMatch(any(), any())).thenReturn(Optional.empty());
+        listener = new RelationDiscoveredListener(artistRepository, artistEdgeRepository, artistNameMatcher);
     }
 
     private static RelationDiscovered relation(String toArtistName) {
@@ -169,10 +173,10 @@ class RelationDiscoveredListenerTest {
     }
 
     @Test
-    @DisplayName("should still attempt the node/edge upsert against an already-known to-artist "
-            + "(no existsBy short-circuit) -- this is the corroboration fix: a second source for an "
-            + "already-known relationship must still get its own edge, not be silently dropped")
-    void shouldNotShortCircuitOnAlreadyKnownArtist() {
+    @DisplayName("should still attempt the edge write when the node insert is a no-op (no name-match "
+            + "found, insertIfAbsent conflicts) -- this is the corroboration fix: a second source for "
+            + "an already-known relationship must still get its own edge, not be silently dropped")
+    void shouldNotShortCircuitEdgeWriteOnAlreadyKnownArtist() {
         Artist toArtist = artistWithId(42L);
         when(artistRepository.findByOwnerAndName(OWNER, "Taylor Goldsmith"))
                 .thenReturn(Optional.of(toArtist));
@@ -195,5 +199,46 @@ class RelationDiscoveredListenerTest {
         verify(artistRepository).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
         verify(artistEdgeRepository, never())
                 .insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    private static ArtistNameStatusView matchedView(Long id, String name, ArtistStatus status) {
+        ArtistNameStatusView view = mock(ArtistNameStatusView.class);
+        when(view.getId()).thenReturn(id);
+        when(view.getName()).thenReturn(name);
+        when(view.getStatus()).thenReturn(status);
+        return view;
+    }
+
+    @Test
+    @DisplayName("issue #118: a normalized-name match against an existing PENDING_REVIEW artist skips "
+            + "the node insert entirely and writes the edge against the existing artist's id")
+    void shouldReuseExistingArtistIdWhenNormalizedMatchFound() {
+        ArtistNameStatusView existing = matchedView(99L, "Charlie Parker's Re-Boppers", ArtistStatus.PENDING_REVIEW);
+        when(artistNameMatcher.findExistingMatch(OWNER, "Charlie Parker's Re-boppers"))
+                .thenReturn(Optional.of(existing));
+
+        listener.on(relation("Charlie Parker's Re-boppers"));
+
+        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistEdgeRepository).insertIfAbsent(eq(OWNER), eq(FROM_ARTIST_ID), eq(99L),
+                eq(ArtistSource.MEMBER_EXPANSION.name()), eq("musicbrainz"),
+                eq("member/lineup relation of Dawes"), isNull(), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("issue #118 core fix: a normalized-name match against a REJECTED artist suppresses "
+            + "the new candidate node -- a rejected artist doesn't resurface as PENDING_REVIEW under "
+            + "a new spelling -- while the edge is still written against the rejected artist's id")
+    void shouldSuppressReSuggestionOfRejectedArtistUnderNewSpelling() {
+        ArtistNameStatusView rejected = matchedView(7L, "Charlie Parker's Re-Boppers", ArtistStatus.REJECTED);
+        when(artistNameMatcher.findExistingMatch(OWNER, "Charlie Parker's Re-boppers"))
+                .thenReturn(Optional.of(rejected));
+
+        listener.on(relation("Charlie Parker's Re-boppers"));
+
+        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistEdgeRepository).insertIfAbsent(eq(OWNER), eq(FROM_ARTIST_ID), eq(7L),
+                eq(ArtistSource.MEMBER_EXPANSION.name()), eq("musicbrainz"),
+                eq("member/lineup relation of Dawes"), isNull(), any(Instant.class));
     }
 }

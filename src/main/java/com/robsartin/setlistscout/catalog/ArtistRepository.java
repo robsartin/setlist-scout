@@ -23,6 +23,14 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndIdIn(String owner, Collection<Long> ids);
 
     /**
+     * Every one of an owner's artists, in every status, as a lightweight (id, name, status)
+     * projection -- the source list for {@link ArtistNameMatcher}'s normalized-name scan (issue
+     * #118). Deliberately status-unfiltered: a normalized-name match against a REJECTED row is
+     * exactly the case that must be caught (a rejected artist reappearing under a new spelling).
+     */
+    List<ArtistNameStatusView> findByOwner(String owner);
+
+    /**
      * Case-SENSITIVE exact-match lookup used by {@code RelationDiscoveredListener} to resolve the
      * to-artist id right after an {@link #insertIfAbsent} upsert. Deliberately not
      * case-insensitive: {@code insertIfAbsent}'s {@code ON CONFLICT (owner, name)} constraint is
