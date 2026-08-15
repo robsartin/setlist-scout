@@ -18,7 +18,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Issue #123: merges the ~57 duplicate-variant {@code artist} groups already live in prod --
+ * Issue #123: merges the 27 duplicate-variant {@code artist} groups (54 rows, 27 to be deleted;
+ * read-only profiled against prod 2026-08-14) already live in prod --
  * rows for the same {@code owner} whose {@code name} normalizes to the same match form under
  * {@link ArtistNameNormalizer} (case, whitespace, and unicode dash/quote folding), but were never
  * caught at insert time because {@code artist(owner, name)}'s unique constraint is an exact-string
@@ -36,7 +37,7 @@ import java.util.Map;
  * normalizer from a Flyway {@link BaseJavaMigration} guarantees one definition of "same name" for
  * both the live app-layer guard and this one-time historical cleanup, at the cost of the migration
  * living in Java instead of a portable .sql file -- an acceptable tradeoff for a single-owner-scale
- * (~4,600 artists, ~57 groups) one-time cleanup.
+ * (5,001 artists, 27 groups as profiled 2026-08-14) one-time cleanup.
  *
  * <h2>Survivor selection (per normalized-name group, scoped to one owner)</h2>
  * <ol>
