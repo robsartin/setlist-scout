@@ -46,7 +46,7 @@ class ArtistControllerTest {
         ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class),
                 new ArtistNameMatcher(artistRepository));
         controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService,
-                activationService);
+                activationService, mock(ArtistConnectionsService.class));
     }
 
     private static Artist pending(String name, ArtistSource source) {

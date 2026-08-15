@@ -6,12 +6,23 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 public interface ArtistEdgeRepository extends JpaRepository<ArtistEdge, Long> {
 
     List<ArtistEdge> findByOwnerAndFromArtistId(String owner, Long fromArtistId);
     List<ArtistEdge> findByOwnerAndToArtistId(String owner, Long toArtistId);
+
+    /**
+     * Every outgoing edge from any of {@code fromArtistIds}, owner-scoped -- the batched,
+     * set-based building block {@link ArtistConnectionsService} uses twice (once for the owner's
+     * active artists, once for their 1-hop targets) to compute an aggregate 2-hop traversal in
+     * two bounded queries instead of one recursive-CTE or per-artist call per starting artist
+     * (issue #112). Uses the same {@code artist_edge_from_idx (owner, from_artist_id)} index as
+     * {@link #findByOwnerAndFromArtistId}.
+     */
+    List<ArtistEdge> findByOwnerAndFromArtistIdIn(String owner, Collection<Long> fromArtistIds);
 
     /**
      * DB-level idempotent upsert: relies on the {@code artist_edge_unique} constraint via
