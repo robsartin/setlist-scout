@@ -33,10 +33,17 @@
                         </form>
                     </td>
                     <td>
-                        <!--/* Remove = reject: drops off the active list, stops scanning, reversible via Unreject.
+                        <!--/* Remove = reject (APPROVED only): drops off the active list, stops scanning, reversible via Unreject.
                                Plain redirect since it updates both the active and rejected sections. */-->
-                        <form class="inline remove" th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
+                        <form class="inline remove" th:if="${a.status.name() == 'APPROVED'}"
+                              th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
                             <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${a.name}">Remove</button>
+                        </form>
+                        <!--/* Remove from seed (SEED only): drops off the active list, stops scanning, terminal (no unreject).
+                               Plain redirect for consistency with Remove. */-->
+                        <form class="inline remove" th:if="${a.status.name() == 'SEED'}"
+                              th:action="@{'/artists/' + ${a.id} + '/remove-from-seed'}" method="post">
+                            <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${a.name} + ' from seed list'">Remove from seed list</button>
                         </form>
                     </td>
                 </tr>

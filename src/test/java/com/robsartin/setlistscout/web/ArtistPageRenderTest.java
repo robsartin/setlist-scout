@@ -15,6 +15,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -117,5 +118,34 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("Alice Only Act")))
                 .andExpect(content().string(not(containsString("Bob Only Act"))));
+    }
+
+    @Test
+    void seedRowShowsRemoveFromSeedListButton() throws Exception {
+        String owner = "render-seed-button@example.com";
+        saveActive(owner, "Seed Artist", ArtistStatus.SEED);
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Seed Artist");
+        assertThat(body).contains("Remove from seed list");
+        assertThat(body).contains("/remove-from-seed");
+    }
+
+    @Test
+    void approvedRowShowsRemoveButton() throws Exception {
+        String owner = "render-approved-button@example.com";
+        saveActive(owner, "Approved Artist", ArtistStatus.APPROVED);
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Approved Artist");
+        assertThat(body).contains("Remove Approved Artist");
+        assertThat(body).contains("/artists");
+        assertThat(body).contains("/remove\"");
     }
 }
