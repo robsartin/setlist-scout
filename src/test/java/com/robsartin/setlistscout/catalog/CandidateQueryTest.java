@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.data.domain.PageRequest;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -48,7 +47,7 @@ class CandidateQueryTest extends AbstractPostgresIntegrationTest {
 
     @Test
     @DisplayName("groups PENDING_REVIEW candidates by base artist (discoveredVia) and source, "
-            + "scoped to the owner, and supports a paged slice + total pending count")
+            + "scoped to the owner, and supports a full-group fetch + total pending count")
     void groupsPendingCandidatesByBaseArtistAndSource() {
         save("Mike Campbell", MEMBER_EXPANSION, PENDING_REVIEW, "Tom Petty", OWNER);
         save("Benmont Tench", MEMBER_EXPANSION, PENDING_REVIEW, "Tom Petty", OWNER);
@@ -69,10 +68,6 @@ class CandidateQueryTest extends AbstractPostgresIntegrationTest {
         });
 
         assertThat(artistRepository.countByOwnerAndStatus(OWNER, PENDING_REVIEW)).isEqualTo(5);
-
-        List<Artist> page = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
-                OWNER, PENDING_REVIEW, "Tom Petty", MEMBER_EXPANSION, PageRequest.of(0, 1));
-        assertThat(page).hasSize(1); // "show more" slice
 
         List<Artist> all = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
                 OWNER, PENDING_REVIEW, "Tom Petty", MEMBER_EXPANSION);

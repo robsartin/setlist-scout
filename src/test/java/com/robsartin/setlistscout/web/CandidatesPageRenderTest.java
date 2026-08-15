@@ -16,8 +16,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -140,5 +142,43 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("Dawes");
         assertThat(body).doesNotContain(TOM_PETTY);
         assertThat(body).doesNotContain(WILCO);
+    }
+
+    @Test
+    void clearingEveryGroupOneByOneAutoAdvancesThroughAllOfThemToTheRealEmptyState() throws Exception {
+        String owner = "candidates-capstone@example.com";
+        Long tomPettyRow = artistRepository.save(pendingArtist(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY)).getId();
+        Long wilcoRow = artistRepository.save(pendingArtist(owner, "Nels Cline", ArtistSource.MEMBER_EXPANSION, WILCO)).getId();
+        Long dawesRow = artistRepository.save(pendingArtist(owner, "Taylor Goldsmith", ArtistSource.MEMBER_EXPANSION, "Dawes")).getId();
+
+        // Land on whatever's biggest (all groups are size 1 here, so any consistent tie-break is fine)
+        // -- clear it, then clear whatever's next, then the last, confirming each response carries
+        // exactly the remaining groups and the final one is the real empty state.
+        String afterFirst = mockMvc.perform(post("/artists/{id}/reject", tomPettyRow)
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(afterFirst).doesNotContain(TOM_PETTY);
+        assertThat(afterFirst).satisfiesAnyOf(
+                b -> assertThat(b).contains(WILCO),
+                b -> assertThat(b).contains("Dawes"));
+
+        String afterSecond = mockMvc.perform(post("/artists/{id}/reject", wilcoRow)
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(afterSecond).doesNotContain(TOM_PETTY).doesNotContain(WILCO);
+
+        String afterThird = mockMvc.perform(post("/artists/{id}/reject", dawesRow)
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(afterThird).contains("Nothing pending. Run expansion to find more.");
+    }
+
+    private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {
+        Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, "note for " + name);
+        artist.setOwner(owner);
+        return artist;
     }
 }
