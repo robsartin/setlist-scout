@@ -85,7 +85,6 @@ form.inline { display:inline; }
 
 /* Candidates page: global bar + grouped artist cards */
 .globalbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
-.globalbar .count-label { margin-right:auto; font-weight:600; }
 
 /* Two-column focused-group layout (#148): sidebar + current group side by side on wide
    viewports, collapsing to a single column on narrow ones. This file has no width-based
@@ -97,7 +96,13 @@ form.inline { display:inline; }
 .candidates-layout .group-sidebar { flex:0 1 240px; min-width:0; }
 .candidates-layout .artist-group { flex:1 1 420px; min-width:0; }
 
-.group-sidebar ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.3rem; }
+/* #148 follow-up: production has ~295 base-artist groups, so this list can run to hundreds of
+   entries. Bounding its height and scrolling it internally (rather than the whole page) keeps
+   the focused group -- the actual content -- from being pushed far below the fold, on both a
+   tall desktop sidebar and a narrow viewport where .candidates-layout wraps this above the
+   group. overflow-y:auto (never hidden) plus no tabindex here means a keyboard user tabbing to
+   an entry below the fold still gets the browser's native scroll-into-view for free. */
+.group-sidebar ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.3rem; max-height:60vh; overflow-y:auto; }
 .group-sidebar li a { display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.45rem .6rem; border-radius:8px; color:var(--text); text-decoration:none; }
 .group-sidebar li a:hover { background:var(--surface-2); }
 

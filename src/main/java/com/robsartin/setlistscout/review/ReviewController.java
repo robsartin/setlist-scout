@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Controller
@@ -47,8 +48,13 @@ public class ReviewController {
      * fallback rule every status-changing action below reuses as its auto-advance.
      */
     @GetMapping("/candidates")
-    public String candidates(@RequestParam(required = false) String via, Model model) {
+    public String candidates(@RequestParam(required = false) String via,
+                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                             Model model) {
         populateCandidates(model, via);
+        if (hxRequest != null) {
+            return "candidates :: candidatesApp";
+        }
         return "candidates";
     }
 
@@ -65,7 +71,7 @@ public class ReviewController {
         model.addAttribute("current", resolved.current());
         model.addAttribute("others", resolved.others());
         if (resolved.current() != null) {
-            Map<ArtistSource, java.util.List<Artist>> rowsByType = new LinkedHashMap<>();
+            Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
             for (var rg : resolved.current().relationGroups()) {
                 rowsByType.put(rg.source(), artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
                         owner, ArtistStatus.PENDING_REVIEW, resolved.current().via(), rg.source()));

@@ -15,6 +15,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.regex.Pattern;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
@@ -74,6 +76,11 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("/css/app.css");
         assertThat(body).contains(">Shows<");
 
+        assertThat(Pattern.compile("Candidates[\\s\\S]{0,20}aria-current=\"page\"|aria-current=\"page\"[\\s\\S]{0,40}Candidates")
+                .matcher(body).find())
+                .as("Candidates nav link should carry aria-current=\"page\": %s", body)
+                .isTrue();
+
         // Wilco is biggest (30 > 2) -- every one of its rows renders directly, no pagination.
         assertThat(body).contains(WILCO);
         assertThat(body).contains("Wilco Member 1<");
@@ -115,6 +122,26 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(body).contains("Wilco Member 1<");
+    }
+
+    @Test
+    void htmxGetReturnsTheBareFragmentNotTheFullPage() throws Exception {
+        String owner = "candidates-htmx-get@example.com";
+        seedTwoGroups(owner);
+
+        String body = mockMvc.perform(get("/artists/candidates").param("via", TOM_PETTY)
+                        .header("HX-Request", "true")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // The sidebar-link navigation (issue #148) does a plain htmx GET back to this same
+        // endpoint. Without an HX-Request branch it returns the full page, and htmx's makeFragment
+        // then swaps in the parsed <body>'s children -- duplicating the topbar/h1/page-sub inside
+        // #candidates-app on every click. The response here must be the bare candidatesApp fragment.
+        assertThat(body).contains(TOM_PETTY);
+        assertThat(body).contains("Mike Campbell");
+        assertThat(body).doesNotContain("<head").doesNotContain("topbar");
     }
 
     @Test
