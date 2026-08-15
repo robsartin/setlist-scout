@@ -25,8 +25,16 @@ python3 scripts/check_adrs.py                       # ADR numbering contiguous +
 
 - **Gradle cannot *launch* on JDK 25** — launch it on **21**; the toolchain forks **25** for
   compile/test. Both must be installed.
-- The build **exceeds the 600s tool cap** and gets backgrounded. Poll the log for
-  `BUILD SUCCESSFUL`/`BUILD FAILED` with a bounded loop — **never** declare success early.
+- The build **exceeds the 600s tool cap** and gets backgrounded. **Redirect to a log file, then
+  poll that log in a separate command** for `BUILD SUCCESSFUL`/`BUILD FAILED` — never declare
+  success early, and never just "wait for a notification" (nothing will wake you). Verify the log
+  you're reading belongs to *this* run: a stale log from an earlier build will happily show a
+  green line that has nothing to do with your change.
+- **Async-await flakes:** integration tests wait on `@Async` AFTER_COMMIT listeners via
+  `awaitUntil`. Under CI load (a container per test class, contended Hikari pools) these can take
+  far longer than locally. If one fails on CI but passes locally — `PollerFlowTest.expandHappyPath`
+  is the usual suspect — suspect the deadline before suspecting the code. Raising `AWAIT_TIMEOUT`
+  is free: the loop returns as soon as the condition holds, so it only bounds the failure path.
 - Docker Desktop must be running (Testcontainers).
 - Harmless: Hikari / `eventPublicationRegistry` shutdown WARNs at the end of every green build.
 

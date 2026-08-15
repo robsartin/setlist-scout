@@ -38,7 +38,16 @@ public abstract class AbstractPostgresIntegrationTest {
         registry.add("spring.security.oauth2.client.registration.google.client-secret", () -> "test-client-secret");
     }
 
-    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
+    /**
+     * Deadline for {@link #awaitUntil}. Generous on purpose: it bounds only the FAILURE path --
+     * the poll below returns the moment the condition holds, so a longer timeout costs nothing
+     * when things work. It was 10s, which flaked on CI (`PollerFlowTest.expandHappyPath`): a
+     * shared runner starting a Postgres container per test class, with Hikari pools contending
+     * across the cached Spring contexts, can take well over 10s for an {@code @Async} AFTER_COMMIT
+     * listener to fire and commit. That is slow, not broken -- so wait longer rather than fail a
+     * green build.
+     */
+    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(30);
 
     /**
      * Bounded manual poll -- no fixed sleep -- for an async effect (e.g. an
