@@ -100,6 +100,20 @@
             <input type="hidden" name="via" th:if="${current != null}" th:value="${current.via}"/>
             <button type="submit">Run expansion now</button>
         </form>
+        <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
+               and only when there's another allow-listed user to pick -- see NavModelAdvice. The
+               server re-checks admin-ness itself (ReviewController#requireAdmin); this th:if is a
+               UI convenience, not the access control. Not gated on ${current != null}: this acts on
+               a DIFFERENT owner's jobs, so it doesn't depend on the admin's own queue having rows. */-->
+        <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
+              th:hx-post="@{/artists/admin/expand-now}" hx-target="#candidates-app" hx-swap="outerHTML"
+              method="post" th:action="@{/artists/admin/expand-now}">
+            <label for="admin-expand-target">Admin: expand for</label>
+            <select id="admin-expand-target" name="targetOwner">
+                <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
+            </select>
+            <button type="submit">Run expansion for user</button>
+        </form>
     </div>
 </div>
 </body>

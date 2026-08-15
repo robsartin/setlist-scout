@@ -86,7 +86,7 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void approveAllHtmxReturnsBareCandidatesGlobalBar() throws Exception {
+    void approveAllHtmxReturnsBareCandidatesApp() throws Exception {
         String owner = "render-approve-all@example.com";
         savePending(owner, "Some Pending Act", ArtistSource.SIMILAR_EXPANSION, "Dawes", "similar to Dawes");
 
@@ -96,7 +96,7 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        org.assertj.core.api.Assertions.assertThat(res).contains("global-bar");
+        org.assertj.core.api.Assertions.assertThat(res).contains("candidates-app");
         org.assertj.core.api.Assertions.assertThat(res).doesNotContain("<head").doesNotContain("topbar");
     }
 
