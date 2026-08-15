@@ -52,6 +52,15 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
      * transaction (Postgres "current transaction is aborted"), which then fails Modulith's own
      * AFTER_COMMIT completion write and leaves the event stuck for redelivery. See
      * catalog.RelationDiscoveredListener#on -- mirrors scan.ScanJobRepository#insertIfAbsent.
+     * <p>
+     * Has no {@code @Transactional} of its own -- like every other {@code insertIfAbsent} in this
+     * codebase, it relies on an already-transactional caller (see {@code ArtistSeedService
+     * #addSeedIfNew}, which is {@code @Transactional} for exactly this reason).
+     *
+     * @return the number of rows this call actually inserted: {@code 1} if no (owner, name) row
+     * existed yet and this call created it, {@code 0} if the {@code ON CONFLICT} fired because a
+     * row already existed (including one a concurrent racing call just committed -- issue #133,
+     * the caller's way of telling whether IT won or lost that race).
      */
     @Modifying
     @Query(value = """
@@ -59,13 +68,13 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
             VALUES (:owner, :name, :source, :status, :discoveredVia, :note, :createdAt)
             ON CONFLICT (owner, name) DO NOTHING
             """, nativeQuery = true)
-    void insertIfAbsent(@Param("owner") String owner,
-                         @Param("name") String name,
-                         @Param("source") String source,
-                         @Param("status") String status,
-                         @Param("discoveredVia") String discoveredVia,
-                         @Param("note") String note,
-                         @Param("createdAt") Instant createdAt);
+    int insertIfAbsent(@Param("owner") String owner,
+                        @Param("name") String name,
+                        @Param("source") String source,
+                        @Param("status") String status,
+                        @Param("discoveredVia") String discoveredVia,
+                        @Param("note") String note,
+                        @Param("createdAt") Instant createdAt);
 
     /**
      * One row per (discoveredVia, source) pair among an owner's candidates in the given status --

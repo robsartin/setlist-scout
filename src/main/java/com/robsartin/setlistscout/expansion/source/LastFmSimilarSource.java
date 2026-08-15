@@ -2,12 +2,18 @@ package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.LastFmService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** Similar artists from Last.fm (limit 8) behind the {@link RelationSource} port. */
+/**
+ * Similar artists from Last.fm (limit 8) behind the {@link RelationSource} port. On by default
+ * ({@code matchIfMissing = true}) -- {@code setlistscout.sources.lastfm=false} opts this source
+ * out with zero effect on the other 7 (issue #139).
+ */
 @Component
+@ConditionalOnProperty(name = "setlistscout.sources.lastfm", havingValue = "true", matchIfMissing = true)
 public class LastFmSimilarSource implements RelationSource {
 
     private final LastFmService lastFm;

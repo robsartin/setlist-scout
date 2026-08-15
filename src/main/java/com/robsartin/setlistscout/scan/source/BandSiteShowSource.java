@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.scan.BandSiteScraperService;
 import com.robsartin.setlistscout.scan.GeoDistance;
 import com.robsartin.setlistscout.scan.Show;
 import com.robsartin.setlistscout.settings.GeocodingService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -23,9 +24,14 @@ import java.util.Optional;
  * Known gap: assuming the owner's state means a show just across a state line in a metro that spans
  * one (Kansas City, Texarkana, ...) will 404 on the city+state lookup and fall back to the old
  * city-name match -- never worse than before #28, just not improved for that case.
+ * <p>
+ * On by default ({@code matchIfMissing = true}) -- {@code setlistscout.sources.band-site=false}
+ * (Render env var {@code SETLISTSCOUT_SOURCES_BANDSITE=false}) opts this source out with zero
+ * effect on the other 7 (issue #139).
  */
 @Component
 @Order(3)
+@ConditionalOnProperty(name = "setlistscout.sources.band-site", havingValue = "true", matchIfMissing = true)
 public class BandSiteShowSource implements ShowSource {
 
     private final BandSiteScraperService scraper;

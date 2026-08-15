@@ -38,13 +38,17 @@ public class BandSiteScraperService {
     }
 
     public List<Show> scrapeShows(String artistName, String siteUrl, LocalDateTime start, LocalDateTime end) {
+        // Tracks whichever URL is currently being fetched, so a failure on the (optional) second
+        // fetch is attributed to the tour page, not misreported as the front page below.
+        String currentUrl = siteUrl;
         try {
-            Document doc = Jsoup.connect(siteUrl).userAgent(USER_AGENT).timeout(TIMEOUT_MS).get();
+            Document doc = Jsoup.connect(currentUrl).userAgent(USER_AGENT).timeout(TIMEOUT_MS).get();
             List<Show> shows = extractShows(artistName, doc, siteUrl, start, end);
             if (shows.isEmpty()) {
                 String tourUrl = findTourPageUrl(doc);
                 if (tourUrl != null && !tourUrl.equals(siteUrl)) {
-                    Document tourDoc = Jsoup.connect(tourUrl).userAgent(USER_AGENT).timeout(TIMEOUT_MS).get();
+                    currentUrl = tourUrl;
+                    Document tourDoc = Jsoup.connect(currentUrl).userAgent(USER_AGENT).timeout(TIMEOUT_MS).get();
                     shows = extractShows(artistName, tourDoc, tourUrl, start, end);
                 }
             }
@@ -54,7 +58,7 @@ public class BandSiteScraperService {
         } catch (Exception e) {
             log.atWarn().setCause(e)
                     .addKeyValue("source", "band-site")
-                    .addKeyValue("url", siteUrl)
+                    .addKeyValue("url", currentUrl)
                     .log("band-site scrape failed");
             return List.of(); // network/parse/blocked -> no shows, never breaks the scan
         }
@@ -66,7 +70,7 @@ public class BandSiteScraperService {
         List<Show> shows = new ArrayList<>();
 
         for (Element script : doc.select("script[type=application/ld+json]")) {
-            for (JsonNode event : eventsIn(script.data())) {
+            for (JsonNode event : eventsIn(script.data(), artistName, pageUrl)) {
                 Show show = toShow(artistName, event, source, pageUrl);
                 if (show != null && inWindow(show, start, end)) shows.add(show);
             }
@@ -83,12 +87,18 @@ public class BandSiteScraperService {
         return shows;
     }
 
-    private List<JsonNode> eventsIn(String json) {
+    private List<JsonNode> eventsIn(String json, String artistName, String pageUrl) {
         List<JsonNode> events = new ArrayList<>();
         try {
             collectEvents(MAPPER.readTree(json), events);
         } catch (Exception e) {
-            // malformed ld+json -> skip this block
+            // malformed ld+json -> skip this block; one bad block among possibly many good ones,
+            // not a whole-fetch failure, so DEBUG rather than WARN.
+            log.atDebug().setCause(e)
+                    .addKeyValue("source", "band-site")
+                    .addKeyValue("artist", artistName)
+                    .addKeyValue("url", pageUrl)
+                    .log("malformed ld+json block, skipping");
         }
         return events;
     }
