@@ -4,124 +4,102 @@
 <body>
 <div th:fragment="content">
     <h1>Candidates</h1>
-    <p class="page-sub">Discovered via expansion, grouped by the base artist that led us here. Expand a group to review its rows.</p>
+    <p class="page-sub">Reviewing one group at a time, biggest first. Approve or reject to move to the next.</p>
 
-    <!--/* globalBar is the htmx swap target for the bulk actions: approve-all/reject-all/expand-now
-           all return just this (pendingCount comes from NavModelAdvice on every request). */-->
-    <div th:fragment="globalBar" id="global-bar" class="globalbar card" aria-live="polite">
-        <span class="count-label">
-            <strong th:text="${pendingCount}">0</strong> pending
-        </span>
-        <form class="inline" th:if="${pendingCount != null and pendingCount > 0}"
-              hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
-              th:action="@{/artists/approve-all-pending}" method="post">
+    <div th:replace="~{::candidatesApp}"></div>
+</div>
+
+<!--/* candidatesApp (#148): the single swap target for every action on this page (per-row
+       approve/reject, per-relation-type bulk, global bulk, expand-now) -- one response always
+       carries both the current group's full content AND the sidebar together, so there's never a
+       moment where one reflects new state and the other doesn't (the old page's bug: bulk actions
+       only patched a background counter, leaving cleared rows visibly stuck). */-->
+<div th:fragment="candidatesApp" id="candidates-app" class="candidates-app" aria-live="polite">
+    <p th:if="${current == null}">Nothing pending. Run expansion to find more.</p>
+
+    <div th:if="${current != null}" class="candidates-layout">
+        <aside class="group-sidebar card" aria-label="Other pending groups">
+            <h2>Up next</h2>
+            <ul>
+                <li th:each="g : ${others}">
+                    <a th:href="@{/artists/candidates(via=${g.via})}"
+                       th:hx-get="@{/artists/candidates(via=${g.via})}"
+                       hx-target="#candidates-app" hx-swap="outerHTML" hx-push-url="true">
+                        <span th:text="${g.via}">Base artist</span>
+                        <span class="count" th:text="${g.total}">0</span>
+                    </a>
+                </li>
+                <li th:if="${#lists.isEmpty(others)}" class="lazy-hint">Nothing else queued.</li>
+            </ul>
+        </aside>
+
+        <section class="artist-group card" aria-current="true">
+            <div class="artist-group-header">
+                <h2 th:text="${current.via}">Base artist</h2>
+                <span class="count" th:text="${current.total}">0</span>
+            </div>
+
+            <div class="relgroup" th:each="rg : ${current.relationGroups}">
+                <div class="relgroup-header">
+                    <span class="chip" th:classappend="${rg.chipClass}" th:text="${rg.label}">Label</span>
+                    <span class="count" th:text="${rg.count}">0</span>
+                    <span class="group-actions">
+                        <form class="inline" th:hx-post="@{/artists/candidates/group}"
+                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
+                              th:action="@{/artists/candidates/group}">
+                            <input type="hidden" name="via" th:value="${current.via}"/>
+                            <input type="hidden" name="type" th:value="${rg.source}"/>
+                            <input type="hidden" name="decision" value="approve"/>
+                            <button type="submit" class="btn-good btn-sm"
+                                    th:aria-label="'Approve all ' + ${rg.label} + ' from ' + ${current.via}">Approve all</button>
+                        </form>
+                        <form class="inline" th:hx-post="@{/artists/candidates/group}"
+                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
+                              th:action="@{/artists/candidates/group}">
+                            <input type="hidden" name="via" th:value="${current.via}"/>
+                            <input type="hidden" name="type" th:value="${rg.source}"/>
+                            <input type="hidden" name="decision" value="reject"/>
+                            <button type="submit" class="btn-bad btn-sm"
+                                    th:aria-label="'Reject all ' + ${rg.label} + ' from ' + ${current.via}">Reject all</button>
+                        </form>
+                    </span>
+                </div>
+                <div class="cand-list">
+                    <div class="cand" th:each="a : ${rowsByType.get(rg.source)}">
+                        <span class="cand-name" th:text="${a.name}">Name</span>
+                        <span class="note" th:text="${a.note}">Note</span>
+                        <form class="inline" th:hx-post="@{/artists/{id}/approve(id=${a.id})}"
+                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
+                              th:action="@{/artists/{id}/approve(id=${a.id})}">
+                            <button type="submit" class="btn-good btn-sm" th:aria-label="'Approve ' + ${a.name}">Approve</button>
+                        </form>
+                        <form class="inline" th:hx-post="@{/artists/{id}/reject(id=${a.id})}"
+                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
+                              th:action="@{/artists/{id}/reject(id=${a.id})}">
+                            <button type="submit" class="btn-bad btn-sm" th:aria-label="'Reject ' + ${a.name}">Reject</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="globalbar card">
+        <form class="inline" th:if="${current != null}"
+              th:hx-post="@{/artists/approve-all-pending}" hx-target="#candidates-app" hx-swap="outerHTML"
+              method="post" th:action="@{/artists/approve-all-pending}">
             <button type="submit" class="btn-good">Approve all remaining</button>
         </form>
-        <form class="inline" th:if="${pendingCount != null and pendingCount > 0}"
-              hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
-              th:action="@{/artists/reject-all-pending}" method="post">
+        <form class="inline" th:if="${current != null}"
+              th:hx-post="@{/artists/reject-all-pending}" hx-target="#candidates-app" hx-swap="outerHTML"
+              method="post" th:action="@{/artists/reject-all-pending}">
             <button type="submit" class="btn-bad btn-sm">Reject all remaining</button>
         </form>
-        <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
-              th:action="@{/artists/expand-now}" method="post">
+        <form class="inline" th:hx-post="@{/artists/expand-now}" hx-target="#candidates-app" hx-swap="outerHTML"
+              method="post" th:action="@{/artists/expand-now}">
+            <input type="hidden" name="via" th:if="${current != null}" th:value="${current.via}"/>
             <button type="submit">Run expansion now</button>
         </form>
-        <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
-               and only when there's another allow-listed user to pick -- see NavModelAdvice. The
-               server re-checks admin-ness itself (ReviewController#requireAdmin); this th:if is a
-               UI convenience, not the access control. */-->
-        <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
-              hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
-              th:action="@{/artists/admin/expand-now}" method="post">
-            <label for="admin-expand-target">Admin: expand for</label>
-            <select id="admin-expand-target" name="targetOwner">
-                <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
-            </select>
-            <button type="submit">Run expansion for user</button>
-        </form>
-    </div>
-
-    <p th:if="${#lists.isEmpty(groups)}">Nothing pending. Run expansion to find more.</p>
-
-    <div class="artist-group card" th:each="g : ${groups}">
-        <div class="artist-group-header">
-            <h2 th:text="${g.via}">Base artist</h2>
-            <span class="count" th:text="${g.total}">0</span>
-        </div>
-
-        <details class="relgroup" th:each="rg : ${g.relationGroups}">
-            <summary>
-                <span class="chip" th:classappend="${rg.chipClass}" th:text="${rg.label}">Label</span>
-                <span class="count" th:text="${rg.count}">0</span>
-                <span class="group-actions">
-                    <!--/* Per-group bulk decision: htmx swaps just #global-bar (its pendingCount is
-                           refreshed by NavModelAdvice on every request) so the running total stays
-                           correct; this group's own summary count re-syncs on the next full page
-                           load -- acceptable for v1 (see ReviewController#actionResult javadoc). */-->
-                    <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
-                          th:action="@{/artists/candidates/group}" method="post">
-                        <input type="hidden" name="via" th:value="${g.via}"/>
-                        <input type="hidden" name="type" th:value="${rg.source}"/>
-                        <input type="hidden" name="decision" value="approve"/>
-                        <button type="submit" class="btn-good btn-sm"
-                                th:aria-label="'Approve all ' + ${rg.label} + ' from ' + ${g.via}">Approve all</button>
-                    </form>
-                    <form class="inline" hx-boost="true" hx-target="#global-bar" hx-swap="outerHTML" hx-push-url="false"
-                          th:action="@{/artists/candidates/group}" method="post">
-                        <input type="hidden" name="via" th:value="${g.via}"/>
-                        <input type="hidden" name="type" th:value="${rg.source}"/>
-                        <input type="hidden" name="decision" value="reject"/>
-                        <button type="submit" class="btn-bad btn-sm"
-                                th:aria-label="'Reject all ' + ${rg.label} + ' from ' + ${g.via}">Reject all</button>
-                    </form>
-                </span>
-            </summary>
-            <!--/* Lazy load: the body only fetches this group's rows the first time the <details>
-                   opens, so the initial page render carries counts only, not every candidate row.
-                   "toggle once from:closest details" fires once, on the details element's own toggle
-                   event -- verified against the vendored htmx build in CandidatesPageRenderTest (the
-                   rows endpoint is independently GET-able either way). */-->
-            <div class="body" aria-live="polite" aria-relevant="additions removals"
-                 th:hx-get="@{/artists/candidates/rows(via=${g.via},type=${rg.source})}"
-                 hx-trigger="toggle once from:closest details"
-                 hx-target="this" hx-swap="innerHTML">
-                <p class="lazy-hint">Loading&hellip;</p>
-            </div>
-        </details>
-    </div>
-
-    <!--/* rowDone: bare empty fragment returned by POST /artists/{id}/approve|reject on htmx requests.
-           Its form targets closest .cand with hx-swap="outerHTML", so swapping this empty span in
-           simply removes the row from view; the group's summary count and nav badge re-sync on the
-           next full page load -- acceptable for v1 (see ReviewController#rowResult javadoc). */-->
-    <span th:fragment="rowDone" class="cand-done" aria-hidden="true"></span>
-
-    <!--/* groupRows: bare fragment returned by GET /artists/candidates/rows, both for a group's first
-           lazy load (swapped into .body via innerHTML) and for "Show more" (swapped into the button
-           itself via outerHTML, nesting a fresh .cand-list -- harmless for <div>s). */-->
-    <div th:fragment="groupRows">
-        <div class="cand-list">
-            <div class="cand" th:each="a : ${rows}">
-                <span class="cand-name" th:text="${a.name}">Name</span>
-                <span class="note" th:text="${a.note}">Note</span>
-                <form class="inline" th:action="@{/artists/{id}/approve(id=${a.id})}"
-                      th:hx-post="@{/artists/{id}/approve(id=${a.id})}"
-                      hx-target="closest .cand" hx-swap="outerHTML" method="post">
-                    <button type="submit" class="btn-good btn-sm" th:aria-label="'Approve ' + ${a.name}">Approve</button>
-                </form>
-                <form class="inline" th:action="@{/artists/{id}/reject(id=${a.id})}"
-                      th:hx-post="@{/artists/{id}/reject(id=${a.id})}"
-                      hx-target="closest .cand" hx-swap="outerHTML" method="post">
-                    <button type="submit" class="btn-bad btn-sm" th:aria-label="'Reject ' + ${a.name}">Reject</button>
-                </form>
-            </div>
-            <p class="lazy-hint" th:if="${rows != null and #lists.isEmpty(rows)}">Nothing here.</p>
-            <button th:if="${hasMore}" type="button" class="btn-sm show-more"
-                    th:hx-get="@{/artists/candidates/rows(via=${via},type=${type},offset=${nextOffset})}"
-                    hx-target="this" hx-swap="outerHTML">
-                Show more
-            </button>
-        </div>
     </div>
 </div>
 </body>

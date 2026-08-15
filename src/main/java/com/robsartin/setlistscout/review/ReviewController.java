@@ -8,12 +8,14 @@ import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.shared.CurrentUser;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Controller
 @RequestMapping("/artists")
@@ -21,9 +23,6 @@ public class ReviewController {
 
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
-
-    /** Page size for a lazy-loaded group's rows on the Candidates page. */
-    private static final int ROWS_PAGE = 25;
 
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
@@ -42,35 +41,38 @@ public class ReviewController {
     }
 
     /**
-     * The Candidates page: this owner's pending candidates grouped by base artist (discoveredVia)
-     * and relation type (member/similar/tribute), with counts only -- rows lazy-load per group via
-     * {@link #candidateRows}. {@code pendingCount} for the global bar comes from {@link NavModelAdvice}.
+     * The Candidates page (issue #148): one group's full pending list at a time, biggest-first,
+     * with a sidebar of the rest. {@code via} picks a specific group; omitted or stale (no pending
+     * rows left) falls back to biggest-first via {@link CandidateGroups#resolve} -- the same
+     * fallback rule every status-changing action below reuses as its auto-advance.
      */
     @GetMapping("/candidates")
-    public String candidates(Model model) {
-        var counts = artistRepository.countByStatusGroupedByViaAndSource(
-                currentUser.email(), ArtistStatus.PENDING_REVIEW);
-        model.addAttribute("groups", CandidateGroups.from(counts));
+    public String candidates(@RequestParam(required = false) String via, Model model) {
+        populateCandidates(model, via);
         return "candidates";
     }
 
     /**
-     * One group's page of pending rows, loaded lazily when its {@code <details>} is first expanded
-     * (or via "Show more" for a subsequent page). Owner-scoped like everything else here.
+     * Resolves the current group and populates the model for either the full page or the
+     * {@code candidatesApp} fragment. Returns the resolved current group's {@code via} (for
+     * building a redirect URL after a non-htmx action), or {@code null} if nothing is pending.
      */
-    @GetMapping("/candidates/rows")
-    public String candidateRows(@RequestParam String via, @RequestParam ArtistSource type,
-                                @RequestParam(defaultValue = "0") int offset, Model model) {
-        var rows = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
-                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type,
-                PageRequest.of(offset / ROWS_PAGE, ROWS_PAGE));
-        model.addAttribute("rows", rows);
-        model.addAttribute("via", via);
-        model.addAttribute("type", type);
-        model.addAttribute("nextOffset", offset + ROWS_PAGE);
-        // Simple heuristic: a full page might mean more remain. Good enough at ROWS_PAGE granularity.
-        model.addAttribute("hasMore", rows.size() == ROWS_PAGE);
-        return "candidates :: groupRows";
+    private String populateCandidates(Model model, String requestedVia) {
+        String owner = currentUser.email();
+        var groups = CandidateGroups.from(
+                artistRepository.countByStatusGroupedByViaAndSource(owner, ArtistStatus.PENDING_REVIEW));
+        var resolved = CandidateGroups.resolve(groups, requestedVia);
+        model.addAttribute("current", resolved.current());
+        model.addAttribute("others", resolved.others());
+        if (resolved.current() != null) {
+            Map<ArtistSource, java.util.List<Artist>> rowsByType = new LinkedHashMap<>();
+            for (var rg : resolved.current().relationGroups()) {
+                rowsByType.put(rg.source(), artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                        owner, ArtistStatus.PENDING_REVIEW, resolved.current().via(), rg.source()));
+            }
+            model.addAttribute("rowsByType", rowsByType);
+        }
+        return resolved.current() != null ? resolved.current().via() : null;
     }
 
     /** The Rejected page: this owner's rejected artists, reversible via Unreject. */

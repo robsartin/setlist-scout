@@ -15,18 +15,16 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.util.regex.Pattern;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Renders the real /artists/candidates Thymeleaf templates (grouped headers + lazy rows fragment)
- * against a booted context + Postgres, signed in as a test user, and checks multi-tenant isolation.
- * Each test uses a distinct owner so saved data can't leak between methods (no per-test rollback).
- * Runs in CI (needs Docker).
+ * Renders the real /artists/candidates focused-single-group page (issue #148) against a booted
+ * context + Postgres, signed in as a test user, and checks multi-tenant isolation. Each test uses
+ * a distinct owner so saved data can't leak between methods (no per-test rollback). Runs in CI
+ * (needs Docker).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -52,20 +50,19 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         artistRepository.save(artist);
     }
 
-    /** Seeds 2 base artists x relation types for the given owner, including a 26-row group (show-more). */
-    private void seedGroupedCandidates(String owner) {
-        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
-        savePending(owner, "Benmont Tench", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
-        savePending(owner, "Jackson Browne", ArtistSource.SIMILAR_EXPANSION, TOM_PETTY);
-        for (int i = 1; i <= 26; i++) {
+    /** Wilco (30 rows, the biggest group) and Tom Petty (2 rows, Members + Similar) for the owner. */
+    private void seedTwoGroups(String owner) {
+        for (int i = 1; i <= 30; i++) {
             savePending(owner, "Wilco Member " + i, ArtistSource.MEMBER_EXPANSION, WILCO);
         }
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Jackson Browne", ArtistSource.SIMILAR_EXPANSION, TOM_PETTY);
     }
 
     @Test
-    void candidatesPageShowsGroupHeadersAndCountsButNotRows() throws Exception {
-        String owner = "render-candidates-headers@example.com";
-        seedGroupedCandidates(owner);
+    void landingWithNoViaShowsTheBiggestGroupInFullAndSidebarsTheRest() throws Exception {
+        String owner = "candidates-land-biggest@example.com";
+        seedTwoGroups(owner);
 
         String body = mockMvc.perform(get("/artists/candidates")
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
@@ -74,101 +71,65 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
 
         assertThat(body).contains("/css/app.css");
         assertThat(body).contains(">Shows<");
-        assertThat(body).contains(TOM_PETTY);
+
+        // Wilco is biggest (30 > 2) -- every one of its rows renders directly, no pagination.
         assertThat(body).contains(WILCO);
-        assertThat(body).contains("<details");
+        assertThat(body).contains("Wilco Member 1<");
+        assertThat(body).contains("Wilco Member 30<");
+        assertThat(body).doesNotContain("Show more");
 
-        // aria-current="page" lands on the Candidates nav link specifically.
-        assertThat(Pattern.compile("Candidates[\\s\\S]{0,20}aria-current=\"page\"|aria-current=\"page\"[\\s\\S]{0,40}Candidates")
-                .matcher(body).find())
-                .as("Candidates nav link should carry aria-current=\"page\": %s", body)
-                .isTrue();
-
-        // Relation-group chip + count: "Members" section shows 2, "Similar" section shows 1.
-        assertThat(Pattern.compile("Members[\\s\\S]{0,60}?>2<").matcher(body).find())
-                .as("Members group should show count 2: %s", body)
-                .isTrue();
-        assertThat(Pattern.compile("Similar[\\s\\S]{0,60}?>1<").matcher(body).find())
-                .as("Similar group should show count 1: %s", body)
-                .isTrue();
-
-        // Rows are lazy -- the initial page must not contain individual candidate names.
+        // Tom Petty is in the sidebar (name + count), not expanded -- its rows are NOT on the page.
+        assertThat(body).contains(TOM_PETTY);
         assertThat(body).doesNotContain("Mike Campbell");
-        assertThat(body).doesNotContain("Benmont Tench");
         assertThat(body).doesNotContain("Jackson Browne");
-
-        // Groups exist, so the rows-fragment empty state ("Nothing here.") must not leak onto the
-        // full page -- it lives inside groupRows, which isn't rendered on this response (rows=null).
-        assertThat(body).doesNotContain("Nothing here.");
     }
 
     @Test
-    void candidateRowsEndpointShowsNothingHereWhenGroupIsEmpty() throws Exception {
-        String owner = "render-candidates-empty-rows@example.com";
-        seedGroupedCandidates(owner);
+    void viaParamShowsThatSpecificGroupRegardlessOfSize() throws Exception {
+        String owner = "candidates-via-param@example.com";
+        seedTwoGroups(owner);
 
-        // Tom Petty has no TRIBUTE_EXPANSION rows -- this group's page of rows is genuinely empty.
-        String body = mockMvc.perform(get("/artists/candidates/rows")
-                        .param("via", TOM_PETTY)
-                        .param("type", "TRIBUTE_EXPANSION")
-                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).contains("Nothing here.");
-    }
-
-    @Test
-    void candidateRowsEndpointReturnsBareFragmentWithMemberNamesAndControls() throws Exception {
-        String owner = "render-candidates-rows@example.com";
-        seedGroupedCandidates(owner);
-
-        String body = mockMvc.perform(get("/artists/candidates/rows")
-                        .param("via", TOM_PETTY)
-                        .param("type", "MEMBER_EXPANSION")
+        String body = mockMvc.perform(get("/artists/candidates").param("via", TOM_PETTY)
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(body).contains("Mike Campbell");
-        assertThat(body).contains("Benmont Tench");
-        assertThat(body).doesNotContain("Jackson Browne"); // that's the Similar group, not Members
+        assertThat(body).contains("Jackson Browne");
+        assertThat(body).doesNotContain("Wilco Member 1<");
 
-        // Bare fragment: no page shell.
-        assertThat(body).doesNotContain("<head");
-        assertThat(body).doesNotContain("topbar");
-
-        // Per-item approve/reject controls pointing at the (Task-4) per-artist routes.
-        assertThat(Pattern.compile("/artists/\\d+/approve").matcher(body).find())
-                .as("expected an approve control targeting /artists/{id}/approve: %s", body)
-                .isTrue();
-        assertThat(Pattern.compile("/artists/\\d+/reject").matcher(body).find())
-                .as("expected a reject control targeting /artists/{id}/reject: %s", body)
-                .isTrue();
-
-        // Only 2 rows in this group -- no "Show more".
-        assertThat(body).doesNotContain("Show more");
+        // Wilco is now in the sidebar instead.
+        assertThat(body).contains(WILCO);
     }
 
     @Test
-    void groupLargerThanPageLimitYieldsShowMoreWithNextOffset() throws Exception {
-        String owner = "render-candidates-showmore@example.com";
-        seedGroupedCandidates(owner);
+    void viaParamForAGroupWithNoPendingRowsFallsBackToBiggest() throws Exception {
+        String owner = "candidates-via-stale@example.com";
+        seedTwoGroups(owner);
 
-        String body = mockMvc.perform(get("/artists/candidates/rows")
-                        .param("via", WILCO)
-                        .param("type", "MEMBER_EXPANSION")
+        String body = mockMvc.perform(get("/artists/candidates").param("via", "Not A Real Group")
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).contains("Show more");
-        assertThat(body).contains("offset=25");
+        assertThat(body).contains("Wilco Member 1<");
+    }
+
+    @Test
+    void noPendingCandidatesShowsEmptyStateNotABrokenGroup() throws Exception {
+        String owner = "candidates-empty@example.com";
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Nothing pending. Run expansion to find more.");
     }
 
     @Test
     void candidatesAreIsolatedByOwner() throws Exception {
-        seedGroupedCandidates("candidates-owner-a@example.com");
+        seedTwoGroups("candidates-owner-a@example.com");
         savePending("candidates-owner-b@example.com", "Bob Only Act", ArtistSource.SIMILAR_EXPANSION, "Dawes");
 
         String body = mockMvc.perform(get("/artists/candidates")
