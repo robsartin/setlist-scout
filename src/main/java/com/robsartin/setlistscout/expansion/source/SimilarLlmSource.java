@@ -2,12 +2,19 @@ package com.robsartin.setlistscout.expansion.source;
 
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.expansion.SimilarArtistLlmService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** Similar artists from LLM (limit 8) behind the {@link RelationSource} port. */
+/**
+ * Similar artists from LLM (limit 8) behind the {@link RelationSource} port. On by default
+ * ({@code matchIfMissing = true}) -- set {@code setlistscout.sources.similar-llm=false} (Render
+ * env var {@code SETLISTSCOUT_SOURCES_SIMILARLLM=false}) to opt this source out with zero effect
+ * on the other 7 (issue #139).
+ */
 @Component
+@ConditionalOnProperty(name = "setlistscout.sources.similar-llm", havingValue = "true", matchIfMissing = true)
 public class SimilarLlmSource implements RelationSource {
 
     private final SimilarArtistLlmService similarArtistLlm;

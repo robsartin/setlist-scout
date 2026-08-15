@@ -155,6 +155,23 @@ class ScanUnitRunnerTest {
     }
 
     @Test
+    @DisplayName("source disabled via config (bean absent from injected list) -- no-op, nothing persisted")
+    void disabledSourceIsNoOp() {
+        Artist zz = seed("ZZ Top");
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(zz));
+
+        // "bandsintown" is a real production source id (see BandsintownShowSource#id), but this
+        // runner only has "ticketmaster" injected -- exactly what happens when
+        // setlistscout.sources.bandsintown=false: Spring never creates that bean, so it's simply
+        // absent from the injected List<ShowSource>. Same no-op path as an unrecognized id
+        // (#unknownSourceIsNoOp), pinned here under a real disabled-source id rather than a typo.
+        int saved = runner.run(OWNER, ARTIST_ID, "bandsintown");
+
+        assertThat(saved).isEqualTo(0);
+        verify(showSource, never()).search(any());
+    }
+
+    @Test
     @DisplayName("a blank artist name is skipped (defense in depth)")
     void blankArtistNameIsSkipped() {
         Artist blank = seed("   ");

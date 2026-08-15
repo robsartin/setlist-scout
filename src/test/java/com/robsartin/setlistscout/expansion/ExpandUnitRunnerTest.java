@@ -70,4 +70,21 @@ class ExpandUnitRunnerTest {
 
         verify(publisher, never()).publishEvent(any());
     }
+
+    @Test
+    @DisplayName("should no-op when the source is disabled via config (bean absent from injected list)")
+    void shouldNoOpForDisabledSource() {
+        lenient().when(lastFmSource.id()).thenReturn("lastfm");
+
+        ExpandUnitRunner runner = new ExpandUnitRunner(List.of(lastFmSource), publisher, transactionTemplate);
+
+        // "musicbrainz" is a real production source id (see MusicBrainzRelationSource#id), but this
+        // runner only has "lastfm" injected -- exactly what happens when
+        // setlistscout.sources.musicbrainz=false: Spring never creates that bean, so it's simply
+        // absent from the injected List<RelationSource>. Same no-op path as an unrecognized id
+        // (#shouldNoOpForUnknownSourceId), pinned here under a real disabled-source id rather than a typo.
+        runner.run(OWNER, 1L, "musicbrainz", "Dawes");
+
+        verify(publisher, never()).publishEvent(any());
+    }
 }
