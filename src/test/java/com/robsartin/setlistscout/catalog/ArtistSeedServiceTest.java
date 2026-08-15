@@ -3,14 +3,16 @@ package com.robsartin.setlistscout.catalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -48,17 +50,35 @@ class ArtistSeedServiceTest {
     @DisplayName("adds a trimmed new name as a seed when no existing artist matches")
     void addsATrimmedNewNameAsASeed() {
         when(artistNameMatcher.findExistingMatch(OWNER, "Wilco")).thenReturn(Optional.empty());
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
+        Artist resolved = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        resolved.setOwner(OWNER);
+        when(artistRepository.findByOwnerAndName(OWNER, "Wilco")).thenReturn(Optional.of(resolved));
 
         boolean added = service.addSeedIfNew(OWNER, "  Wilco  ");
 
         assertThat(added).isTrue();
-        ArgumentCaptor<Artist> saved = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository).save(saved.capture());
-        assertThat(saved.getValue().getName()).isEqualTo("Wilco");
-        assertThat(saved.getValue().getOwner()).isEqualTo(OWNER);
-        assertThat(saved.getValue().getSource()).isEqualTo(ArtistSource.SEED_LIST);
-        assertThat(saved.getValue().getStatus()).isEqualTo(ArtistStatus.SEED);
-        verify(activationService).onSeedCreated(saved.getValue());
+        verify(artistRepository, never()).save(any(Artist.class));
+        verify(activationService).onSeedCreated(resolved);
+        verify(activationService, never()).changeStatus(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("issue #133: when insertIfAbsent reports the row already existed (a concurrent "
+            + "call won the race for this exact brand-new name), this call reports false and never "
+            + "fires onSeedCreated for what is, from its own perspective, someone else's insert")
+    void raceLoserReportsFalseAndDoesNotFireOnSeedCreated() {
+        when(artistNameMatcher.findExistingMatch(OWNER, "Nebraska")).thenReturn(Optional.empty());
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Nebraska"), eq(ArtistSource.SEED_LIST.name()),
+                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(0);
+
+        boolean added = service.addSeedIfNew(OWNER, "Nebraska");
+
+        assertThat(added).as("the race loser did not cause a new seed -- the winner did").isFalse();
+        verify(artistRepository, never()).save(any(Artist.class));
+        verify(artistRepository, never()).findByOwnerAndName(anyString(), anyString());
+        verify(activationService, never()).onSeedCreated(any(Artist.class));
         verify(activationService, never()).changeStatus(any(), any(), any());
     }
 
@@ -137,14 +157,23 @@ class ArtistSeedServiceTest {
     void twoGenuinelyDifferentArtistsBothGetAdded() {
         when(artistNameMatcher.findExistingMatch(OWNER, "Radiohead")).thenReturn(Optional.empty());
         when(artistNameMatcher.findExistingMatch(OWNER, "Radioheads Tribute Band")).thenReturn(Optional.empty());
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Radiohead"), eq(ArtistSource.SEED_LIST.name()),
+                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Radioheads Tribute Band"), eq(ArtistSource.SEED_LIST.name()),
+                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
+        Artist radiohead = new Artist("Radiohead", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        radiohead.setOwner(OWNER);
+        Artist tribute = new Artist("Radioheads Tribute Band", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        tribute.setOwner(OWNER);
+        when(artistRepository.findByOwnerAndName(OWNER, "Radiohead")).thenReturn(Optional.of(radiohead));
+        when(artistRepository.findByOwnerAndName(OWNER, "Radioheads Tribute Band")).thenReturn(Optional.of(tribute));
 
         assertThat(service.addSeedIfNew(OWNER, "Radiohead")).isTrue();
         assertThat(service.addSeedIfNew(OWNER, "Radioheads Tribute Band")).isTrue();
 
-        ArgumentCaptor<Artist> saved = ArgumentCaptor.forClass(Artist.class);
-        verify(artistRepository, org.mockito.Mockito.times(2)).save(saved.capture());
-        assertThat(saved.getAllValues()).extracting(Artist::getName)
-                .containsExactlyInAnyOrder("Radiohead", "Radioheads Tribute Band");
+        verify(artistRepository, never()).save(any(Artist.class));
+        verify(activationService).onSeedCreated(radiohead);
+        verify(activationService).onSeedCreated(tribute);
     }
 
     @Test
