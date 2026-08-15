@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.PollerProperties;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.observability.Correlation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,7 +88,12 @@ public class ExpandPoller {
         try {
             Optional<Artist> artist = artistRepository.findByIdAndOwner(job.getArtistId(), job.getOwner());
             if (artist.isPresent()) {
-                expandUnitRunner.run(job.getOwner(), job.getArtistId(), job.getSource(), artist.get().getName());
+                // #135: one fresh correlation id per job execution, scoped to just this call so
+                // every external-service log line the unit run triggers can be grepped as one
+                // thread through the log stream. Deliberately NOT wrapping recordSuccess/
+                // recordFailure below -- see Correlation#runWithNewId.
+                Correlation.runWithNewId(() -> expandUnitRunner.run(
+                        job.getOwner(), job.getArtistId(), job.getSource(), artist.get().getName()));
             } else {
                 log.atWarn().addKeyValue("owner", job.getOwner()).addKeyValue("artistId", job.getArtistId())
                         .log("expand unit skipped -- artist not found");

@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.PollerProperties;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.observability.Correlation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -93,7 +94,11 @@ public class ScanPoller {
 
     private void runOne(ScanJob job, Instant now) {
         try {
-            scanUnitRunner.run(job.getOwner(), job.getArtistId(), job.getSource());
+            // #135: one fresh correlation id per job execution, scoped to just this call so every
+            // external-service log line the unit run triggers can be grepped as one thread through
+            // the log stream. Deliberately NOT wrapping recordSuccess/recordFailure below -- see
+            // Correlation#runWithNewId.
+            Correlation.runWithNewId(() -> scanUnitRunner.run(job.getOwner(), job.getArtistId(), job.getSource()));
             recordSuccess(job, now);
         } catch (OptimisticLockingFailureException concurrentChange) {
             // The job was re-dued (SettingsChanged / manual "Scan now") or deleted (ArtistDeactivated)
