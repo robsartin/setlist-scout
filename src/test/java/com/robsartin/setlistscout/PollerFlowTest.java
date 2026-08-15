@@ -65,6 +65,16 @@ import static org.mockito.Mockito.when;
 @TestPropertySource(properties = {
         "setlistscout.scan-poller-enabled=true",
         "setlistscout.expand-poller-enabled=true",
+        // Park the @Scheduled trigger far out of reach. This test drives tick() explicitly, so it
+        // only needs the poller BEANS to exist -- it never needs the scheduler to fire on its own.
+        // Letting it fire is actively harmful: Spring caches this context, so a background
+        // scheduling-N thread keeps ticking after this class finishes, touching the @MockitoBean
+        // sources below while LATER test classes are mid-stubbing -- which surfaces as a bogus
+        // Mockito UnfinishedStubbingException in an unrelated test (and only ever in a full-suite
+        // run, never when that class is run alone). initialDelayString reuses these same keys, so
+        // a large value means the first automatic tick never lands during the suite.
+        "setlistscout.scan-tick-ms=3600000",
+        "setlistscout.expand-tick-ms=3600000",
         // The Task 4 startup backfill (scan.ScanJobBackfill / expansion.ExpandJobBackfill) is a
         // synchronous ApplicationRunner: it runs once during context refresh, before any @Test
         // method's own `when(...)` stubbing has happened. CatalogSeeder always seeds real SEED
