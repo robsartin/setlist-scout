@@ -1,11 +1,13 @@
 package com.robsartin.setlistscout.review;
 
+import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
+import com.robsartin.setlistscout.service.TestAppProperties;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +42,9 @@ class ReviewControllerTest {
         currentUser = mock(CurrentUser.class);
         activationService = mock(ArtistActivationService.class);
         when(currentUser.email()).thenReturn(OWNER);
-        controller = new ReviewController(artistRepository, expandJobRepository, currentUser, activationService);
+        AppProperties appProperties = TestAppProperties.withKeys();
+        controller = new ReviewController(artistRepository, expandJobRepository, currentUser, activationService,
+                appProperties);
     }
 
     private static Artist pending(String name, ArtistSource source, long id) {
