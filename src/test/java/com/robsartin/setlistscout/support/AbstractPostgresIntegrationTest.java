@@ -45,9 +45,10 @@ public abstract class AbstractPostgresIntegrationTest {
      * shared runner starting a Postgres container per test class, with Hikari pools contending
      * across the cached Spring contexts, can take well over 10s for an {@code @Async} AFTER_COMMIT
      * listener to fire and commit. That is slow, not broken -- so wait longer rather than fail a
-     * green build.
+     * green build. Raised again 30s -> 90s after `maxParallelForks=4` (#129) multiplied that same
+     * contention across concurrently running test JVMs, reflaking the same test on CI.
      */
-    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(90);
 
     /**
      * Bounded manual poll -- no fixed sleep -- for an async effect (e.g. an
