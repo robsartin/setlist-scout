@@ -367,7 +367,7 @@ Replace the existing `candidates` method:
     }
 ```
 
-Leave `candidateRows` in place for now (Task 5 removes it) — the old template it backs still exists until Step 4 below replaces the template. Add the missing import if not already present: `com.robsartin.setlistscout.catalog.Artist` (check the top of the file — it's likely already imported since `Artist` is used elsewhere in the class; add only if missing).
+Delete the `candidateRows` method (the `GET /candidates/rows` endpoint) and its javadoc entirely in this same step — Step 4 below replaces the whole template, including the `groupRows`/`rowDone` fragments that method rendered, so leaving it in place even briefly would mean dead code referencing a fragment that no longer exists. Add the missing import if not already present: `com.robsartin.setlistscout.catalog.Artist` (check the top of the file — it's likely already imported since `Artist` is used elsewhere in the class; add only if missing).
 
 - [ ] **Step 4: Implement — template**
 
@@ -950,9 +950,8 @@ git commit -m "#148: group-level and global bulk actions share the same auto-adv
 ### Task 5: Remove dead code + capstone multi-group coverage
 
 **Files:**
-- Modify: `src/main/java/com/robsartin/setlistscout/review/ReviewController.java` (delete `candidateRows`)
 - Modify: `src/main/java/com/robsartin/setlistscout/catalog/ArtistRepository.java` (delete paginated overload)
-- Modify: `src/main/resources/templates/candidates.html` (delete dead fragments, if any remain — Task 2 already replaced the whole file, so this is a verification step, not new deletion)
+- Verify only, no expected changes: `src/main/resources/templates/candidates.html` (Task 2 already replaced the whole file and Task 2 already removed the controller method that used the old `groupRows`/`rowDone` fragments — this task just confirms no leftovers)
 - Modify: `src/test/java/com/robsartin/setlistscout/web/CandidatesPageRenderTest.java` (add the capstone test)
 
 **Interfaces:**
@@ -1010,7 +1009,7 @@ Expected: PASS already — Tasks 1–4 already implement everything this test ex
 
 - [ ] **Step 3: Delete dead code**
 
-In `ReviewController.java`, delete the entire `candidateRows` method (the `GET /candidates/rows` endpoint) and its javadoc — nothing calls it anymore, the new template renders all rows directly.
+`candidateRows` was already deleted in Task 2 (moved there during pre-flight review, since the template fragment it depended on was removed in that same task). This step handles what's left:
 
 In `ArtistRepository.java`, delete the paginated overload (the one taking a `Pageable` parameter, with the "A page slice of one group's rows, for lazy load + 'show more'" javadoc) and its now-unused `import org.springframework.data.domain.Pageable;` if nothing else in the file uses `Pageable` (check first — `grep -n "Pageable" src/main/java/com/robsartin/setlistscout/catalog/ArtistRepository.java` should show only that one method + its import after this deletion is needed; if it shows nothing else, remove the import too).
 
@@ -1027,8 +1026,8 @@ Expected: `ADR compliance check passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/robsartin/setlistscout/review/ReviewController.java src/main/java/com/robsartin/setlistscout/catalog/ArtistRepository.java src/test/java/com/robsartin/setlistscout/web/CandidatesPageRenderTest.java
-git commit -m "#148: remove dead lazy-load rows endpoint + paginated repo overload; capstone multi-group coverage"
+git add src/main/java/com/robsartin/setlistscout/catalog/ArtistRepository.java src/test/java/com/robsartin/setlistscout/web/CandidatesPageRenderTest.java
+git commit -m "#148: remove dead paginated repo overload; capstone multi-group coverage"
 ```
 
 ---
