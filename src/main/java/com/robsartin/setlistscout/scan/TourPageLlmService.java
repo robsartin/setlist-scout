@@ -89,7 +89,13 @@ public class TourPageLlmService {
                     result.add(new ExtractedShow(date, venue, city));
                 }
             } catch (Exception e) {
-                // skip lines that aren't a well-formed "date | venue | city"
+                // skip lines that aren't a well-formed "date | venue | city"; one bad line among
+                // possibly many good ones, not a whole-request failure, so DEBUG rather than WARN.
+                log.atDebug().setCause(e)
+                        .addKeyValue("source", "tour-llm")
+                        .addKeyValue("artist", artistName)
+                        .addKeyValue("line", line)
+                        .log("malformed tour-page line, skipping");
             }
         }
         log.atDebug().addKeyValue("source", "tour-llm").addKeyValue("artist", artistName)
