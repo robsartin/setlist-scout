@@ -109,6 +109,13 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("/artists/candidates/group");
         assertThat(body).doesNotContain("@{");
 
+        // #148 fix round 4: hx-disabled-elt="this" targeted the <form>, where `disabled` isn't a
+        // valid HTML attribute (browsers silently ignore it, so the buttons never actually
+        // disabled). Assert the real fix -- the form's own submit button -- rendered, and that
+        // the dead value hasn't regressed back in.
+        assertThat(body).contains("hx-disabled-elt=\"find button\"");
+        assertThat(body).doesNotContain("hx-disabled-elt=\"this\"");
+
         // Minor 4 (#148 fix round 3): a skip link past the ~294-entry sidebar to the focused group,
         // for keyboard users -- see app.css's .visually-hidden:focus and the id="current-group"
         // skip target below.

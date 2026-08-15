@@ -68,6 +68,15 @@ fieldset.decision label { margin-right:.6rem; white-space:nowrap; }
 button, .btn { font:inherit; font-weight:600; cursor:pointer; border-radius:8px; padding:.4rem .8rem; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); font-size:.9rem; }
 button:hover, .btn:hover { border-color:var(--primary); }
 button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+/* #148 fix round 4: hx-disabled-elt="find button" (candidates.html) sets the `disabled` attribute
+   during a request; without this rule the base button rule's cursor:pointer and the .btn-good/
+   .btn-bad tint colors would still look fully active. Token-based color swap rather than opacity:
+   opacity blends both text and background toward whatever sits behind the button, and .btn-good/
+   .btn-bad are already close to the 4.5:1 AA floor at full strength (4.65:1 / 5.34:1 light-mode) --
+   any opacity strong enough to read as "disabled" pushes them under AA. Swapping to --muted text
+   on a flat --surface-2 background is AA-safe regardless of theme or which surface the button
+   sits on (verified >=5.6:1 for every button/background pairing this page uses, both themes). */
+button:disabled, .btn:disabled { color:var(--muted); background:var(--surface-2); cursor:not-allowed; }
 .btn-primary { background:var(--primary); color:var(--on-primary); border-color:var(--primary); }
 .btn-primary:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
 .btn-good { color:var(--good); background:var(--good-bg); border-color:transparent; }
