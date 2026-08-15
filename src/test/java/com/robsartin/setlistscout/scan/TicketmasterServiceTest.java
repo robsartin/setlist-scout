@@ -1,5 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import com.robsartin.setlistscout.service.LogCapture;
 import com.robsartin.setlistscout.service.TestAppProperties;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -103,6 +106,33 @@ class TicketmasterServiceTest {
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("should log a DEBUG count=0 line when _embedded is missing, since that's a legitimate zero-result search")
+    void shouldLogDebugCountZeroWhenNoEmbedded() {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
+
+        try (LogCapture logs = LogCapture.attachAt(TicketmasterService.class, Level.DEBUG)) {
+            List<Show> shows = service.searchShows("Dawes", "78701", 50,
+                    LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+            assertThat(shows).isEmpty();
+
+            ILoggingEvent debugEvent = logs.events().stream()
+                    .filter(e -> e.getLevel() == Level.DEBUG)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "expected a DEBUG log for the zero-result search"));
+            String loggedCount = debugEvent.getKeyValuePairs().stream()
+                    .filter(kv -> "count".equals(kv.key))
+                    .findFirst()
+                    .map(kv -> String.valueOf(kv.value))
+                    .orElseThrow(() -> new AssertionError(
+                            "expected a 'count' key-value on the DEBUG log"));
+
+            assertThat(loggedCount).isEqualTo("0");
+        }
     }
 
     @Test
