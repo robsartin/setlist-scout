@@ -87,16 +87,20 @@ public class ReviewController {
     @PostMapping("/{id}/approve")
     public String approve(@PathVariable Long id, @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           Model model) {
-        activationService.changeStatus(id, currentUser.email(), ArtistStatus.APPROVED);
-        return rowResult(hxRequest, model);
+        String owner = currentUser.email();
+        String via = artistRepository.findByIdAndOwner(id, owner).map(Artist::getDiscoveredVia).orElse(null);
+        activationService.changeStatus(id, owner, ArtistStatus.APPROVED);
+        return actionResult(hxRequest, model, via);
     }
 
     /** Reject one candidate. Owner-scoped via changeStatus (no-op if this owner doesn't own {@code id}). */
     @PostMapping("/{id}/reject")
     public String reject(@PathVariable Long id, @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                          Model model) {
-        activationService.changeStatus(id, currentUser.email(), ArtistStatus.REJECTED);
-        return rowResult(hxRequest, model);
+        String owner = currentUser.email();
+        String via = artistRepository.findByIdAndOwner(id, owner).map(Artist::getDiscoveredVia).orElse(null);
+        activationService.changeStatus(id, owner, ArtistStatus.REJECTED);
+        return actionResult(hxRequest, model, via);
     }
 
     /**
@@ -115,13 +119,13 @@ public class ReviewController {
             status = ArtistStatus.REJECTED;
         } else {
             // Malformed decision: do nothing rather than silently defaulting to reject.
-            return actionResult(hxRequest, model);
+            return actionResult(hxRequest, model, via);
         }
         for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
                 currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type)) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);
         }
-        return actionResult(hxRequest, model);
+        return actionResult(hxRequest, model, via);
     }
 
     /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
@@ -148,7 +152,7 @@ public class ReviewController {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
         }
-        return actionResult(hxRequest, model);
+        return actionResult(hxRequest, model, null);
     }
 
     /** Reject everything still pending in one action -- clears out a noisy batch after picking the keepers. */
@@ -158,15 +162,16 @@ public class ReviewController {
         for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
         }
-        return actionResult(hxRequest, model);
+        return actionResult(hxRequest, model, null);
     }
 
     /** Manually request expansion: mark all of this owner's expand jobs due-now (the poller drains them). */
     @PostMapping("/expand-now")
-    public String expandNow(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+    public String expandNow(@RequestParam(required = false) String via,
+                            @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
         expandJobRepository.redueAll(currentUser.email(), java.time.Instant.now());
-        return actionResult(hxRequest, model);
+        return actionResult(hxRequest, model, via);
     }
 
     /**
@@ -174,6 +179,9 @@ public class ReviewController {
      * Reuses the exact same redueAll mechanism as the self-service {@link #expandNow} above, just
      * parameterized by {@code targetOwner} instead of {@code currentUser.email()}. See
      * {@link #requireAdmin()} and {@code ShowController#requireAdmin} for the shared rationale.
+     * The response re-renders the ADMIN's own Candidates page (not the target owner's), so {@code
+     * via} is {@code null} -- there's no "current group" carried across a cross-account action, it
+     * always falls back to the admin's own biggest-first group via {@link #populateCandidates}.
      */
     @PostMapping("/admin/expand-now")
     public String adminExpandNow(@RequestParam String targetOwner,
@@ -181,7 +189,7 @@ public class ReviewController {
                                  Model model) {
         requireAdmin();
         expandJobRepository.redueAll(targetOwner, java.time.Instant.now());
-        return actionResult(hxRequest, model);
+        return actionResult(hxRequest, model, null);
     }
 
     /**
@@ -203,29 +211,23 @@ public class ReviewController {
     }
 
     /**
-     * Result for a per-item approve/reject: htmx request -&gt; a bare empty fragment swapped in for
-     * the row itself (its form targets {@code closest .cand} with {@code hx-swap="outerHTML"}, so
-     * the row simply disappears); otherwise a normal redirect to the Candidates page (no-JS
-     * fallback). The group's summary count and the nav badge re-sync on that next full page load --
-     * acceptable for v1; an htmx out-of-band count update is a follow-up, not built now.
+     * Shared response for every status-changing action on this page (issue #148): re-resolves
+     * against {@code via} (the group the action just happened in, or {@code null} for a
+     * whole-owner action) via {@link #populateCandidates} -- which either keeps that group current
+     * (rows remain) or auto-advances to the next biggest (it's now empty), and populates the model
+     * either way. htmx request -&gt; the {@code candidatesApp} fragment (both the group and sidebar
+     * regions, always in sync, never stale). Non-JS fallback -&gt; redirect back to
+     * {@code /artists/candidates}, carrying the resolved via as a query param so a full page load
+     * lands in the same place htmx would have.
      */
-    private String rowResult(String hxRequest, Model model) {
+    private String actionResult(String hxRequest, Model model, String via) {
+        String resolvedVia = populateCandidates(model, via);
         if (hxRequest != null) {
-            return "candidates :: rowDone";
+            return "candidates :: candidatesApp";
         }
-        return "redirect:/artists/candidates";
-    }
-
-    /**
-     * Result for a per-group bulk or global approve/reject: htmx request -&gt; swap just the
-     * Candidates page's global bar (its pendingCount attribute comes from {@link NavModelAdvice},
-     * already applied to the model for every request); otherwise a normal redirect to the Candidates
-     * page (no-JS fallback). The group's own summary count re-syncs on that next full page load --
-     * acceptable for v1; an htmx out-of-band count update is a follow-up, not built now.
-     */
-    private String actionResult(String hxRequest, Model model) {
-        if (hxRequest != null) {
-            return "candidates :: globalBar";
+        if (resolvedVia != null) {
+            return "redirect:/artists/candidates?via="
+                    + java.net.URLEncoder.encode(resolvedVia, java.nio.charset.StandardCharsets.UTF_8);
         }
         return "redirect:/artists/candidates";
     }

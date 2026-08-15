@@ -89,11 +89,11 @@ class ReviewControllerTest {
     }
 
     @Test
-    @DisplayName("approve (htmx) delegates to the activation service and returns a bare row-removal fragment")
-    void approveHtmxReturnsRowDoneFragment() {
+    @DisplayName("approve (htmx) delegates to the activation service and returns the Candidates app fragment")
+    void approveHtmxReturnsCandidatesAppFragment() {
         String view = controller.approve(1L, "hx", new ConcurrentModel());
 
-        assertThat(view).isEqualTo("candidates :: rowDone");
+        assertThat(view).isEqualTo("candidates :: candidatesApp");
         verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
     }
 
@@ -124,7 +124,7 @@ class ReviewControllerTest {
     }
 
     @Test
-    @DisplayName("reviewGroup (htmx) rejects every pending row in that group and returns the global bar fragment")
+    @DisplayName("reviewGroup (htmx) rejects every pending row in that group and returns the Candidates app fragment")
     void reviewGroupHtmxRejectsGroupAndReturnsFragment() {
         Artist member1 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
         when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
@@ -134,7 +134,7 @@ class ReviewControllerTest {
         String view = controller.reviewGroup("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION,
                 "reject", "hx", new ConcurrentModel());
 
-        assertThat(view).isEqualTo("candidates :: globalBar");
+        assertThat(view).isEqualTo("candidates :: candidatesApp");
         verify(activationService).changeStatus(1L, OWNER, ArtistStatus.REJECTED);
     }
 
@@ -146,7 +146,11 @@ class ReviewControllerTest {
 
         assertThat(view).isEqualTo("redirect:/artists/candidates");
         verify(activationService, org.mockito.Mockito.never()).changeStatus(any(), any(), any());
-        org.mockito.Mockito.verifyNoInteractions(artistRepository);
+        // Not verifyNoInteractions: actionResult now always re-resolves the current group (for
+        // auto-advance) via populateCandidates, which legitimately reads countByStatusGroupedByViaAndSource
+        // even on a no-op decision. What still must never happen is the mutation loop's own query.
+        verify(artistRepository, org.mockito.Mockito.never()).findByOwnerAndStatusAndDiscoveredViaAndSource(
+                any(String.class), any(ArtistStatus.class), any(String.class), any(ArtistSource.class));
     }
 
     @Test
@@ -170,18 +174,18 @@ class ReviewControllerTest {
     @Test
     @DisplayName("expandNow re-dues the owner's expand jobs and redirects to Candidates (no-JS fallback)")
     void expandNowRedirects() {
-        String view = controller.expandNow(null, new ConcurrentModel());
+        String view = controller.expandNow(null, null, new ConcurrentModel());
 
         assertThat(view).isEqualTo("redirect:/artists/candidates");
         verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
     }
 
     @Test
-    @DisplayName("expandNow (htmx) re-dues the owner's expand jobs and returns the Candidates global bar fragment")
-    void expandNowHtmxReturnsGlobalBarFragment() {
-        String view = controller.expandNow("hx", new ConcurrentModel());
+    @DisplayName("expandNow (htmx) re-dues the owner's expand jobs and returns the Candidates app fragment")
+    void expandNowHtmxReturnsCandidatesAppFragment() {
+        String view = controller.expandNow(null, "hx", new ConcurrentModel());
 
-        assertThat(view).isEqualTo("candidates :: globalBar");
+        assertThat(view).isEqualTo("candidates :: candidatesApp");
         verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
     }
 }

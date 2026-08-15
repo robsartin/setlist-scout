@@ -22,9 +22,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Drives the real per-item / per-group candidate review actions (approve/reject) against a booted
- * context + Postgres, signed in as a test user, and checks owner isolation + the no-JS fallback.
- * Runs in CI (needs Docker).
+ * Drives the real per-item candidate review actions (approve/reject) against a booted context +
+ * Postgres, signed in as a test user: status changes, owner isolation, and the auto-advance
+ * response shape (issue #148). Runs in CI (needs Docker).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -64,22 +64,6 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void approveHtmxReturnsBareFragment() throws Exception {
-        String owner = "actions-approve-htmx@example.com";
-        Long id = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
-
-        String body = mockMvc.perform(post("/artists/{id}/approve", id)
-                        .header("HX-Request", "true")
-                        .with(csrf())
-                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).doesNotContain("<head").doesNotContain("topbar");
-        assertThat(artistRepository.findById(id).orElseThrow().getStatus()).isEqualTo(ArtistStatus.APPROVED);
-    }
-
-    @Test
     void approveDoesNotTouchAnotherOwnersArtist() throws Exception {
         String owner = "actions-approve-owner-a@example.com";
         String otherOwner = "actions-approve-owner-b@example.com";
@@ -107,19 +91,67 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void rejectHtmxReturnsBareFragment() throws Exception {
-        String owner = "actions-reject-htmx@example.com";
-        Long id = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+    void approvingTheLastRowInAGroupsOnlySectionAutoAdvancesToTheNextGroup() throws Exception {
+        String owner = "actions-auto-advance@example.com";
+        // Wilco is bigger, so it's the initial "current" group; Tom Petty has exactly one row.
+        for (int i = 1; i <= 3; i++) {
+            savePending(owner, "Wilco Member " + i, ArtistSource.MEMBER_EXPANSION, WILCO);
+        }
+        Long lastTomPettyRow = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
 
-        String body = mockMvc.perform(post("/artists/{id}/reject", id)
+        // Land on Tom Petty specifically (it's not the biggest, so this proves `via` navigation first).
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/artists/candidates").param("via", TOM_PETTY)
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk());
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", lastTomPettyRow)
                         .header("HX-Request", "true")
                         .with(csrf())
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
+        // Tom Petty had only that one row -- clearing it empties the group, so the response is the
+        // NEXT group (Wilco, the only one left) shown in full, not a bare empty swap.
+        assertThat(body).contains(WILCO);
+        assertThat(body).contains("Wilco Member 1<");
+        assertThat(body).doesNotContain(TOM_PETTY);
         assertThat(body).doesNotContain("<head").doesNotContain("topbar");
-        assertThat(artistRepository.findById(id).orElseThrow().getStatus()).isEqualTo(ArtistStatus.REJECTED);
+    }
+
+    @Test
+    void approvingOneRowWhenOthersRemainInTheSameSectionStaysOnTheCurrentGroup() throws Exception {
+        String owner = "actions-stay-put@example.com";
+        Long member1 = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Benmont Tench", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", member1)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Benmont Tench is still pending in the same group -- current group unchanged, just refreshed.
+        assertThat(body).contains(TOM_PETTY);
+        assertThat(body).contains("Benmont Tench");
+        assertThat(body).doesNotContain("Mike Campbell");
+    }
+
+    @Test
+    void clearingTheLastGroupShowsTheRealEmptyState() throws Exception {
+        String owner = "actions-clear-last@example.com";
+        Long onlyRow = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/reject", onlyRow)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Nothing pending. Run expansion to find more.");
     }
 
     @Test
@@ -145,25 +177,6 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void groupApproveHtmxReturnsBareFragment() throws Exception {
-        String owner = "actions-group-approve-htmx@example.com";
-        Long member1 = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
-
-        String body = mockMvc.perform(post("/artists/candidates/group")
-                        .param("via", TOM_PETTY)
-                        .param("type", "MEMBER_EXPANSION")
-                        .param("decision", "approve")
-                        .header("HX-Request", "true")
-                        .with(csrf())
-                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-
-        assertThat(body).doesNotContain("<head").doesNotContain("topbar");
-        assertThat(artistRepository.findById(member1).orElseThrow().getStatus()).isEqualTo(ArtistStatus.APPROVED);
-    }
-
-    @Test
     void groupActionOnlyTouchesRequestingOwnersRows() throws Exception {
         String owner = "actions-group-owner-a@example.com";
         String otherOwner = "actions-group-owner-b@example.com";
@@ -180,5 +193,78 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
 
         assertThat(artistRepository.findById(mine).orElseThrow().getStatus()).isEqualTo(ArtistStatus.APPROVED);
         assertThat(artistRepository.findById(theirs).orElseThrow().getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+    }
+
+    @Test
+    void groupBulkRejectThatEmptiesTheWholeGroupAutoAdvances() throws Exception {
+        String owner = "actions-group-bulk-advance@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY); // Tom Petty's only row
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+        savePending(owner, "Wilco Member 2", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        String body = mockMvc.perform(post("/artists/candidates/group")
+                        .param("via", TOM_PETTY)
+                        .param("type", "MEMBER_EXPANSION")
+                        .param("decision", "reject")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains(WILCO);
+        assertThat(body).doesNotContain(TOM_PETTY);
+    }
+
+    @Test
+    void globalApproveAllThatEmptiesEverythingShowsRealEmptyState() throws Exception {
+        String owner = "actions-global-approve-all@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        String body = mockMvc.perform(post("/artists/approve-all-pending")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Nothing pending. Run expansion to find more.");
+    }
+
+    @Test
+    void globalRejectAllOnlyTouchesThisOwnersRows() throws Exception {
+        String owner = "actions-global-reject-owner-a@example.com";
+        String otherOwner = "actions-global-reject-owner-b@example.com";
+        Long mine = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        Long theirs = savePending(otherOwner, "Someone Else", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        mockMvc.perform(post("/artists/reject-all-pending")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().is3xxRedirection());
+
+        assertThat(artistRepository.findById(mine).orElseThrow().getStatus()).isEqualTo(ArtistStatus.REJECTED);
+        assertThat(artistRepository.findById(theirs).orElseThrow().getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+    }
+
+    @Test
+    void expandNowKeepsTheCurrentGroupInView() throws Exception {
+        String owner = "actions-expand-now@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        // Land on Tom Petty specifically, then run expansion -- nothing about pending rows changed
+        // (expand-now only re-dues background jobs), so the same group should still be current.
+        String body = mockMvc.perform(post("/artists/expand-now")
+                        .param("via", TOM_PETTY)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains(TOM_PETTY);
+        assertThat(body).contains("Mike Campbell");
     }
 }
