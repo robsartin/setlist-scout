@@ -4,7 +4,9 @@ Personal service: expands a seed band list (members, side projects, similar
 artists), searches for their upcoming shows near Austin, and shows them on a
 single sortable, Google-login-protected web page.
 
-See [docs/adr/](docs/adr/README.md) for the reasoning behind each major design decision.
+See [docs/architecture-introduction.md](docs/architecture-introduction.md) for a guided tour
+of how the modules, jobs, and events fit together, and [docs/adr/](docs/adr/README.md) for
+the reasoning behind each major design decision.
 
 ## How it works
 
