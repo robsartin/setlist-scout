@@ -2,19 +2,24 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.PollerProperties;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.observability.Correlation;
+import com.robsartin.setlistscout.shared.observability.CorrelationIds;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -233,5 +238,63 @@ class ScanPollerTest {
         verify(scanUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE);
         verify(scanJobRepository).save(ok);
         assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+    }
+
+    // -- #135: correlation id scoped around the ScanUnitRunner.run call --------------------------
+
+    @Test
+    @DisplayName("#135: a valid cid is in MDC for the duration of the unit-runner call, and cleared once tick() returns")
+    void unitRunnerCallCarriesAValidCidClearedAfterTick() {
+        ScanJob job = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        AtomicReference<String> cidDuring = new AtomicReference<>();
+        when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE)).thenAnswer(invocation -> {
+            cidDuring.set(MDC.get(Correlation.CID));
+            return 0;
+        });
+
+        poller.tick();
+
+        assertThat(CorrelationIds.isValid(cidDuring.get()))
+                .as("a valid cid was visible to the unit runner while it ran").isTrue();
+        assertThat(MDC.get(Correlation.CID)).as("cleared once tick() returns").isNull();
+    }
+
+    @Test
+    @DisplayName("#135: MDC is cleared after tick() returns even when the unit runner throws")
+    void unitRunnerExceptionStillClearsMdcAfterTick() {
+        ScanJob job = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        AtomicReference<String> cidDuring = new AtomicReference<>();
+        when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE)).thenAnswer(invocation -> {
+            cidDuring.set(MDC.get(Correlation.CID));
+            throw new RuntimeException("boom");
+        });
+
+        poller.tick();
+
+        assertThat(CorrelationIds.isValid(cidDuring.get()))
+                .as("a valid cid was visible to the unit runner even on the failing path").isTrue();
+        assertThat(MDC.get(Correlation.CID))
+                .as("the job-failure path must not leak a stale cid to whatever runs next on this thread")
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("#135: two jobs claimed in the same tick each get a different cid, not one reused")
+    void eachClaimedJobGetsItsOwnCid() {
+        ScanJob first = job(0);
+        ScanJob second = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(first, second));
+        List<String> observedCids = new ArrayList<>();
+        when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE)).thenAnswer(invocation -> {
+            observedCids.add(MDC.get(Correlation.CID));
+            return 0;
+        });
+
+        poller.tick();
+
+        assertThat(observedCids).hasSize(2);
+        assertThat(observedCids.get(0)).isNotEqualTo(observedCids.get(1));
     }
 }

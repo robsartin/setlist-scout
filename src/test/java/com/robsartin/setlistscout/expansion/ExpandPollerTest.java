@@ -6,26 +6,32 @@ import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.observability.Correlation;
+import com.robsartin.setlistscout.shared.observability.CorrelationIds;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -237,5 +243,66 @@ class ExpandPollerTest {
         verify(expandUnitRunner, times(2)).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
         verify(expandJobRepository).save(ok);
         assertThat(ok.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+    }
+
+    // -- #135: correlation id scoped around the ExpandUnitRunner.run call ------------------------
+
+    @Test
+    @DisplayName("#135: a valid cid is in MDC for the duration of the unit-runner call, and cleared once tick() returns")
+    void unitRunnerCallCarriesAValidCidClearedAfterTick() {
+        ExpandJob job = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        AtomicReference<String> cidDuring = new AtomicReference<>();
+        doAnswer(invocation -> {
+            cidDuring.set(MDC.get(Correlation.CID));
+            return null;
+        }).when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+
+        poller.tick();
+
+        assertThat(CorrelationIds.isValid(cidDuring.get()))
+                .as("a valid cid was visible to the unit runner while it ran").isTrue();
+        assertThat(MDC.get(Correlation.CID)).as("cleared once tick() returns").isNull();
+    }
+
+    @Test
+    @DisplayName("#135: MDC is cleared after tick() returns even when the unit runner throws")
+    void unitRunnerExceptionStillClearsMdcAfterTick() {
+        ExpandJob job = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        AtomicReference<String> cidDuring = new AtomicReference<>();
+        doAnswer(invocation -> {
+            cidDuring.set(MDC.get(Correlation.CID));
+            throw new RuntimeException("boom");
+        }).when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+
+        poller.tick();
+
+        assertThat(CorrelationIds.isValid(cidDuring.get()))
+                .as("a valid cid was visible to the unit runner even on the failing path").isTrue();
+        assertThat(MDC.get(Correlation.CID))
+                .as("the job-failure path must not leak a stale cid to whatever runs next on this thread")
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("#135: two jobs claimed in the same tick each get a different cid, not one reused")
+    void eachClaimedJobGetsItsOwnCid() {
+        ExpandJob first = job(0);
+        ExpandJob second = job(0);
+        when(expandJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(first, second));
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(artist()));
+        List<String> observedCids = new ArrayList<>();
+        doAnswer(invocation -> {
+            observedCids.add(MDC.get(Correlation.CID));
+            return null;
+        }).when(expandUnitRunner).run(OWNER, ARTIST_ID, SOURCE, ARTIST_NAME);
+
+        poller.tick();
+
+        assertThat(observedCids).hasSize(2);
+        assertThat(observedCids.get(0)).isNotEqualTo(observedCids.get(1));
     }
 }
