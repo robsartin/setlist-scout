@@ -91,7 +91,12 @@ class AdminCrossAccountActionsTest extends AbstractPostgresIntegrationTest {
     void adminScanNowRejectsNonAdminAndLeavesTargetOwnersJobUntouched() throws Exception {
         String targetOwner = "admin-scan-target-a@example.com";
         ScanJob seeded = seedScanJob(targetOwner);
-        Instant originalNextDueAt = seeded.getNextDueAt();
+        // Re-fetch rather than use seeded.getNextDueAt() directly: Postgres timestamp columns are
+        // microsecond precision, but a JVM Instant.now() can carry nanosecond precision (observed
+        // on CI's Linux runners, not locally on macOS) -- comparing the pre-round-trip value
+        // against a post-round-trip re-fetch would spuriously fail on precision alone, not because
+        // anything actually changed. Both sides of the equality below must come from the DB.
+        Instant originalNextDueAt = scanJobRepository.findById(seeded.getId()).orElseThrow().getNextDueAt();
 
         mockMvc.perform(post("/admin/scan-now")
                         .param("targetOwner", targetOwner)
@@ -143,7 +148,9 @@ class AdminCrossAccountActionsTest extends AbstractPostgresIntegrationTest {
     void adminExpandNowRejectsNonAdminAndLeavesTargetOwnersJobUntouched() throws Exception {
         String targetOwner = "admin-expand-target-a@example.com";
         ExpandJob seeded = seedExpandJob(targetOwner);
-        Instant originalNextDueAt = seeded.getNextDueAt();
+        // See the identical comment in adminScanNowRejectsNonAdminAndLeavesTargetOwnersJobUntouched:
+        // must re-fetch to compare DB-precision-rounded values on both sides.
+        Instant originalNextDueAt = expandJobRepository.findById(seeded.getId()).orElseThrow().getNextDueAt();
 
         mockMvc.perform(post("/artists/admin/expand-now")
                         .param("targetOwner", targetOwner)
