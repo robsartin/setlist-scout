@@ -1,7 +1,9 @@
 package com.robsartin.setlistscout.catalog;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -48,11 +50,32 @@ public class ArtistSeedService {
      * by name, and is reactivated to SEED through {@link ArtistActivationService#changeStatus} --
      * never a direct repository save -- so the activation event fires and the artist's scan/expand
      * jobs get enqueued exactly as they would for a brand-new seed.
+     * <p>
+     * The "not found" branch is a check-then-insert against the matcher above, so two
+     * near-simultaneous calls for the same brand-new name can both pass that pre-check and then
+     * race for real at the DB's {@code artist (owner, name)} unique constraint (issue #133; hit in
+     * production on "Nebraska"). That race is resolved the same way {@code
+     * RelationDiscoveredListener#resolveOrCreateToArtist} resolves the equivalent
+     * expansion-discovery race: {@link ArtistRepository#insertIfAbsent} (a DB-level {@code INSERT
+     * ... ON CONFLICT (owner, name) DO NOTHING}, never a raw {@code save()}) followed by {@link
+     * ArtistRepository#findByOwnerAndName} to resolve the row. {@code insertIfAbsent}'s int return
+     * (rows actually inserted) is how this call tells whether IT won the race: only the winner
+     * calls {@link ArtistActivationService#onSeedCreated}; see that branch below for why the loser
+     * must not. This method is {@code @Transactional} because {@code insertIfAbsent}, like every
+     * other {@code insertIfAbsent} in this codebase, needs an ambient transaction supplied by its
+     * caller -- and because that also satisfies the event-publish invariant (ADR-0024): {@code
+     * onSeedCreated}'s publish only reaches the AFTER_COMMIT listeners if it happens inside a
+     * transaction that goes on to commit.
      *
      * @return {@code true} if the call resulted in a newly-active SEED artist for the owner (a
-     * fresh row, or an existing inactive row reactivated); {@code false} if it was skipped
-     * (blank/comment) or the name already matched an artist that was already active.
+     * fresh row this call itself inserted, or an existing inactive row this call reactivated);
+     * {@code false} if it was skipped (blank/comment), the name already matched an artist that was
+     * already active, or -- the race case -- a concurrent call won the insert for this exact
+     * (owner, name) first. In that last case the name IS now a seed, just not because of this
+     * call; from this call's point of view "did I cause a new seed" is correctly "no", the same
+     * answer as every other case where it didn't.
      */
+    @Transactional
     public boolean addSeedIfNew(String owner, String rawName) {
         String name = rawName == null ? "" : rawName.trim();
         if (name.isEmpty() || name.startsWith("#")) {
@@ -69,9 +92,25 @@ public class ArtistSeedService {
             return true;
         }
 
-        Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
-        artist.setOwner(owner);
-        artistRepository.save(artist);
+        int inserted = artistRepository.insertIfAbsent(owner, name, ArtistSource.SEED_LIST.name(),
+                ArtistStatus.SEED.name(), null, null, Instant.now());
+        if (inserted == 0) {
+            // Race loser (issue #133): between this call's matcher pre-check above and this
+            // call's own insertIfAbsent, a concurrent call for this exact (owner, name) already
+            // committed its row -- insertIfAbsent's ON CONFLICT made this call's insert a silent
+            // no-op instead of throwing. That other call already has (or will have) its own
+            // resolved Artist and calls onSeedCreated for it; doing so again here would
+            // double-publish ArtistActivated for the SAME artist and double-enqueue its scan/expand
+            // jobs for no reason (the enqueue side is itself idempotent, but there is no reason to
+            // fire the event twice for one artist). So this call is done: it did not create
+            // anything, and reports that honestly.
+            return false;
+        }
+
+        Artist artist = artistRepository.findByOwnerAndName(owner, name)
+                .orElseThrow(() -> new IllegalStateException(
+                        "artist row missing immediately after this call's own insertIfAbsent for owner="
+                                + owner + " name=\"" + name + "\""));
         activationService.onSeedCreated(artist);
         return true;
     }
