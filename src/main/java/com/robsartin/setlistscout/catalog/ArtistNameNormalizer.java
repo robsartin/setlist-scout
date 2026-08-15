@@ -16,8 +16,14 @@ import java.util.Locale;
  * first profiling pass stripped non-ASCII characters and collapsed every all-Hebrew or
  * all-Japanese name to an empty string, inflating a true count of 3 pairs to a false 13 -- this
  * normalizer must preserve non-ASCII text so two different non-Latin names never collide.
+ * <p>
+ * Public (not package-private): also reused by the {@code db.migration.V13__merge_duplicate_variant_artists}
+ * Flyway Java migration (issue #123), which merges the ~57 duplicate-variant artist groups already
+ * live in prod. That migration deliberately calls this same method rather than re-implementing the
+ * folding rules in SQL, so there is exactly one definition of "same name" for both the live guard
+ * and the historical cleanup.
  */
-final class ArtistNameNormalizer {
+public final class ArtistNameNormalizer {
 
     private ArtistNameNormalizer() {
     }
@@ -28,7 +34,7 @@ final class ArtistNameNormalizer {
      * with {@link Locale#ROOT} (not the default locale, so this is stable across JVMs/deployments
      * regardless of the server's locale -- avoids the Turkish-I class of bugs).
      */
-    static String normalize(String name) {
+    public static String normalize(String name) {
         if (name == null) {
             return "";
         }
