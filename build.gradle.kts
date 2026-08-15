@@ -81,4 +81,12 @@ tasks.bootJar {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Gradle defaults to 1 -- all test classes run serially in one JVM. 23 of ~62 classes boot a
+    // real Testcontainers Postgres + Spring context (AbstractPostgresIntegrationTest), which
+    // dominates the ~11.5min wall time. Forking multiple JVMs gives each its own independent
+    // container, so this doesn't reintroduce the connection-pool contention that made a single
+    // SHARED container across cached contexts unworkable (see AbstractPostgresIntegrationTest's
+    // class javadoc). Set to 4, not the host's full core count: Docker Desktop here has ~7.75GB
+    // memory allocated and is shared with other concurrent build processes on this machine.
+    maxParallelForks = 4
 }
