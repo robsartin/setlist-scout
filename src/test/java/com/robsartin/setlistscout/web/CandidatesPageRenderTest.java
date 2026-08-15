@@ -91,6 +91,29 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains(TOM_PETTY);
         assertThat(body).doesNotContain("Mike Campbell");
         assertThat(body).doesNotContain("Jackson Browne");
+
+        // Repo-wide, nothing else asserts a rendered URL or htmx attribute. CLAUDE.md documents
+        // hx-get="@{/x}" shipping a literal "@{/x}" (a missing th: prefix) as a repeat-offender
+        // gotcha, and an instance of exactly that bug class already shipped on this branch once
+        // (the broken sidebar nav) without any test catching it -- the sidebar test drives the
+        // endpoint directly with a header, so it passes even if the template ships a literal
+        // "@{...}". Assert the actual resolved URLs are present, and that no unresolved Thymeleaf
+        // expression leaks into the HTML at all.
+        assertThat(body).contains("/artists/candidates?via=");
+        assertThat(Pattern.compile("/artists/\\d+/approve").matcher(body).find())
+                .as("should contain a rendered per-row approve URL: %s", body)
+                .isTrue();
+        assertThat(Pattern.compile("/artists/\\d+/reject").matcher(body).find())
+                .as("should contain a rendered per-row reject URL: %s", body)
+                .isTrue();
+        assertThat(body).contains("/artists/candidates/group");
+        assertThat(body).doesNotContain("@{");
+
+        // Minor 4 (#148 fix round 3): a skip link past the ~294-entry sidebar to the focused group,
+        // for keyboard users -- see app.css's .visually-hidden:focus and the id="current-group"
+        // skip target below.
+        assertThat(body).contains("href=\"#current-group\"");
+        assertThat(body).contains("id=\"current-group\"");
     }
 
     @Test
@@ -145,6 +168,27 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void historyRestoreRequestReturnsTheFullPageNotTheBareFragment() throws Exception {
+        String owner = "candidates-history-restore@example.com";
+        seedTwoGroups(owner);
+
+        // On a history-cache MISS (production has ~294 sidebar groups; vendored htmx's
+        // historyCacheSize is 10), htmx re-issues the sidebar link's GET with BOTH HX-Request AND
+        // HX-History-Restore-Request set, then does swapInnerHTML(<body>, response) -- it needs the
+        // FULL page here, unlike a plain HX-Request GET (see htmxGetReturnsTheBareFragmentNotThe
+        // FullPage above), or the topbar/nav/h1/page-sub get wiped out until a manual reload.
+        String body = mockMvc.perform(get("/artists/candidates").param("via", TOM_PETTY)
+                        .header("HX-Request", "true")
+                        .header("HX-History-Restore-Request", "true")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("topbar");
+        assertThat(body).contains("<head");
+    }
+
+    @Test
     void noPendingCandidatesShowsEmptyStateNotABrokenGroup() throws Exception {
         String owner = "candidates-empty@example.com";
 
@@ -172,6 +216,58 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void requestingAnotherOwnersRealGroupNameAsViaShowsOwnGroupNotTheirs() throws Exception {
+        // Pins the actual security property on the render path: unlike candidatesAreIsolatedByOwner
+        // (no via at all) and viaParamForAGroupWithNoPendingRowsFallsBackToBiggest (a via that
+        // doesn't exist for ANY owner), this uses a via that's a REAL, currently-pending group --
+        // just for a different owner. CandidateGroups.resolve must fall back to this owner's own
+        // biggest group, never render the other owner's rows.
+        String ownerA = "candidates-cross-owner-a@example.com";
+        String ownerB = "candidates-cross-owner-b@example.com";
+        seedTwoGroups(ownerA);
+        savePending(ownerB, "Bob Only Act", ArtistSource.SIMILAR_EXPANSION, "Dawes");
+
+        String body = mockMvc.perform(get("/artists/candidates").param("via", TOM_PETTY)
+                        .with(oidcLogin().idToken(t -> t.claim("email", ownerB))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Dawes");
+        assertThat(body).contains("Bob Only Act");
+        assertThat(body).doesNotContain(TOM_PETTY);
+        assertThat(body).doesNotContain(WILCO);
+        assertThat(body).doesNotContain("Mike Campbell");
+        assertThat(body).doesNotContain("Jackson Browne");
+    }
+
+    @Test
+    void bulkClearingOneRelationTypeLeavesTheGroupCurrentWhenAnotherTypeIsStillPending() throws Exception {
+        // The spec explicitly says a partial bulk-clear must NOT auto-advance. Existing coverage
+        // only had the emptying case (via ReviewControllerTest's mocked htmx assertion) and a
+        // DB-status-only non-htmx test -- nothing rendered the SAME group afterward with one
+        // relation section gone and another still intact.
+        String owner = "candidates-partial-bulk@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Benmont Tench", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Jackson Browne", ArtistSource.SIMILAR_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/candidates/group")
+                        .param("via", TOM_PETTY)
+                        .param("type", "MEMBER_EXPANSION")
+                        .param("decision", "reject")
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Still the SAME current group -- Similar survives, Members is gone, no auto-advance.
+        assertThat(body).contains(TOM_PETTY);
+        assertThat(body).contains("Jackson Browne");
+        assertThat(body).doesNotContain("Mike Campbell");
+        assertThat(body).doesNotContain("Benmont Tench");
+    }
+
+    @Test
     void clearingEveryGroupOneByOneAutoAdvancesThroughAllOfThemToTheRealEmptyState() throws Exception {
         String owner = "candidates-capstone@example.com";
         Long tomPettyRow = artistRepository.save(pendingArtist(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY)).getId();
@@ -194,13 +290,35 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                         .header("HX-Request", "true").with(csrf())
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(afterSecond).doesNotContain(TOM_PETTY).doesNotContain(WILCO);
+        // Minor 9: must actually land ON Dawes here, not merely have dropped the first two -- as
+        // written before this fix, auto-advance skipping Dawes entirely and jumping straight to the
+        // empty state would have passed this assertion just as well.
+        assertThat(afterSecond).doesNotContain(TOM_PETTY).doesNotContain(WILCO).contains("Dawes");
 
         String afterThird = mockMvc.perform(post("/artists/{id}/reject", dawesRow)
                         .header("HX-Request", "true").with(csrf())
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andReturn().getResponse().getContentAsString();
         assertThat(afterThird).contains("Nothing pending. Run expansion to find more.");
+    }
+
+    @Test
+    void globalPendingCountReflectsRealityAfterAnAction() throws Exception {
+        // Minor 2: the nav badge is outside #candidates-app and never updates on an htmx swap, so
+        // the in-page .globalbar .count-label is the only running total that stays live mid-session.
+        // Confirm it actually reflects the new total after an action, not the count from page load.
+        String owner = "candidates-pending-count@example.com";
+        seedTwoGroups(owner); // 30 Wilco + 2 Tom Petty = 32 pending
+        Long aWilcoRow = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW).stream()
+                .filter(a -> WILCO.equals(a.getDiscoveredVia()))
+                .findFirst().orElseThrow().getId();
+
+        String body = mockMvc.perform(post("/artists/{id}/reject", aWilcoRow)
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("31 pending total");
     }
 
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {

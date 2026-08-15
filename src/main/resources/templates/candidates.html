@@ -13,11 +13,38 @@
        approve/reject, per-relation-type bulk, global bulk, expand-now) -- one response always
        carries both the current group's full content AND the sidebar together, so there's never a
        moment where one reflects new state and the other doesn't (the old page's bug: bulk actions
-       only patched a background counter, leaving cleared rows visibly stuck). */-->
-<div th:fragment="candidatesApp" id="candidates-app" class="candidates-app">
+       only patched a background counter, leaving cleared rows visibly stuck).
+
+       hx-history="false" (fix round 3): a history-cache HIT would restore a DOM snapshot taken
+       before the user's decisions -- Back would show already-approved/rejected rows, the exact
+       symptom this whole redesign exists to fix. Disabling the cache makes every Back a
+       history-RESTORE request instead, which ReviewController#candidates now answers with the
+       full page (see HX_HISTORY_RESTORE_REQUEST) so it re-resolves current state from the DB.
+
+       hx-sync="closest main:queue all" (fix round 3): every form below targets this same element
+       with outerHTML, and htmx does not serialize requests across different elements -- two rapid
+       clicks (approve then reject, or two per-row actions) can race, with the later response
+       clobbering the earlier one's rendered state. Anchoring on <main class="wrap"> (in
+       fragments/layout.html, OUTSIDE this swap region) rather than on #candidates-app itself means
+       the queue survives the outerHTML swap instead of being discarded with the old DOM node. This
+       attribute is inherited by every nested form/link below (htmx resolves hx-sync by walking up
+       from whichever element actually issues the request), so it doesn't need repeating. "queue
+       all", not "queue last": "last" silently drops intermediate clicks, which would drop real
+       user decisions -- exactly the bug this is fixing. */-->
+<div th:fragment="candidatesApp" id="candidates-app" class="candidates-app"
+     hx-history="false" hx-sync="closest main:queue all">
     <p th:if="${current == null}">Nothing pending. Run expansion to find more.</p>
 
     <div th:if="${current != null}" class="candidates-layout">
+        <!--/* Minor 4 (#148 fix round 3): production has ~294 sidebar groups (below) between the
+               top of this region and the first Approve button, with no landmark boundary a screen
+               reader could skip past (the sidebar isn't a <nav>) and focus dropping to <body> after
+               every action (no custom JS -- deferred to its own task). A skip link is the standard
+               bypass-blocks technique (WCAG 2.4.1): jumps straight to the focused group without
+               reordering the DOM. tabindex="-1" on the target makes it focusable as a skip
+               destination without adding it to the normal tab order. */-->
+        <a href="#current-group" class="visually-hidden">Skip to current group</a>
+
         <aside class="group-sidebar card" aria-label="Other pending groups">
             <h2>Up next</h2>
             <ul>
@@ -33,7 +60,7 @@
             </ul>
         </aside>
 
-        <section class="artist-group card">
+        <section class="artist-group card" id="current-group" tabindex="-1">
             <div class="artist-group-header" aria-live="polite">
                 <h2 th:text="${current.via}">Base artist</h2>
                 <span class="count" th:text="${current.total}">0</span>
@@ -45,8 +72,8 @@
                     <span class="count" th:text="${rg.count}">0</span>
                     <span class="group-actions">
                         <form class="inline" th:hx-post="@{/artists/candidates/group}"
-                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
-                              th:action="@{/artists/candidates/group}">
+                              hx-target="#candidates-app" hx-swap="outerHTML" hx-disabled-elt="this"
+                              method="post" th:action="@{/artists/candidates/group}">
                             <input type="hidden" name="via" th:value="${current.via}"/>
                             <input type="hidden" name="type" th:value="${rg.source}"/>
                             <input type="hidden" name="decision" value="approve"/>
@@ -54,8 +81,8 @@
                                     th:aria-label="'Approve all ' + ${rg.label} + ' from ' + ${current.via}">Approve all</button>
                         </form>
                         <form class="inline" th:hx-post="@{/artists/candidates/group}"
-                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
-                              th:action="@{/artists/candidates/group}">
+                              hx-target="#candidates-app" hx-swap="outerHTML" hx-disabled-elt="this"
+                              method="post" th:action="@{/artists/candidates/group}">
                             <input type="hidden" name="via" th:value="${current.via}"/>
                             <input type="hidden" name="type" th:value="${rg.source}"/>
                             <input type="hidden" name="decision" value="reject"/>
@@ -68,14 +95,22 @@
                     <div class="cand" th:each="a : ${rowsByType.get(rg.source)}">
                         <span class="cand-name" th:text="${a.name}">Name</span>
                         <span class="note" th:text="${a.note}">Note</span>
+                        <!--/* Important 2 (#148 fix round 3): these two per-row forms are the
+                               original race -- two rapid clicks on different rows both target
+                               #candidates-app, and without hx-sync (declared once, above, on
+                               #candidates-app itself) a slower response can re-render a row the
+                               faster one already decided. hx-disabled-elt="this" gives the user
+                               feedback during the round trip (there was previously none: htmx's
+                               default .htmx-request class has no CSS rule, and .htmx-swapping only
+                               covers the swap animation itself). */-->
                         <form class="inline" th:hx-post="@{/artists/{id}/approve(id=${a.id})}"
-                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
-                              th:action="@{/artists/{id}/approve(id=${a.id})}">
+                              hx-target="#candidates-app" hx-swap="outerHTML" hx-disabled-elt="this"
+                              method="post" th:action="@{/artists/{id}/approve(id=${a.id})}">
                             <button type="submit" class="btn-good btn-sm" th:aria-label="'Approve ' + ${a.name}">Approve</button>
                         </form>
                         <form class="inline" th:hx-post="@{/artists/{id}/reject(id=${a.id})}"
-                              hx-target="#candidates-app" hx-swap="outerHTML" method="post"
-                              th:action="@{/artists/{id}/reject(id=${a.id})}">
+                              hx-target="#candidates-app" hx-swap="outerHTML" hx-disabled-elt="this"
+                              method="post" th:action="@{/artists/{id}/reject(id=${a.id})}">
                             <button type="submit" class="btn-bad btn-sm" th:aria-label="'Reject ' + ${a.name}">Reject</button>
                         </form>
                     </div>
@@ -85,18 +120,24 @@
     </div>
 
     <div class="globalbar card">
+        <!--/* Minor 2 (#148 fix round 3): the nav badge (fragments/layout.html) sits OUTSIDE
+               #candidates-app, so it's frozen mid-session -- every htmx swap replaces this element
+               but never that one. This is the one running total INSIDE the swap region, so it's the
+               only pending count that stays live while grinding a long queue. pendingCount is
+               already on the model for every request via NavModelAdvice. */-->
+        <span class="count-label" th:text="${pendingCount} + ' pending total'">0 pending total</span>
         <form class="inline" th:if="${current != null}"
               th:hx-post="@{/artists/approve-all-pending}" hx-target="#candidates-app" hx-swap="outerHTML"
-              method="post" th:action="@{/artists/approve-all-pending}">
+              hx-disabled-elt="this" method="post" th:action="@{/artists/approve-all-pending}">
             <button type="submit" class="btn-good">Approve all remaining</button>
         </form>
         <form class="inline" th:if="${current != null}"
               th:hx-post="@{/artists/reject-all-pending}" hx-target="#candidates-app" hx-swap="outerHTML"
-              method="post" th:action="@{/artists/reject-all-pending}">
+              hx-disabled-elt="this" method="post" th:action="@{/artists/reject-all-pending}">
             <button type="submit" class="btn-bad btn-sm">Reject all remaining</button>
         </form>
         <form class="inline" th:hx-post="@{/artists/expand-now}" hx-target="#candidates-app" hx-swap="outerHTML"
-              method="post" th:action="@{/artists/expand-now}">
+              hx-disabled-elt="this" method="post" th:action="@{/artists/expand-now}">
             <input type="hidden" name="via" th:if="${current != null}" th:value="${current.via}"/>
             <button type="submit">Run expansion now</button>
         </form>
@@ -107,7 +148,7 @@
                a DIFFERENT owner's jobs, so it doesn't depend on the admin's own queue having rows. */-->
         <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
               th:hx-post="@{/artists/admin/expand-now}" hx-target="#candidates-app" hx-swap="outerHTML"
-              method="post" th:action="@{/artists/admin/expand-now}">
+              hx-disabled-elt="this" method="post" th:action="@{/artists/admin/expand-now}">
             <label for="admin-expand-target">Admin: expand for</label>
             <select id="admin-expand-target" name="targetOwner">
                 <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>

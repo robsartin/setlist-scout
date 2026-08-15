@@ -85,6 +85,7 @@ form.inline { display:inline; }
 
 /* Candidates page: global bar + grouped artist cards */
 .globalbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
+.globalbar .count-label { margin-right:auto; font-weight:600; }
 
 /* Two-column focused-group layout (#148): sidebar + current group side by side on wide
    viewports, collapsing to a single column on narrow ones. This file has no width-based
@@ -123,7 +124,7 @@ form.inline { display:inline; }
 .connection-paths { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.3rem; }
 .connection-paths li { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
 
-.lazy-hint { color:var(--muted); font-size:.88rem; margin:0; }
 .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.visually-hidden:focus { position:static; width:auto; height:auto; padding:.4rem .8rem; margin:0; overflow:visible; clip:auto; white-space:normal; }
 .htmx-swapping { opacity:.4; transition:opacity .2s; }
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }

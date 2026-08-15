@@ -24,6 +24,15 @@ public class ReviewController {
 
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
+    /**
+     * htmx sets this ALONGSIDE {@code HX-Request} when a history navigation (e.g. Back) misses its
+     * local history cache (vendored htmx's {@code historyCacheSize} is 10; production has ~294
+     * sidebar groups, so a miss is routine) and has to re-fetch. That response gets {@code
+     * swapInnerHTML(<body>, ...)} on the client, so it needs the FULL page -- answering it with the
+     * bare fragment (as a plain {@code HX_REQUEST} request should get) strips the topbar/nav/h1/
+     * page-sub until a manual reload.
+     */
+    private static final String HX_HISTORY_RESTORE_REQUEST = "HX-History-Restore-Request";
 
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
@@ -50,18 +59,25 @@ public class ReviewController {
     @GetMapping("/candidates")
     public String candidates(@RequestParam(required = false) String via,
                              @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                             @RequestHeader(value = HX_HISTORY_RESTORE_REQUEST, required = false) String historyRestore,
                              Model model) {
         populateCandidates(model, via);
-        if (hxRequest != null) {
-            return "candidates :: candidatesApp";
-        }
-        return "candidates";
+        return (hxRequest != null && historyRestore == null) ? "candidates :: candidatesApp" : "candidates";
     }
 
     /**
      * Resolves the current group and populates the model for either the full page or the
      * {@code candidatesApp} fragment. Returns the resolved current group's {@code via} (for
      * building a redirect URL after a non-htmx action), or {@code null} if nothing is pending.
+     * <p>
+     * Also overwrites {@code pendingCount} (Minor 2, #148 fix round 3): {@link NavModelAdvice}'s
+     * {@code @ModelAttribute} runs BEFORE the handler method body -- including before this action's
+     * own {@code activationService.changeStatus} call -- so its {@code pendingCount} always reflects
+     * PRE-action state. Recomputing it here, from the {@code groups} this method already fetched
+     * fresh (no extra query: every pending row for the owner is in exactly one relation group, so
+     * summing every group's total equals {@code countByOwnerAndStatus}), keeps the in-page counter
+     * (unlike the nav badge, which stays stale -- see {@code .globalbar .count-label}) accurate
+     * immediately after the mutation that just happened in this same request.
      */
     private String populateCandidates(Model model, String requestedVia) {
         String owner = currentUser.email();
@@ -70,6 +86,7 @@ public class ReviewController {
         var resolved = CandidateGroups.resolve(groups, requestedVia);
         model.addAttribute("current", resolved.current());
         model.addAttribute("others", resolved.others());
+        model.addAttribute("pendingCount", groups.stream().mapToLong(CandidateGroups.BaseArtistGroup::total).sum());
         if (resolved.current() != null) {
             Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
             for (var rg : resolved.current().relationGroups()) {
