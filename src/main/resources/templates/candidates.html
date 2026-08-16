@@ -30,9 +30,24 @@
        attribute is inherited by every nested form/link below (htmx resolves hx-sync by walking up
        from whichever element actually issues the request), so it doesn't need repeating. "queue
        all", not "queue last": "last" silently drops intermediate clicks, which would drop real
-       user decisions -- exactly the bug this is fixing. */-->
+       user decisions -- exactly the bug this is fixing.
+
+       hx-indicator="find button" (#164): busy feedback for the round trip itself, not just the
+       .htmx-swapping tail end. Same inheritance trick as hx-sync just above -- declared once here,
+       htmx resolves "find button" per-form, relative to whichever form actually issues the request
+       (confirmed against the vendored 2.0.3 build with a local harness, not just the docs: with no
+       hx-indicator at all, htmx's default .htmx-request class lands on the <form> itself, since
+       that's the element hx-post lives on and thus the one issuing the request). "find button"
+       redirects it to that form's own submit button instead -- the SAME element hx-disabled-elt
+       already disables -- so app.css has one element to style for both states instead of two. See
+       app.css's .htmx-request rule for the actual visual (cursor + a currentColor spinner, no
+       opacity, no new literal color -- the AA trap app.css's button:disabled comment warns about
+       applies just as much to a dimmed busy state). Deliberately NOT extended to queued clicks: a
+       click still waiting behind hx-sync's queue carries neither .htmx-request nor :disabled until
+       htmx actually dispatches it, and there's no queue-time hook to style without JS, so a queued
+       button is left looking idle until its turn comes. */-->
 <div th:fragment="candidatesApp" id="candidates-app" class="candidates-app"
-     hx-history="false" hx-sync="closest main:queue all">
+     hx-history="false" hx-sync="closest main:queue all" hx-indicator="find button">
     <!--/* TWO out-of-band elements ride along in one response (#155 + #154), which htmx handles:
            it scans the WHOLE response document for [hx-swap-oob], swaps each one against the live
            DOM by id, and strips them all from the content before the primary #candidates-app swap.

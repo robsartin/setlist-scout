@@ -1,0 +1,15 @@
+-- Issue #166: let the owner hide a single show from the default Shows list without losing it
+-- entirely (unlike removing the whole artist, the only escape hatch before, which kills every
+-- other show for that artist too).
+--
+-- A nullable hidden_at TIMESTAMP, not a boolean flag: `hidden_at IS NULL` / `IS NOT NULL` behave
+-- exactly like a boolean would for every query this feature needs, so it costs nothing over a
+-- boolean -- but it's strictly more informative (WHEN it was hidden, for free), which is worth
+-- having even though nothing reads it yet.
+--
+-- NULL by default: every existing row is unaffected (not hidden), which is exactly correct --
+-- nobody has hidden anything yet. ScanUnitRunner#persistNew (scan/ScanUnitRunner.java) skips a
+-- show that already exists by its (owner, artistName, eventDateTime, venueName) natural key rather
+-- than refreshing it, and that existsBy check never looks at hidden_at -- so hiding survives a
+-- later scan re-discovering the same show by construction, with no change needed there.
+ALTER TABLE show_event ADD COLUMN IF NOT EXISTS hidden_at timestamp(6) with time zone;

@@ -36,7 +36,20 @@ dependencyManagement {
     }
 }
 
+// Mockito's inline mock maker (the default in Mockito 5) needs a JVM agent. Left alone it
+// *self*-attaches on first use -- which the JDK already warns about ("A Java agent has been
+// loaded dynamically") and will eventually forbid outright. Under maxParallelForks (below),
+// four test JVMs race that self-attach concurrently and it intermittently loses, taking down
+// every mock-using test in the affected fork with "Mockito cannot mock this class" instead of
+// a real assertion failure -- scattered, unreproducible RED across unrelated subsystems (#160).
+// Supplying the same jar as a launch-time -javaagent removes the self-attach entirely.
+// Deliberately unversioned: the Spring Boot BOM manages mockito-core, so the agent jar always
+// matches the mockito-core already on the test classpath.
+val mockitoAgent: Configuration by configurations.creating
+
 dependencies {
+    mockitoAgent("org.mockito:mockito-core") { isTransitive = false }
+
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
@@ -81,6 +94,19 @@ tasks.bootJar {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Resolved lazily via a provider rather than `jvmArgs("-javaagent:${mockitoAgent.asPath}")`,
+    // which would resolve the configuration during Gradle's configuration phase.
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf(
+            "-javaagent:${mockitoAgent.asPath}",
+            // Regression guard. With the agent supplied above, nothing needs to self-attach, so
+            // forbidding dynamic attach costs nothing -- but if that wiring is ever removed,
+            // Mockito silently falls back to self-attaching, the build stays green, and the #160
+            // flake creeps back unnoticed. This turns that silent regression into an immediate,
+            // deterministic failure in every fork instead of a rare one in a random fork.
+            "-XX:-EnableDynamicAgentLoading",
+        )
+    })
     // Gradle defaults to 1 -- all test classes run serially in one JVM. 23 of ~62 classes boot a
     // real Testcontainers Postgres + Spring context (AbstractPostgresIntegrationTest), which
     // dominates the ~11.5min wall time. Forking multiple JVMs gives each its own independent
