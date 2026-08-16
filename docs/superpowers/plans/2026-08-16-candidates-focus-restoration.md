@@ -10,6 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-16-candidates-focus-restoration-design.md`
 
+> **Superseded in one place — read the spec's Correction block before trusting this document on expand-now.**
+> This plan's `ActionOutcome.keepFocus(message)` (Tasks 2 and 4) rests on the assumption that the expand-now
+> button survives the swap and htmx's id-based restore re-focuses it. The final review **disproved that by
+> measurement**: `hx-disabled-elt` blurs the trigger before the swap, so the restore never fires. What shipped is
+> `ActionOutcome.trigger(triggerId, message)`, marking the re-rendered button `autofocus`. The plan text below is
+> left as the historical record of what was planned, not what was built.
+
 ## Global Constraints
 
 - **Never commit to `main`.** Work happens on branch `155-candidates-focus-restoration` (already created and holding the spec commit). Stop at the PR; the human merges.
