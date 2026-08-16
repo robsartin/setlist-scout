@@ -1077,6 +1077,8 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
+import com.robsartin.setlistscout.scan.source.ScanQuery;
+import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -1084,13 +1086,20 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
@@ -1107,6 +1116,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
+@Import(SharedScanControllerTest.StubSourceConfig.class)
 class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
 
     @Container
@@ -1115,6 +1125,9 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
 
     private static final String ADMIN = "rob@example.com";
     private static final String OTHER = "david@example.com";
+
+    /** The one artist StubSourceConfig returns a show for -- see its Javadoc. */
+    private static final String RENDERING_ARTIST = "The Gaslight Anthem";
 
     @DynamicPropertySource
     static void authProperties(DynamicPropertyRegistry registry) {
@@ -1239,6 +1252,54 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         // If this went through exact-name matching it would render the "no artists in common"
         // message instead -- the same 1-of-4 failure SharedArtistFinderTest guards at its level.
         assertThat(runScan(ADMIN, OTHER, "60601")).doesNotContain("no artists in common");
+    }
+
+    /**
+     * Supplies a stub source under the "ticketmaster" id so the OK path -- the one that actually
+     * renders the table -- is reachable without network access. The real TicketmasterShowSource is
+     * switched off by the property above, so there is no duplicate-bean conflict.
+     * <p>
+     * It returns a show for exactly ONE artist name, {@link #RENDERING_ARTIST}, and nothing for any
+     * other. That keeps this stub from contaminating the sibling tests in this class: they seed
+     * other artists and must still observe a genuinely empty result. A stub that returned a show
+     * for every query would silently turn {@code sharedButNoShowsMessage} green for the wrong
+     * reason -- or red.
+     */
+    @TestConfiguration
+    static class StubSourceConfig {
+        @Bean
+        ShowSource stubTicketmaster() {
+            return new ShowSource() {
+                @Override public String id() { return "ticketmaster"; }
+
+                @Override public List<Show> search(ScanQuery query) {
+                    if (!RENDERING_ARTIST.equals(query.artistName())) {
+                        return List.of();
+                    }
+                    return List.of(new Show(query.artistName(),
+                            LocalDateTime.now().plusDays(20), "Metro", "Chicago",
+                            new BigDecimal("42.50"), "ticketmaster", "https://example.test/tix"));
+                }
+            };
+        }
+    }
+
+    @Test
+    @DisplayName("found shows render in a semantic table with column headers")
+    void showsRenderInASemanticTable() throws Exception {
+        seed(ADMIN, RENDERING_ARTIST, ArtistStatus.SEED);
+        seed(OTHER, "the gaslight anthem", ArtistStatus.SEED);
+
+        String body = runScan(ADMIN, OTHER, "60601");
+
+        assertThat(body).contains("<table>");
+        assertThat(body).contains("<th scope=\"col\">Date</th>");
+        assertThat(body).contains("<th scope=\"col\">Artist</th>");
+        assertThat(body).contains("<th scope=\"col\">Venue</th>");
+        assertThat(body).contains("Metro");
+        assertThat(body).contains(RENDERING_ARTIST);
+        // Wide tables scroll inside their own container rather than scrolling the page sideways.
+        assertThat(body).contains("class=\"table-scroll\"");
     }
 
     @Test
@@ -1544,7 +1605,7 @@ Then, beside the existing `#current-group:focus` rule (line 75), add the same tr
 - [ ] **Step 7: Run test to verify it passes**
 
 Run: `./gradlew --no-daemon test --tests "*SharedScanControllerTest" --console=plain`
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 8: Run the full gate**
 
@@ -1587,4 +1648,7 @@ git commit -m "feat: shared shows page -- admin-only, four distinct empty states
 
 **`select` was genuinely missing from the focus rule.** Step 6 of Task 4 is not boilerplate — the app's `:focus-visible` rule covers `button`, `a`, `input`, and `summary` but not `select`, and this page introduces the app's second `<select>`. Without that one-word change the spec's "visible focus throughout" is not met on the user picker.
 
-**`List<ShowSource>` injection.** `SharedScanControllerTest` disables `ticketmaster` and `bandsintown` so the page's states can be tested without network access. That is safe because `BandSiteShowSource` stays enabled (`matchIfMissing = true` on `setlistscout.sources.band-site`), so Spring still has one `ShowSource` bean to inject — constructor-injecting an empty `List<T>` would otherwise fail. `SharedScanService`'s allow-list then filters it out, which is exactly the behavior `excludesBandSiteSource` pins. **Do not "simplify" that test by disabling all three sources.**
+**`List<ShowSource>` injection, and why the stub source is shaped the way it is.** `SharedScanControllerTest` disables the real `ticketmaster` and `bandsintown` sources so the page's states can be exercised without network access, then supplies `StubSourceConfig` under the `ticketmaster` id so the OK path — the only one that renders the table — is still reachable. Two things there are load-bearing:
+
+- The stub returns a show for **exactly one** artist name (`RENDERING_ARTIST`). A stub that answered every query would break `sharedButNoShowsMessage` and `geocodingFailureMessage`, which need a genuinely empty result. Do not "simplify" it into an unconditional return.
+- `BandSiteShowSource` stays enabled (`matchIfMissing = true` on `setlistscout.sources.band-site`), which is what `excludesBandSiteSource` relies on at the service level. Constructor-injecting an empty `List<T>` fails in Spring, so leaving at least one real `ShowSource` bean registered also keeps the context bootable. **Do not disable all three sources.**
