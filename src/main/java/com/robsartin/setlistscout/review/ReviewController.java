@@ -33,6 +33,8 @@ public class ReviewController {
      * page-sub until a manual reload.
      */
     private static final String HX_HISTORY_RESTORE_REQUEST = "HX-History-Restore-Request";
+    /** Fragment view name shared by every bare-fragment htmx response on this page. */
+    private static final String CANDIDATES_APP_FRAGMENT = "candidates :: candidatesApp";
 
     /** DOM id of the "Run expansion now" button (candidates.html); rendered on every response. */
     private static final String EXPAND_NOW_TRIGGER = "expand-now";
@@ -74,7 +76,7 @@ public class ReviewController {
         // so it gets the anchor. A full page render -- including a history restore -- must not carry
         // autofocus at all: the browser would honour it natively on load.
         populateCandidates(model, via, fragment ? ActionOutcome.anchor(null) : null);
-        return fragment ? "candidates :: candidatesApp" : "candidates";
+        return fragment ? candidatesAppFragment(model) : "candidates";
     }
 
     /**
@@ -107,8 +109,7 @@ public class ReviewController {
         Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
         if (resolved.current() != null) {
             for (var rg : resolved.current().relationGroups()) {
-                rowsByType.put(rg.source(), artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
-                        owner, ArtistStatus.PENDING_REVIEW, resolved.current().via(), rg.source()));
+                rowsByType.put(rg.source(), groupRows(owner, resolved.current().via(), rg.source()));
             }
             model.addAttribute("rowsByType", rowsByType);
         }
@@ -117,6 +118,28 @@ public class ReviewController {
             model.addAttribute("outcome", focusable);
         }
         return resolved.current() != null ? resolved.current().via() : null;
+    }
+
+    /**
+     * Fetches one group's pending rows for a base-artist {@code via} + relation {@code source} --
+     * shared by the render path ({@link #populateCandidates}) and the bulk-action path ({@link
+     * #reviewGroup}). {@code via} is either an actual {@code discoveredVia} value or {@link
+     * CandidateGroups#UNGROUPED}, the sentinel {@link CandidateGroups#from} maps a null {@code
+     * discoveredVia} to for display (issue #156): {@code discoveredVia = 'Ungrouped'} can never
+     * match a NULL column in SQL, so that sentinel needs its own {@code IS NULL} query rather than
+     * the exact-match one below.
+     * <p>
+     * BOTH branches are name-ordered (issue #155). "The next row" -- what {@link
+     * ActionOutcome#afterRow} resolves and what {@link #focusable} then re-checks against these
+     * very lists -- is only defined if the render and the successor lookup agree on an order the
+     * database reproduces, so the Ungrouped bucket cannot be the one bucket left unordered.
+     */
+    private List<Artist> groupRows(String owner, String via, ArtistSource source) {
+        return CandidateGroups.UNGROUPED.equals(via)
+                ? artistRepository.findByOwnerAndStatusAndDiscoveredViaIsNullAndSourceOrderByNameAsc(
+                        owner, ArtistStatus.PENDING_REVIEW, source)
+                : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
+                        owner, ArtistStatus.PENDING_REVIEW, via, source);
     }
 
     /**
@@ -156,6 +179,25 @@ public class ReviewController {
     private static boolean adminTriggerRenders(Model model) {
         return Boolean.TRUE.equals(model.getAttribute("isAdmin"))
                 && model.getAttribute("otherOwnerEmails") instanceof List<?> others && !others.isEmpty();
+    }
+
+    /**
+     * Returns the bare {@code candidatesApp} fragment view, and flags the model so that fragment
+     * also renders an out-of-band swap of the nav badge (issue #154): {@code fragments/layout.html}'s
+     * badge sits OUTSIDE {@code #candidates-app}, so a normal htmx swap -- which only ever touches
+     * its target's subtree -- can never reach it. {@code hx-swap-oob="true"} lets htmx patch it
+     * anywhere in the response document regardless of the primary swap target (vendored htmx 2.0.3
+     * finds it via a document-wide scan and matches it to the live DOM by id, independent of
+     * nesting -- {@code allowNestedOobSwaps} defaults true and this app never overrides it).
+     * <p>
+     * Only set here, never for the full-page {@code "candidates"} view: that view already renders
+     * {@code fragments/layout.html}'s own badge fresh (same shared {@code Model}, same overwritten
+     * {@code pendingCount} -- see {@link #populateCandidates}), so a second copy of the same id
+     * inside {@code <main>} would just be a duplicate-id no-op at best.
+     */
+    private String candidatesAppFragment(Model model) {
+        model.addAttribute("oobNavBadge", true);
+        return CANDIDATES_APP_FRAGMENT;
     }
 
     /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
@@ -217,8 +259,7 @@ public class ReviewController {
             // Malformed decision: do nothing rather than silently defaulting to reject.
             return actionResult(hxRequest, model, via, ActionOutcome.anchor(null));
         }
-        List<Artist> rows = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
-                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type);
+        List<Artist> rows = groupRows(currentUser.email(), via, type);
         for (Artist a : rows) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);
         }
@@ -332,7 +373,7 @@ public class ReviewController {
     private String actionResult(String hxRequest, Model model, String via, ActionOutcome outcome) {
         String resolvedVia = populateCandidates(model, via, outcome);
         if (hxRequest != null) {
-            return "candidates :: candidatesApp";
+            return candidatesAppFragment(model);
         }
         if (resolvedVia != null) {
             return "redirect:/artists/candidates?via="

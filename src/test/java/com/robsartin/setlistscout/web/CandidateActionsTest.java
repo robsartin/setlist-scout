@@ -264,6 +264,65 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("issue #156: a PENDING_REVIEW row with a null discoveredVia "
+            + "(the Ungrouped bucket) renders its row AND its bulk action actually clears it -- the "
+            + "old query (discoveredVia = 'Ungrouped') could never match NULL, so this used to render "
+            + "a non-zero count with zero rows and a bulk action that silently did nothing")
+    void ungroupedGroupRendersItsRowAndBulkActionActuallyClearsIt() throws Exception {
+        String owner = "actions-ungrouped@example.com";
+        // discoveredVia=null, SEED_LIST source: the actually-reachable shape (issue #156) -- a SEED
+        // artist's discoveredVia is null by construction.
+        Artist row = new Artist("Direct Seed Artist", ArtistSource.SEED_LIST, ArtistStatus.PENDING_REVIEW, null, null);
+        row.setOwner(owner);
+        Long id = artistRepository.save(row).getId();
+
+        String body = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/artists/candidates").param("via", "Ungrouped")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(body).as("the Ungrouped group must render its actual row, not zero rows")
+                .contains("Direct Seed Artist");
+
+        mockMvc.perform(post("/artists/candidates/group")
+                        .param("via", "Ungrouped")
+                        .param("type", "SEED_LIST")
+                        .param("decision", "reject")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().is3xxRedirection());
+
+        assertThat(artistRepository.findById(id).orElseThrow().getStatus())
+                .as("the bulk action must actually change status, not silently no-op")
+                .isEqualTo(ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("issue #156 reachability: /unreject has no status/source guard "
+            + "(see ReviewControllerTest#unrejectMovesBackToPending), so a SEED artist -- whose "
+            + "discoveredVia is null by construction -- can be unrejected straight back to "
+            + "PENDING_REVIEW with that null discoveredVia intact, landing it in the Ungrouped bucket")
+    void seedArtistUnrejectedLandsInTheUngroupedBucket() throws Exception {
+        String owner = "actions-seed-unreject@example.com";
+        Artist seed = new Artist("Direct Seed Artist", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        seed.setOwner(owner);
+        Long id = artistRepository.save(seed).getId();
+
+        mockMvc.perform(post("/artists/{id}/unreject", id)
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().is3xxRedirection());
+        assertThat(artistRepository.findById(id).orElseThrow().getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+
+        String body = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/artists/candidates").param("via", "Ungrouped")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(body).contains("Direct Seed Artist");
+    }
+
+    @Test
     void expandNowKeepsTheCurrentGroupInView() throws Exception {
         String owner = "actions-expand-now@example.com";
         savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
@@ -480,6 +539,51 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         assertThat(body).containsPattern("id=\"sr-status\"[^>]*hx-swap-oob=\"innerHTML\"|hx-swap-oob=\"innerHTML\"[^>]*id=\"sr-status\"");
         assertThat(body).contains("Approved Alpha Centauri.");
         assertThat(body).contains("1 left in " + TOM_PETTY);
+    }
+
+    @Test
+    void anActionCarriesBothOutOfBandUpdatesAndStillExactlyOneAutofocus() throws Exception {
+        // TWO independent out-of-band elements now ride in one response: #155's #sr-status
+        // announcement and #154's #nav-candidates-badge count. htmx supports that -- it scans the
+        // whole response for [hx-swap-oob] and applies each -- but "supports" is not "this app
+        // emits both", so pin it: dropping either feature to resolve the other would still leave
+        // every OTHER test in this class green.
+        String owner = "actions-both-oob@example.com";
+        Long alpha = savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", alpha)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Each OOB element exactly once, with its OWN swap style: innerHTML for the live region
+        // (so the node survives and the announcement is heard), the default true for the badge.
+        assertThat(oobIds(body)).containsExactlyInAnyOrder("sr-status", "nav-candidates-badge");
+        assertThat(body).containsPattern("id=\"sr-status\"[^>]*hx-swap-oob=\"innerHTML\"|hx-swap-oob=\"innerHTML\"[^>]*id=\"sr-status\"");
+        assertThat(body).containsPattern(
+                "id=\"nav-candidates-badge\"[^>]*hx-swap-oob=\"true\"|hx-swap-oob=\"true\"[^>]*id=\"nav-candidates-badge\"");
+        assertThat(body).contains("Approved Alpha Centauri.");
+        // 3 pending - 1 approved = 2, the post-action recount, in the badge.
+        assertThat(body).containsPattern("id=\"nav-candidates-badge\"[^>]*>2</span>");
+
+        // And the extra OOB element does NOT disturb the invariant the focus work rests on: htmx
+        // strips both from the content before the primary swap, so neither can carry a competing
+        // autofocus. The one autofocus is still on the successor row's Approve button.
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(autofocusedButtonLabel(body)).isEqualTo("Approve Bravo Company");
+    }
+
+    /** The ids of every element in {@code body} carrying an {@code hx-swap-oob} attribute. */
+    private static java.util.List<String> oobIds(String body) {
+        return java.util.regex.Pattern
+                .compile("<[^>]*\\bhx-swap-oob=\"[^\"]*\"[^>]*\\bid=\"([^\"]+)\"|<[^>]*\\bid=\"([^\"]+)\"[^>]*\\bhx-swap-oob=\"[^\"]*\"")
+                .matcher(body).results()
+                .map(r -> r.group(1) != null ? r.group(1) : r.group(2))
+                .toList();
     }
 
     @Test

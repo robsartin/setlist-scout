@@ -33,6 +33,15 @@
        user decisions -- exactly the bug this is fixing. */-->
 <div th:fragment="candidatesApp" id="candidates-app" class="candidates-app"
      hx-history="false" hx-sync="closest main:queue all">
+    <!--/* TWO out-of-band elements ride along in one response (#155 + #154), which htmx handles:
+           it scans the WHOLE response document for [hx-swap-oob], swaps each one against the live
+           DOM by id, and strips them all from the content before the primary #candidates-app swap.
+           Their gates are deliberately DIFFERENT and must not be unified -- the sidebar-navigation
+           htmx GET moves focus but has nothing to announce (a null message), so it emits the badge
+           and NOT the status update. What they share is that neither may appear on a full-page
+           render, where the layout already carries the real #sr-status and the real nav badge and a
+           second copy of either id would be a duplicate-id bug. */-->
+
     <!--/* #155: out-of-band update for the layout's permanent #sr-status region. htmx extracts
            this before the primary swap, so it never lands inside #candidates-app -- and because it
            is emitted only when there's a message, a full page render can't produce a duplicate id.
@@ -46,6 +55,33 @@
               th:text="' ' + ${current.total} + ' left in ' + ${current.via} + '.'"> </span>
         <span th:if="${current == null}"> Nothing left to review.</span>
     </p>
+    <!--/* Issue #154: nav badge OOB sync. fragments/layout.html's badge lives in <header>, OUTSIDE
+           this fragment's own #candidates-app swap target, so it's otherwise unreachable by any
+           action here -- most visible on "Reject all", where the count can drop by hundreds and
+           visibly not move. This companion shares that badge's id and carries hx-swap-oob="true":
+           htmx finds it anywhere in the response (nested is fine -- allowNestedOobSwaps defaults
+           true in the vendored 2.0.3 build, confirmed by reading its source, not just the docs) and
+           patches the header element in place, independent of where #candidates-app's own swap
+           lands.
+
+           Gated on oobNavBadge (set only by ReviewController#candidatesAppFragment) so the
+           full-page render -- where candidatesApp is also th:replace'd inline inside <main>, and
+           the header's own badge already reflects the fresh count -- doesn't get a second element
+           with the same id.
+
+           pendingCount here is ReviewController#populateCandidates's post-action recomputation, NOT
+           NavModelAdvice's pre-action @ModelAttribute (that one runs before the handler body, so
+           it's always one step behind -- see populateCandidates' Javadoc).
+
+           Always rendered (never th:if'd away like the header's own span) so the id stays put in
+           the DOM as an OOB target for the next action too; empty text when there's nothing pending
+           reproduces the header's "tag omitted" look (.count carries no box/background) without
+           actually removing the element htmx needs to find.
+
+           No autofocus here, and none is wanted: this element never reaches the swapped-in subtree
+           (htmx strips it), so the exactly-one-autofocus-per-response invariant is untouched. */-->
+    <span th:if="${oobNavBadge}" id="nav-candidates-badge" class="count" hx-swap-oob="true"
+          th:text="${pendingCount != null and pendingCount > 0 ? pendingCount : ''}">0</span>
     <!--/* The visible empty state and the announcement's "where you are now" half (above) say the
            same sentence on purpose: focus lands here at the same moment the live region speaks, so
            two different phrasings for one state read as two different states. The guidance stays

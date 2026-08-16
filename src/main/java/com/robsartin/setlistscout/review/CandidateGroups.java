@@ -18,7 +18,18 @@ import java.util.stream.Collectors;
  */
 public final class CandidateGroups {
 
-    /** Bucket for a null discoveredVia. Defensive: no current expansion path produces one. */
+    /**
+     * Bucket for a null {@code discoveredVia}. Not reachable through expansion-discovery ({@code
+     * RelationDiscoveredListener} always supplies a from-artist name), but IS reachable today
+     * (issue #156): a SEED artist's {@code discoveredVia} is null by construction, and {@code
+     * ReviewController}'s {@code remove}/{@code reject}/{@code unreject} endpoints have no
+     * status/source guard -- {@code changeStatus} accepts any transition for any of the owner's
+     * artist ids -- so a SEED artist can land back in PENDING_REVIEW with that null {@code
+     * discoveredVia} intact (e.g. {@code POST /artists/{id}/unreject} on a SEED artist's id in one
+     * step). {@code ReviewController} translates this sentinel back to {@code discoveredVia IS
+     * NULL} for its row queries, since {@code discoveredVia = 'Ungrouped'} can never match a NULL
+     * column in SQL.
+     */
     static final String UNGROUPED = "Ungrouped";
 
     private static final List<ArtistSource> RELATION_ORDER =

@@ -14,6 +14,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.List;
 
 import static com.robsartin.setlistscout.catalog.ArtistSource.MEMBER_EXPANSION;
+import static com.robsartin.setlistscout.catalog.ArtistSource.SEED_LIST;
 import static com.robsartin.setlistscout.catalog.ArtistSource.SIMILAR_EXPANSION;
 import static com.robsartin.setlistscout.catalog.ArtistSource.TRIBUTE_EXPANSION;
 import static com.robsartin.setlistscout.catalog.ArtistStatus.APPROVED;
@@ -72,6 +73,31 @@ class CandidateQueryTest extends AbstractPostgresIntegrationTest {
         List<Artist> all = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                 OWNER, PENDING_REVIEW, "Tom Petty", MEMBER_EXPANSION);
         assertThat(all).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("issue #156: a null discoveredVia (the Ungrouped bucket) is fetched via an explicit "
+            + "IS NULL query -- discoveredVia = 'Ungrouped' can never match a NULL column in SQL -- "
+            + "and comes back name-ordered, like every other bucket (issue #155)")
+    void findsRowsWithNullDiscoveredViaViaExplicitIsNullQuery() {
+        // A SEED artist's discoveredVia is null by construction (only expansion-discovery sets it) --
+        // the actually-reachable combination (issue #156), not an arbitrary synthetic one.
+        // Saved deliberately out of order: insertion order is Zeta, Direct, Alpha.
+        save("Zeta Seed Artist", SEED_LIST, PENDING_REVIEW, null, OWNER);
+        save("Direct Seed Artist", SEED_LIST, PENDING_REVIEW, null, OWNER);
+        save("Alpha Seed Artist", SEED_LIST, PENDING_REVIEW, null, OWNER);
+        save("Has A Via", MEMBER_EXPANSION, PENDING_REVIEW, "Tom Petty", OWNER);
+        save("Other Owner Null Via", SEED_LIST, PENDING_REVIEW, null, OTHER_OWNER);
+
+        List<Artist> found = artistRepository.findByOwnerAndStatusAndDiscoveredViaIsNullAndSourceOrderByNameAsc(
+                OWNER, PENDING_REVIEW, SEED_LIST);
+
+        // containsExactly is order-sensitive on purpose, so this pins three things at once: the
+        // IS NULL filter, the owner scoping, and the A-Z order. That order is not cosmetic -- the
+        // Ungrouped bucket feeds the same ActionOutcome.afterRow successor lookup as every other
+        // bucket (issue #155), and "the next row" is undefined without it.
+        assertThat(found).extracting(Artist::getName)
+                .containsExactly("Alpha Seed Artist", "Direct Seed Artist", "Zeta Seed Artist");
     }
 
     private Artist save(String name, ArtistSource source, ArtistStatus status, String discoveredVia, String owner) {

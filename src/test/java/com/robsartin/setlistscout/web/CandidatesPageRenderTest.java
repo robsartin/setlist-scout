@@ -372,6 +372,102 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void ungroupedBucketRowsAlsoRenderAlphabetically() throws Exception {
+        // The Ungrouped bucket (issue #156) takes a DIFFERENT repository method than every other
+        // group -- an explicit IS NULL query, since discoveredVia = 'Ungrouped' can never match a
+        // NULL column -- so the A-Z order asserted above does not automatically cover it. It has to,
+        // because ActionOutcome.afterRow (issue #155) picks "the next row" out of exactly this list:
+        // an unordered bucket would name a successor the page cannot be relied on to reproduce.
+        // A SEED artist's discoveredVia is null by construction, which is what puts it here.
+        String owner = "candidates-ungrouped-order@example.com";
+        // Saved deliberately out of order: insertion order is Zeta, Alpha, Mike.
+        savePending(owner, "Zeta Reticuli", ArtistSource.SEED_LIST, null);
+        savePending(owner, "Alpha Centauri", ArtistSource.SEED_LIST, null);
+        savePending(owner, "Mike Campbell", ArtistSource.SEED_LIST, null);
+
+        String body = mockMvc.perform(get("/artists/candidates").param("via", "Ungrouped")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).as("the Ungrouped bucket must render its rows at all (issue #156)")
+                .contains("Alpha Centauri").contains("Mike Campbell").contains("Zeta Reticuli");
+        assertThat(body.indexOf("Alpha Centauri"))
+                .as("Ungrouped rows render A-Z, not in insertion order: %s", body)
+                .isLessThan(body.indexOf("Mike Campbell"));
+        assertThat(body.indexOf("Mike Campbell")).isLessThan(body.indexOf("Zeta Reticuli"));
+    }
+
+    @Test
+    void htmxRejectResponseIncludesOutOfBandNavBadgeWithPostActionCount() throws Exception {
+        // Issue #154: the nav badge (fragments/layout.html) sits OUTSIDE #candidates-app, so a
+        // normal htmx swap can never reach it -- it's stuck showing whatever count was there at
+        // the last full page load, no matter how many actions run afterward. The fragment
+        // response must carry an out-of-band copy of the badge, using the SAME post-action
+        // recount as the in-page total (ReviewController#populateCandidates), not
+        // NavModelAdvice's pre-action @ModelAttribute (which runs before the handler body).
+        String owner = "candidates-oob-badge@example.com";
+        seedTwoGroups(owner); // 30 Wilco + 2 Tom Petty = 32 pending
+        Long aWilcoRow = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW).stream()
+                .filter(a -> WILCO.equals(a.getDiscoveredVia()))
+                .findFirst().orElseThrow().getId();
+
+        String body = mockMvc.perform(post("/artists/{id}/reject", aWilcoRow)
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+
+        // Both totals must agree: the in-page running total (globalbar) and the nav badge's OOB copy.
+        assertThat(body).contains("31 pending total");
+        assertThat(body).contains("hx-swap-oob=\"true\"");
+        var badgeValues = Pattern.compile("<span[^>]*id=\"nav-candidates-badge\"[^>]*>([^<]*)</span>")
+                .matcher(body).results().map(r -> r.group(1)).toList();
+        assertThat(badgeValues).as("exactly one OOB nav badge, carrying the post-action count: %s", body)
+                .containsExactly("31");
+    }
+
+    @Test
+    void rejectAllHtmxResponseClearsTheOutOfBandNavBadge() throws Exception {
+        // The most visible symptom in the issue: after "Reject all", the badge should vanish (same
+        // as a fresh page load with nothing pending), not keep showing the pre-action count.
+        String owner = "candidates-oob-badge-reject-all@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        String body = mockMvc.perform(post("/artists/reject-all-pending")
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+
+        var badgeValues = Pattern.compile("<span[^>]*id=\"nav-candidates-badge\"[^>]*>([^<]*)</span>")
+                .matcher(body).results().map(r -> r.group(1)).toList();
+        assertThat(badgeValues)
+                .as("OOB badge should be present but empty (hidden), not stuck at the old count: %s", body)
+                .containsExactly("");
+    }
+
+    @Test
+    void fullPageRenderShowsExactlyOneCorrectNavBadgeNoOobDuplicate() throws Exception {
+        // No regression to the non-htmx path (issue #154): the full page must still show exactly
+        // one nav-candidates-badge element, with the right count. The OOB companion is gated to
+        // bare-fragment htmx responses only (ReviewController#candidatesAppFragment) -- if it
+        // leaked into the full-page render too (candidatesApp is th:replace'd inline inside
+        // <main>), the id would be duplicated: invalid HTML, and two elements that could disagree.
+        String owner = "candidates-full-page-badge@example.com";
+        seedTwoGroups(owner); // 32 pending
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        var badgeValues = Pattern.compile("<span[^>]*id=\"nav-candidates-badge\"[^>]*>([^<]*)</span>")
+                .matcher(body).results().map(r -> r.group(1)).toList();
+        assertThat(badgeValues).as("exactly one nav badge, header's own copy, no OOB duplicate: %s", body)
+                .containsExactly("32");
+    }
+
+    @Test
     void aFullPageLoadNeverStealsFocus() throws Exception {
         String owner = "candidates-no-autofocus@example.com";
         seedTwoGroups(owner);
@@ -410,6 +506,12 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         // above pins whose it is.
         assertThat(body).as("only the layout's permanent #sr-status carries aria-live")
                 .containsOnlyOnce("aria-live");
+        // ...and neither OOB companion leaks onto the full page: #154's nav badge is gated on
+        // ${oobNavBadge} (bare-fragment responses only) and #155's #sr-status update on
+        // outcome.message, which is null here. The doesNotContain above covers BOTH -- a duplicate
+        // id="nav-candidates-badge" inside <main> would be exactly as invalid as a duplicate
+        // id="sr-status". fullPageRenderShowsExactlyOneCorrectNavBadgeNoOobDuplicate counts the
+        // badge elements directly; this pins the attribute that would give either one away.
     }
 
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {
