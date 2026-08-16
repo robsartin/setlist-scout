@@ -14,6 +14,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.List;
 
 import static com.robsartin.setlistscout.catalog.ArtistSource.MEMBER_EXPANSION;
+import static com.robsartin.setlistscout.catalog.ArtistSource.SEED_LIST;
 import static com.robsartin.setlistscout.catalog.ArtistSource.SIMILAR_EXPANSION;
 import static com.robsartin.setlistscout.catalog.ArtistSource.TRIBUTE_EXPANSION;
 import static com.robsartin.setlistscout.catalog.ArtistStatus.APPROVED;
@@ -72,6 +73,22 @@ class CandidateQueryTest extends AbstractPostgresIntegrationTest {
         List<Artist> all = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
                 OWNER, PENDING_REVIEW, "Tom Petty", MEMBER_EXPANSION);
         assertThat(all).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("issue #156: a null discoveredVia (the Ungrouped bucket) is fetched via an explicit "
+            + "IS NULL query -- discoveredVia = 'Ungrouped' can never match a NULL column in SQL")
+    void findsRowsWithNullDiscoveredViaViaExplicitIsNullQuery() {
+        // A SEED artist's discoveredVia is null by construction (only expansion-discovery sets it) --
+        // the actually-reachable combination (issue #156), not an arbitrary synthetic one.
+        save("Direct Seed Artist", SEED_LIST, PENDING_REVIEW, null, OWNER);
+        save("Has A Via", MEMBER_EXPANSION, PENDING_REVIEW, "Tom Petty", OWNER);
+        save("Other Owner Null Via", SEED_LIST, PENDING_REVIEW, null, OTHER_OWNER);
+
+        List<Artist> found = artistRepository.findByOwnerAndStatusAndDiscoveredViaIsNullAndSource(
+                OWNER, PENDING_REVIEW, SEED_LIST);
+
+        assertThat(found).extracting(Artist::getName).containsExactly("Direct Seed Artist");
     }
 
     private Artist save(String name, ArtistSource source, ArtistStatus status, String discoveredVia, String owner) {

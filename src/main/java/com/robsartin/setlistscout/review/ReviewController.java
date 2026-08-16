@@ -92,12 +92,28 @@ public class ReviewController {
         if (resolved.current() != null) {
             Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
             for (var rg : resolved.current().relationGroups()) {
-                rowsByType.put(rg.source(), artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
-                        owner, ArtistStatus.PENDING_REVIEW, resolved.current().via(), rg.source()));
+                rowsByType.put(rg.source(), groupRows(owner, resolved.current().via(), rg.source()));
             }
             model.addAttribute("rowsByType", rowsByType);
         }
         return resolved.current() != null ? resolved.current().via() : null;
+    }
+
+    /**
+     * Fetches one group's pending rows for a base-artist {@code via} + relation {@code source} --
+     * shared by the render path ({@link #populateCandidates}) and the bulk-action path ({@link
+     * #reviewGroup}). {@code via} is either an actual {@code discoveredVia} value or {@link
+     * CandidateGroups#UNGROUPED}, the sentinel {@link CandidateGroups#from} maps a null {@code
+     * discoveredVia} to for display (issue #156): {@code discoveredVia = 'Ungrouped'} can never
+     * match a NULL column in SQL, so that sentinel needs its own {@code IS NULL} query rather than
+     * the exact-match one below.
+     */
+    private List<Artist> groupRows(String owner, String via, ArtistSource source) {
+        return CandidateGroups.UNGROUPED.equals(via)
+                ? artistRepository.findByOwnerAndStatusAndDiscoveredViaIsNullAndSource(
+                        owner, ArtistStatus.PENDING_REVIEW, source)
+                : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                        owner, ArtistStatus.PENDING_REVIEW, via, source);
     }
 
     /**
@@ -165,8 +181,7 @@ public class ReviewController {
             // Malformed decision: do nothing rather than silently defaulting to reject.
             return actionResult(hxRequest, model, via);
         }
-        for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
-                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type)) {
+        for (Artist a : groupRows(currentUser.email(), via, type)) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);
         }
         return actionResult(hxRequest, model, via);

@@ -249,6 +249,65 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("issue #156: a PENDING_REVIEW row with a null discoveredVia "
+            + "(the Ungrouped bucket) renders its row AND its bulk action actually clears it -- the "
+            + "old query (discoveredVia = 'Ungrouped') could never match NULL, so this used to render "
+            + "a non-zero count with zero rows and a bulk action that silently did nothing")
+    void ungroupedGroupRendersItsRowAndBulkActionActuallyClearsIt() throws Exception {
+        String owner = "actions-ungrouped@example.com";
+        // discoveredVia=null, SEED_LIST source: the actually-reachable shape (issue #156) -- a SEED
+        // artist's discoveredVia is null by construction.
+        Artist row = new Artist("Direct Seed Artist", ArtistSource.SEED_LIST, ArtistStatus.PENDING_REVIEW, null, null);
+        row.setOwner(owner);
+        Long id = artistRepository.save(row).getId();
+
+        String body = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/artists/candidates").param("via", "Ungrouped")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(body).as("the Ungrouped group must render its actual row, not zero rows")
+                .contains("Direct Seed Artist");
+
+        mockMvc.perform(post("/artists/candidates/group")
+                        .param("via", "Ungrouped")
+                        .param("type", "SEED_LIST")
+                        .param("decision", "reject")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().is3xxRedirection());
+
+        assertThat(artistRepository.findById(id).orElseThrow().getStatus())
+                .as("the bulk action must actually change status, not silently no-op")
+                .isEqualTo(ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("issue #156 reachability: /unreject has no status/source guard "
+            + "(see ReviewControllerTest#unrejectMovesBackToPending), so a SEED artist -- whose "
+            + "discoveredVia is null by construction -- can be unrejected straight back to "
+            + "PENDING_REVIEW with that null discoveredVia intact, landing it in the Ungrouped bucket")
+    void seedArtistUnrejectedLandsInTheUngroupedBucket() throws Exception {
+        String owner = "actions-seed-unreject@example.com";
+        Artist seed = new Artist("Direct Seed Artist", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        seed.setOwner(owner);
+        Long id = artistRepository.save(seed).getId();
+
+        mockMvc.perform(post("/artists/{id}/unreject", id)
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().is3xxRedirection());
+        assertThat(artistRepository.findById(id).orElseThrow().getStatus()).isEqualTo(ArtistStatus.PENDING_REVIEW);
+
+        String body = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/artists/candidates").param("via", "Ungrouped")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(body).contains("Direct Seed Artist");
+    }
+
+    @Test
     void expandNowKeepsTheCurrentGroupInView() throws Exception {
         String owner = "actions-expand-now@example.com";
         savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
