@@ -267,4 +267,101 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains(TOM_PETTY);
         assertThat(body).contains("Mike Campbell");
     }
+
+    @Test
+    void approvingARowFocusesTheNextRowsApproveButton() throws Exception {
+        String owner = "actions-focus-next@example.com";
+        Long alpha = savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Charlie Watts", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", alpha)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Exactly one autofocus, and it is on Bravo's Approve button -- the row that took Alpha's place.
+        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(autofocusedButtonLabel(body)).isEqualTo("Approve Bravo Company");
+    }
+
+    @Test
+    void rejectingARowFocusesTheNextRowsRejectButton() throws Exception {
+        String owner = "actions-focus-next-reject@example.com";
+        Long alpha = savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/reject", alpha)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(autofocusedButtonLabel(body)).isEqualTo("Reject Bravo Company");
+    }
+
+    @Test
+    void decidingTheLastRowOfARelationGroupFocusesTheGroupAnchor() throws Exception {
+        String owner = "actions-focus-anchor@example.com";
+        savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        Long bravo = savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", bravo)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Bravo was last in the list, so there is no successor: focus goes to the group anchor.
+        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
+    }
+
+    @Test
+    void autoAdvancingToTheNextGroupFocusesItsAnchor() throws Exception {
+        String owner = "actions-advance-focus@example.com";
+        for (int i = 1; i <= 3; i++) {
+            savePending(owner, "Wilco Member " + i, ArtistSource.MEMBER_EXPANSION, WILCO);
+        }
+        Long lastTomPettyRow = savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", lastTomPettyRow)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Tom Petty had one row; clearing it advances to Wilco. Focus lands on the new group's
+        // anchor -- never on a row of a group the user hasn't seen yet.
+        assertThat(body).contains(WILCO);
+        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
+    }
+
+    /** Occurrences of {@code needle} in {@code haystack} -- used to assert the one-autofocus invariant. */
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
+    }
+
+    /**
+     * The aria-label of the single button carrying autofocus. Both attributes live on the same
+     * <button> tag, in either order, so the match is anchored on the tag rather than on ordering.
+     */
+    private static String autofocusedButtonLabel(String body) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("<button[^>]*autofocus[^>]*aria-label=\"([^\"]+)\"|<button[^>]*aria-label=\"([^\"]+)\"[^>]*autofocus")
+                .matcher(body);
+        assertThat(m.find()).as("a <button> carrying autofocus").isTrue();
+        return m.group(1) != null ? m.group(1) : m.group(2);
+    }
 }

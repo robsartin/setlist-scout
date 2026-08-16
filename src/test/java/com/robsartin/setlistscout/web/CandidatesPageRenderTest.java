@@ -347,6 +347,21 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body.indexOf("Mike Campbell")).isLessThan(body.indexOf("Zeta Reticuli"));
     }
 
+    @Test
+    void aFullPageLoadNeverStealsFocus() throws Exception {
+        String owner = "candidates-no-autofocus@example.com";
+        seedTwoGroups(owner);
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // autofocus is for htmx swaps only -- on a normal page load the browser would honour it
+        // natively and yank the user into the middle of the list.
+        assertThat(body).doesNotContain("autofocus");
+    }
+
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, "note for " + name);
         artist.setOwner(owner);

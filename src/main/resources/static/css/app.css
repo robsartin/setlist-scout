@@ -68,6 +68,11 @@ fieldset.decision label { margin-right:.6rem; white-space:nowrap; }
 button, .btn { font:inherit; font-weight:600; cursor:pointer; border-radius:8px; padding:.4rem .8rem; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); font-size:.9rem; }
 button:hover, .btn:hover { border-color:var(--primary); }
 button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+/* #155: the group anchor is focused programmatically after every swap (and by the skip link), so
+   it gets the same ring as interactive elements. :focus, not :focus-visible -- programmatic focus
+   on a tabindex="-1" element is not reliably "visible" across browsers, and a keyboard user being
+   moved somewhere new should always see where they landed. */
+#current-group:focus { outline:2px solid var(--primary); outline-offset:2px; }
 /* #148 fix round 4: hx-disabled-elt="find button" (candidates.html) sets the `disabled` attribute
    during a request; without this rule the base button rule's cursor:pointer and the .btn-good/
    .btn-bad tint colors would still look fully active. Token-based color swap rather than opacity:

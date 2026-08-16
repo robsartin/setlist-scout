@@ -211,4 +211,31 @@ class ReviewControllerTest {
         assertThat(view).isEqualTo("candidates :: candidatesApp");
         verify(expandJobRepository).redueAll(eq(OWNER), any(Instant.class));
     }
+
+    @Test
+    @DisplayName("focus falls back to the group anchor when the chosen successor is no longer pending")
+    void focusDowngradesWhenTheSuccessorVanishes() {
+        Artist acted = pending("Alpha Centauri", ArtistSource.MEMBER_EXPANSION, 1L);
+        Artist successor = pending("Bravo Company", ArtistSource.MEMBER_EXPANSION, 2L);
+        Artist other = pending("Charlie Watts", ArtistSource.MEMBER_EXPANSION, 3L);
+        when(artistRepository.findByIdAndOwner(1L, OWNER)).thenReturn(java.util.Optional.of(acted));
+        when(artistRepository.countByStatusGroupedByViaAndSource(OWNER, ArtistStatus.PENDING_REVIEW))
+                .thenReturn(List.of(new GroupCountRow("Tom Petty and the Heartbreakers",
+                        ArtistSource.MEMBER_EXPANSION, 1)));
+        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
+                OWNER, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers",
+                ArtistSource.MEMBER_EXPANSION))
+                // First call is the pre-mutation successor lookup: Bravo follows Alpha. Second is
+                // the render, by which point another tab has decided Bravo -- so the successor the
+                // response would point autofocus at isn't there any more.
+                .thenReturn(List.of(acted, successor), List.of(other));
+
+        ConcurrentModel model = new ConcurrentModel();
+        controller.approve(1L, "hx", model);
+
+        ActionOutcome outcome = (ActionOutcome) model.asMap().get("outcome");
+        assertThat(outcome.focusesAnchor()).as("downgraded from ROW so no autofocus dangles").isTrue();
+        assertThat(outcome.focusesRow(2L, "approve")).isFalse();
+        assertThat(outcome.message()).isEqualTo("Approved Alpha Centauri.");
+    }
 }
