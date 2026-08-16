@@ -27,7 +27,7 @@ class TicketmasterShowSourceTest {
         LocalDateTime end = start.plusMonths(6);
         Show mockShow = mock(Show.class);
         List<Show> expected = List.of(mockShow);
-        when(ticketmaster.searchShows(eq("ZZ Top"), eq("78701"), eq(50), eq(start), eq(end)))
+        when(ticketmaster.searchShows(eq("ZZ Top"), eq("78701"), eq(30.26), eq(-97.74), eq(50), eq(start), eq(end)))
                 .thenReturn(expected);
         ScanQuery q = new ScanQuery("ZZ Top", null, "78701", 30.26, -97.74, 50, "Austin", "TX", start, end);
 

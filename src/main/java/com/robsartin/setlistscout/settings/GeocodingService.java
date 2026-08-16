@@ -14,9 +14,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Turns a US ZIP code -- or a city/state pair -- into lat/long (+ city/state) via
  * Zippopotam.us, a free, no-key geocoder (https://api.zippopotam.us). {@link #geocode}
- * backs the owner's ZIP-based search location: Ticketmaster takes the ZIP directly, but
- * Bandsintown has no geo filter, so its results are filtered by distance from this lat/long
- * (see ADR-0018). {@link #geocodeCity} backs the same distance filtering for band-site
+ * backs the owner's ZIP-based search location: Ticketmaster sends this lat/long as a
+ * {@code geoPoint} geohash (falling back to the bare ZIP only if geocoding failed -- #152),
+ * and Bandsintown -- which has no server-side geo filter -- filters its results by distance
+ * from this lat/long (see ADR-0018). {@link #geocodeCity} backs the same distance filtering for band-site
  * scraped shows (#28), which arrive as a bare city name rather than a ZIP -- successful
  * lookups are cached in-process (keyed by state+city) since the same venue city recurs
  * across scans; failed/empty lookups are deliberately NOT cached so a transient error

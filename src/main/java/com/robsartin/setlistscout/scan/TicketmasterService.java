@@ -16,14 +16,18 @@ import java.util.Map;
 
 /**
  * https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/
- * Free tier: 5000 calls/day, ~5 req/sec. Filters by city + state + radius, which
- * covers the "near Austin, adjustable radius" requirement without needing a
- * separate geocoding step.
+ * Free tier: 5000 calls/day, ~5 req/sec. Filters by a {@code geoPoint} geohash built from the
+ * owner's already-geocoded lat/long (ADR-0018) plus a radius; falls back to {@code postalCode}
+ * only when geocoding failed, since Ticketmaster's postal-code index doesn't cover every ZIP and
+ * silently returns zero results rather than an error for the ones it misses (#152).
  */
 @Service
 public class TicketmasterService {
 
     private static final Logger log = LoggerFactory.getLogger(TicketmasterService.class);
+
+    /** ~5m resolution; verified working against the live Ticketmaster API for #152. */
+    private static final int GEOHASH_PRECISION = 9;
 
     private final RestClient restClient;
     private final String apiKey;
@@ -39,8 +43,14 @@ public class TicketmasterService {
         this.apiKey = props.apis().ticketmasterApiKey();
     }
 
+    /**
+     * @param postalCode fallback location filter, sent only when {@code latitude}/{@code longitude}
+     *                    are null (geocoding failed for this owner -- see ADR-0018/#152)
+     * @param latitude    geocoded search-origin latitude, or null
+     * @param longitude   geocoded search-origin longitude, or null
+     */
     @SuppressWarnings("unchecked")
-    public List<Show> searchShows(String artistName, String postalCode,
+    public List<Show> searchShows(String artistName, String postalCode, Double latitude, Double longitude,
                                    int radiusMiles, LocalDateTime start, LocalDateTime end) {
         List<Show> shows = new ArrayList<>();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -48,17 +58,30 @@ public class TicketmasterService {
         Map<String, Object> response;
         try {
             response = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/events.json")
-                            .queryParam("apikey", apiKey)
-                            .queryParam("keyword", artistName)
-                            .queryParam("postalCode", postalCode)
-                            .queryParam("radius", radiusMiles)
-                            .queryParam("unit", "miles")
-                            .queryParam("startDateTime", start.format(fmt))
-                            .queryParam("endDateTime", end.format(fmt))
-                            .queryParam("classificationName", "music")
-                            .build())
+                    .uri(uriBuilder -> {
+                        uriBuilder.path("/events.json")
+                                .queryParam("apikey", apiKey)
+                                .queryParam("keyword", artistName);
+                        // Ticketmaster's postalCode index only covers ZIPs where it has market
+                        // presence and silently matches nothing for the ones it doesn't (#152) --
+                        // geoPoint works from raw coordinates, so prefer it whenever the owner's
+                        // ZIP geocoded successfully. Only fall back to postalCode (degraded, but
+                        // no worse than before #152) when it didn't; never search with no location
+                        // filter at all, which would flood the owner with shows from anywhere.
+                        if (latitude != null && longitude != null) {
+                            uriBuilder.queryParam("geoPoint",
+                                    Geohash.encode(latitude, longitude, GEOHASH_PRECISION));
+                        } else {
+                            uriBuilder.queryParam("postalCode", postalCode);
+                        }
+                        return uriBuilder
+                                .queryParam("radius", radiusMiles)
+                                .queryParam("unit", "miles")
+                                .queryParam("startDateTime", start.format(fmt))
+                                .queryParam("endDateTime", end.format(fmt))
+                                .queryParam("classificationName", "music")
+                                .build();
+                    })
                     .retrieve()
                     .body(Map.class);
         } catch (Exception e) {

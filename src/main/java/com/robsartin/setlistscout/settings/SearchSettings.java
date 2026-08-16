@@ -20,7 +20,8 @@ public class SearchSettings {
     private String postalCode;
     private String city;   // derived from the ZIP geocode, for display
     private String state;  // derived from the ZIP geocode, for display
-    private Double latitude;   // geocoded from postalCode; used for Bandsintown distance filtering
+    private Double latitude;   // geocoded from postalCode; used for Ticketmaster's geoPoint search
+                                // and Bandsintown's client-side distance filtering
     private Double longitude;
     private int radiusMiles;
     private int monthsAhead;

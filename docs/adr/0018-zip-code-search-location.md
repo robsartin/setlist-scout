@@ -21,6 +21,10 @@ singleton `SearchSettings` row.
   settings are saved and as a startup backfill; failures degrade to empty so a scan is
   never broken.
 - **Ticketmaster:** query by `postalCode` + `radius` (native support; no geocoding needed).
+  Refined by [0026](0026-ticketmaster-geopoint-search.md): Ticketmaster's postal-code index
+  doesn't cover every ZIP and silently returns zero results for the ones it misses, so it now
+  sends a `geoPoint` geohash built from this same lat/long instead, falling back to `postalCode`
+  only if geocoding failed.
 - **Bandsintown:** filter each event by great-circle (Haversine) distance from the ZIP's
   lat/long to the venue's coordinates, within the saved radius. With no coordinates
   (geocode failed), fall back to keeping all in-window shows.
