@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
+import com.robsartin.setlistscout.shared.SharedScanOwner;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
 import org.springframework.modulith.events.ApplicationModuleListener;
@@ -29,6 +30,14 @@ public class ExpandJobListener {
 
     @ApplicationModuleListener
     void onArtistActivated(ArtistActivated e) {
+        // #163 guard: a shared scan is a scan context, not a person. Expanding it would discover
+        // member/similar/tribute candidates for an owner who has no Candidates page, no reviewer,
+        // and no way to see them -- while billing an LLM call per artist. Invisible if wrong,
+        // which is why SharedScanGuardsTest pins it.
+        if (SharedScanOwner.isSharedScanKey(e.owner())) {
+            return;
+        }
+
         // Source eligibility (e.g. tribute expansion is SEED-only) is a property of the source
         // itself -- see RelationSource#appliesTo. The status rides on the event itself (#102) so
         // this listener no longer needs to query catalog.ArtistRepository back for it.

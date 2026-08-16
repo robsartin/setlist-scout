@@ -28,7 +28,7 @@ public class ScanJobListener {
 
     @ApplicationModuleListener
     void onArtistActivated(ArtistActivated e) {
-        for (ShowSource source : showSources) {
+        for (ShowSource source : SharedScanSources.forOwner(e.owner(), showSources)) {
             // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than existsBy+save+catch:
             // @ApplicationModuleListener runs this whole loop in one transaction, and on an
             // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real unique-

@@ -52,7 +52,10 @@ public class ScanJobBackfill implements ApplicationRunner {
         List<Artist> active = artistRepository.findByStatusIn(
                 List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
         for (Artist artist : active) {
-            for (ShowSource source : showSources) {
+            // #163: a shared scan is enqueued for the cheap sources only. This runs on every
+            // application start and reaches insertIfAbsent directly, so it needs the same policy
+            // ScanJobListener applies -- guarding only the listener would be undone on each restart.
+            for (ShowSource source : SharedScanSources.forOwner(artist.getOwner(), showSources)) {
                 Instant dueAt = Instant.now().plusMillis(jitter(spreadMs));
                 scanJobRepository.insertIfAbsent(artist.getOwner(), artist.getId(), source.id(), dueAt);
                 enqueued++;
