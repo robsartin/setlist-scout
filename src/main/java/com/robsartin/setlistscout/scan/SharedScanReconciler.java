@@ -96,11 +96,19 @@ public class SharedScanReconciler {
     /**
      * Re-reconciles every shared scan the given owner participates in.
      * <p>
-     * <b>The early return is load-bearing, not defensive.</b> {@link #reconcile} creates artists
-     * under a shared key, which publishes {@code ArtistActivated} for that key, which arrives back
-     * here. Without this guard the reconcile would trigger another reconcile and never terminate.
-     * A shared scan is also never a participant in another shared scan, so there is nothing to do
-     * for one in any case.
+     * <b>The early return states an invariant, not a workaround for today's query shape.</b> A
+     * shared scan is never a participant in another shared scan -- its {@code ownerA}/{@code
+     * ownerB} are always the two real participant addresses, never another scan's synthetic key --
+     * so there is nothing to reconcile for one in any case. That happens to also mean {@link
+     * #reconcile} creating artists under a shared key, which publishes {@code ArtistActivated} for
+     * that key and arrives back here, cannot form a loop today: {@link SharedScanRepository
+     * #findByOwnerAIgnoreCaseOrOwnerBIgnoreCase} matches only the participant columns, so it comes
+     * back empty for a shared key regardless of this guard (confirmed empirically -- Task 4 fix
+     * round, #163: removing this early return did not reproduce a loop, hang, or any test
+     * failure). This guard is what would still hold if that incidental fact ever stopped being
+     * true -- the lookup broadening, or some other publisher emitting {@code ArtistActivated} for
+     * a shared key -- so it stays, but it is defense-in-depth for the stated invariant, not the
+     * thing load-bearing against recursion today.
      * <p>
      * Package-private rather than private so the reconcile-on-participant-change path can be driven
      * directly in tests without publishing an event and waiting on async delivery.
