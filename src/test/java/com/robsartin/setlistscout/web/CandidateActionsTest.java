@@ -283,7 +283,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         // Exactly one autofocus, and it is on Bravo's Approve button -- the row that took Alpha's place.
-        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
         assertThat(autofocusedButtonLabel(body)).isEqualTo("Approve Bravo Company");
     }
 
@@ -300,7 +300,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
         assertThat(autofocusedButtonLabel(body)).isEqualTo("Reject Bravo Company");
     }
 
@@ -318,7 +318,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         // Bravo was last in the list, so there is no successor: focus goes to the group anchor.
-        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
         assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
     }
 
@@ -340,14 +340,20 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         // Tom Petty had one row; clearing it advances to Wilco. Focus lands on the new group's
         // anchor -- never on a row of a group the user hasn't seen yet.
         assertThat(body).contains(WILCO);
-        assertThat(countOccurrences(body, "autofocus")).isEqualTo(1);
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
         assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
     }
 
-    /** Occurrences of {@code needle} in {@code haystack} -- used to assert the one-autofocus invariant. */
-    private static int countOccurrences(String haystack, String needle) {
+    /**
+     * How many ELEMENTS carry the autofocus attribute. Counting raw substrings would read
+     * Thymeleaf's `autofocus="autofocus"` (the expanded form it serialises boolean attributes to)
+     * as two, so this matches the attribute on a tag instead.
+     */
+    private static int countAutofocusElements(String body) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("<[^>]*\\bautofocus\\b[^>]*>").matcher(body);
         int count = 0;
-        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+        while (m.find()) {
             count++;
         }
         return count;
