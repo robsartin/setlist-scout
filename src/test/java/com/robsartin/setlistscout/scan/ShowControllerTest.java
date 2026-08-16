@@ -1,6 +1,5 @@
 package com.robsartin.setlistscout.scan;
 
-import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
@@ -8,6 +7,7 @@ import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.service.TestAppProperties;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
+import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,9 +51,9 @@ class ShowControllerTest {
         when(currentUser.email()).thenReturn(OWNER);
         when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION))
                 .thenReturn(List.of());
-        AppProperties appProperties = TestAppProperties.withKeys();
+        AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         controller = new ShowController(showRepository, artistRepository, scanJobRepository,
-                settingsService, currentUser, appProperties);
+                settingsService, currentUser, adminGuard);
     }
 
     // No id is set here (Show's id is JPA-generated, no setter) -- these controller-unit tests

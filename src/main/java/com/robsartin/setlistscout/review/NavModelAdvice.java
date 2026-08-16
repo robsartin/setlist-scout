@@ -3,6 +3,7 @@ package com.robsartin.setlistscout.review;
 import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
+import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -15,11 +16,14 @@ public class NavModelAdvice {
     private final ArtistRepository artistRepository;
     private final CurrentUser currentUser;
     private final AppProperties appProperties;
+    private final AdminGuard adminGuard;
 
-    public NavModelAdvice(ArtistRepository artistRepository, CurrentUser currentUser, AppProperties appProperties) {
+    public NavModelAdvice(ArtistRepository artistRepository, CurrentUser currentUser, AppProperties appProperties,
+                           AdminGuard adminGuard) {
         this.artistRepository = artistRepository;
         this.currentUser = currentUser;
         this.appProperties = appProperties;
+        this.adminGuard = adminGuard;
     }
 
     /** 0 when there's no authenticated principal (e.g. an error view) rather than a lookup with a null owner. */
@@ -41,8 +45,7 @@ public class NavModelAdvice {
      */
     @ModelAttribute("isAdmin")
     public boolean isAdmin() {
-        String owner = currentUser.email();
-        return owner != null && owner.equalsIgnoreCase(appProperties.auth().adminEmail());
+        return adminGuard.isAdmin();
     }
 
     /**

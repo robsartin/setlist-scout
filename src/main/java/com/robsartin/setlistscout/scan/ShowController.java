@@ -1,16 +1,14 @@
 package com.robsartin.setlistscout.scan;
 
-import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
+import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CurrentUser;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -36,20 +34,20 @@ public class ShowController {
     private final ScanJobRepository scanJobRepository;
     private final SettingsService settingsService;
     private final CurrentUser currentUser;
-    private final AppProperties appProperties;
+    private final AdminGuard adminGuard;
 
     public ShowController(ShowRepository showRepository,
                            ArtistRepository artistRepository,
                            ScanJobRepository scanJobRepository,
                            SettingsService settingsService,
                            CurrentUser currentUser,
-                           AppProperties appProperties) {
+                           AdminGuard adminGuard) {
         this.showRepository = showRepository;
         this.artistRepository = artistRepository;
         this.scanJobRepository = scanJobRepository;
         this.settingsService = settingsService;
         this.currentUser = currentUser;
-        this.appProperties = appProperties;
+        this.adminGuard = adminGuard;
     }
 
     @GetMapping("/")
@@ -131,16 +129,17 @@ public class ShowController {
      * when their scheduled poller hasn't ticked yet and they can't sign in themselves right now.
      * Reuses the exact same redueAll mechanism as the self-service {@link #scanNow} above, just
      * parameterized by {@code targetOwner} instead of {@code currentUser.email()}. Gated by
-     * {@link #requireAdmin()} -- see its Javadoc for why this is a config check, not a roles
-     * system. The admin's OWN shows page (not the target owner's) is what gets re-rendered on an
-     * htmx request, since it's the admin's browser that made the call.
+     * {@link com.robsartin.setlistscout.shared.AdminGuard#require()} -- see its Javadoc for why
+     * this is a config check, not a roles system. The admin's OWN shows page (not the target
+     * owner's) is what gets re-rendered on an htmx request, since it's the admin's browser that
+     * made the call.
      */
     @PostMapping("/admin/scan-now")
     public String adminScanNow(@RequestParam String targetOwner,
                                @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                @RequestParam(defaultValue = "eventDate") String sort,
                                @RequestParam(defaultValue = "false") boolean showHidden, Model model) {
-        requireAdmin();
+        adminGuard.require();
         scanJobRepository.redueAll(targetOwner, Instant.now());
         String owner = currentUser.email();
         if (hxRequest != null) {
@@ -252,18 +251,5 @@ public class ShowController {
             return "shows :: showsRegion";
         }
         return "redirect:/";
-    }
-
-    /**
-     * Placeholder admin gate for #136: reuses the same config-driven allow-list pattern as
-     * {@code SecurityConfig}'s OIDC login check (see {@code AppProperties.Auth#adminEmail}), not a
-     * real roles system -- that would be real infrastructure (migration, entity, an admin-toggle
-     * UI) for an app with exactly two allowed users today. Revisit if the app ever grows past that.
-     */
-    private void requireAdmin() {
-        String owner = currentUser.email();
-        if (owner == null || !owner.equalsIgnoreCase(appProperties.auth().adminEmail())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
     }
 }
