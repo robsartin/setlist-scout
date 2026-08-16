@@ -614,7 +614,7 @@ class SharedScanGuardsTest extends AbstractPostgresIntegrationTest {
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `./gradlew --no-daemon test --tests "*SharedScanGuardsTest" --console=plain`
-Expected: FAIL — `sharedOwnerGetsNoExpandJobs` finds expand jobs, and `sharedOwnerGetsCheapSourcesOnly` finds a `band-site` job. Those two failures are the guards' absence.
+Expected: FAIL — **four** of the six tests fail, which is the correct red state: `sharedOwnerGetsNoExpandJobs` and `scanBackfillAppliesSourcePolicy`'s shared-owner assertion, plus `sharedOwnerGetsCheapSourcesOnly` and `expandBackfillSkipsSharedOwners`. With zero guards implemented, every test that asserts a *reduced* job set fails, at both the listener and the backfill site. The two that pass are the real-owner controls — they must stay green throughout, since the guards must not disable expansion or band-site generally.
 
 - [ ] **Step 3: Write the one source policy**
 
