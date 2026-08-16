@@ -75,6 +75,22 @@ class ReviewControllerTest {
     }
 
     @Test
+    @DisplayName("approveAllPending announces how many candidates it approved")
+    void approveAllPendingAnnouncesCount() {
+        Artist a1 = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 1L);
+        Artist a2 = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 2L);
+        Artist a3 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 3L);
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
+                .thenReturn(List.of(a1, a2, a3));
+
+        ConcurrentModel model = new ConcurrentModel();
+        controller.approveAllPending(null, model);
+
+        ActionOutcome outcome = (ActionOutcome) model.asMap().get("outcome");
+        assertThat(outcome.message()).isEqualTo("Approved all 3 remaining candidates.");
+    }
+
+    @Test
     @DisplayName("rejectAllPending delegates to the activation service for every pending artist")
     void rejectAllPendingRejectsEveryone() {
         Artist tribute = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 1L);
@@ -85,6 +101,22 @@ class ReviewControllerTest {
 
         verify(activationService).changeStatus(1L, OWNER, ArtistStatus.REJECTED);
         verify(activationService).changeStatus(2L, OWNER, ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("rejectAllPending announces how many candidates it rejected")
+    void rejectAllPendingAnnouncesCount() {
+        Artist a1 = pending("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, 1L);
+        Artist a2 = pending("Jackson Browne", ArtistSource.SIMILAR_EXPANSION, 2L);
+        Artist a3 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 3L);
+        when(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
+                .thenReturn(List.of(a1, a2, a3));
+
+        ConcurrentModel model = new ConcurrentModel();
+        controller.rejectAllPending(null, model);
+
+        ActionOutcome outcome = (ActionOutcome) model.asMap().get("outcome");
+        assertThat(outcome.message()).isEqualTo("Rejected all 3 remaining candidates.");
     }
 
     @Test
@@ -144,6 +176,23 @@ class ReviewControllerTest {
         assertThat(view).isEqualTo("redirect:/artists/candidates");
         verify(activationService).changeStatus(1L, OWNER, ArtistStatus.APPROVED);
         verify(activationService).changeStatus(2L, OWNER, ArtistStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("reviewGroup announces how many rows changed and which relation type")
+    void reviewGroupAnnouncesCountAndRelationType() {
+        Artist member1 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
+        Artist member2 = pending("Benmont Tench", ArtistSource.MEMBER_EXPANSION, 2L);
+        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
+                OWNER, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION))
+                .thenReturn(List.of(member1, member2));
+
+        ConcurrentModel model = new ConcurrentModel();
+        controller.reviewGroup("Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION,
+                "approve", null, model);
+
+        ActionOutcome outcome = (ActionOutcome) model.asMap().get("outcome");
+        assertThat(outcome.message()).isEqualTo("Approved 2 Members from Tom Petty and the Heartbreakers.");
     }
 
     @Test
