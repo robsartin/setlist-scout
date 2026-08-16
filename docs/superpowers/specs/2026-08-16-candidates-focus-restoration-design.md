@@ -163,7 +163,11 @@ Message content is composed from two halves so no count plumbing is needed:
 - **what happened** (Java, in the handler): `"Approved Mike Campbell."` / `"Rejected 12 Members from Wilco."` /
   `"Expansion requested."`
 - **where you are now** (template, from the already-resolved model): `" 29 left in Tom Petty and the
-  Heartbreakers."` / `" Now reviewing Wilco, 30 candidates."` / `" Nothing left to review."`
+  Heartbreakers."`, or `" Nothing left to review."` when the queue is empty
+
+The second half needs no auto-advance branch: after an auto-advance `current.via` *is* the group just moved
+into, so the same sentence reads "Approved Mike Campbell. 30 left in Wilco." and the changed group name is
+itself the announcement. Focus landing on that group's anchor announces it a second time.
 
 `outcome` is null on full-page renders (and `outcome.message()` is null for the htmx `GET` used by sidebar
 navigation, which moves focus but has nothing to report), so the OOB element is not emitted there and no
