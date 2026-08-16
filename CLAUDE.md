@@ -69,6 +69,15 @@ mapping, or the app won't boot.
   empty key).
 - **Thymeleaf only resolves expressions inside `th:*` attributes** — `hx-get="@{/x}"` ships the
   literal `@{/x}`. Use `th:hx-get`.
+- **htmx focus after a swap**: an `outerHTML` swap destroys the focused element and focus drops to
+  `<body>`. The fix is server-side and needs no JavaScript — htmx focuses an `[autofocus]` element in
+  swapped-in content (after its own id-based restore, so `autofocus` wins), and `review.ActionOutcome`
+  decides which single element gets it. **The app ships no custom JS; keep it that way.**
+- **`hx-swap-oob="innerHTML"` on `#sr-status` is load-bearing, not stylistic.** htmx's default
+  `hx-swap-oob="true"` swap replaces the node instead of updating it in place, and `role`/`aria-live`
+  come back null — the OOB source element in the response carries only `id` and `hx-swap-oob`, not the
+  live-region attributes — which silently kills every announcement after the first.
+  `CandidateActionsTest` pins the exact `hx-swap-oob="innerHTML"` string so this can't regress unnoticed.
 - **Thymeleaf fragment parameters leak into the content fragment** — naming a layout parameter the
   same as a model attribute silently shadows it.
 - **GitHub GraphQL gets rate-limited** (so `gh pr create` fails); fall back to
