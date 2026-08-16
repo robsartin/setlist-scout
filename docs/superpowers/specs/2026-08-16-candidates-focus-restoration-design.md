@@ -61,8 +61,23 @@ Rejected alternatives:
 | Global Approve/Reject all remaining, group remains | the group anchor |
 | Global Approve/Reject all remaining, nothing left | the empty-state `<p>` |
 | Sidebar group link (htmx `GET`) | the group anchor |
-| Run expansion now / admin expand-now | **no `autofocus`** — the triggering button survives the swap, so a stable `id` on it lets htmx's built-in id-based restore keep focus exactly where the user left it |
+| Run expansion now / admin expand-now | the **swapped-in copy of the trigger button**, marked `autofocus` by its stable `id` (see the correction below) |
 | Full page load (non-htmx `GET`, history restore, and the no-JS redirect path) | **no `autofocus` anywhere** |
+
+> **Correction (2026-08-16, final review).** This row originally read "**no `autofocus`** — the triggering
+> button survives the swap, so a stable `id` on it lets htmx's built-in id-based restore keep focus exactly
+> where the user left it." That assumption was **disproved by measurement** in a browser against this repo's own
+> vendored htmx 2.0.3: `hx-disabled-elt="find button"` sets `disabled` on the trigger when the request starts,
+> which **blurs** it, so `document.activeElement` is already `<body>` when the swap runs. htmx's id-restore is
+> gated on the previously-focused element having *left the document*, and `<body>` has not, so the restore is
+> skipped and focus stays on `<body>` — the exact failure this design exists to remove. Removing
+> `hx-disabled-elt` kept focus on the button, confirming the cause. The fix is `ActionOutcome.trigger(id,
+> message)`, which marks the re-rendered button `autofocus`; the settle-task `focus([autofocus])` runs on the
+> freshly inserted, re-enabled element and is unaffected by the disable/re-enable cycle.
+>
+> Happy consequence: the invariant is now uniformly **exactly one `autofocus` on every htmx response path**,
+> with zero only on full page renders — no exception to carve out. `Focus.NONE` is gone with the assumption
+> that motivated it (a full page render is expressed as `outcome == null`, not `Focus.NONE`).
 
 Same-decision targeting means Approve → next Approve and Reject → next Reject, so a run of identical decisions
 needs no tabbing at all.
@@ -85,17 +100,18 @@ One new pure class, `review/ActionOutcome.java`, factored the way `review/Candid
 (pure logic, unit-tested, no Spring):
 
 ```java
-public record ActionOutcome(Focus focus, Long artistId, String decision, String message) {
-    public enum Focus { NONE, ANCHOR, ROW }
+public record ActionOutcome(Focus focus, Long artistId, String decision, String triggerId, String message) {
+    public enum Focus { ANCHOR, ROW, TRIGGER }
 
     /** ROW targeting the successor of actedId in orderedGroupRows; ANCHOR when it has none. */
     static ActionOutcome afterRow(List<Artist> orderedGroupRows, long actedId, String decision, String message);
     static ActionOutcome anchor(String message);
-    /** NONE -- the element that triggered the request survives the swap and htmx re-focuses it by id. */
-    static ActionOutcome keepFocus(String message);
+    /** TRIGGER -- the swapped-in copy of the button that issued the request, by its stable id. */
+    static ActionOutcome trigger(String triggerId, String message);
 
     boolean focusesRow(Long id, String decision);  // template predicate
     boolean focusesAnchor();                       // template predicate
+    boolean focusesTrigger(String id);             // template predicate
 }
 ```
 
@@ -192,7 +208,8 @@ style, asserting on response markup):
 - per-relation-type bulk → anchor
 - approve-all-pending → `autofocus` on the empty-state element
 - htmx `GET` with `via` (sidebar navigation) → anchor
-- expand-now → response contains **no** `autofocus`, and the trigger button carries its stable id
+- expand-now (and admin expand-now) → `autofocus` on that trigger's own button, matched by its stable id;
+  plus the admin case where its form doesn't render, which must fall back to the anchor rather than dangle
 - full-page `GET` → **zero** occurrences of `autofocus` (never steal focus on a normal load)
 - invariant: every action response contains **exactly one** `autofocus`
 - OOB: action responses contain `id="sr-status"` with `hx-swap-oob="innerHTML"` and the acted-on artist's name;

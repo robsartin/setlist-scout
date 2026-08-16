@@ -34,6 +34,14 @@ public class ReviewController {
      */
     private static final String HX_HISTORY_RESTORE_REQUEST = "HX-History-Restore-Request";
 
+    /** DOM id of the "Run expansion now" button (candidates.html); rendered on every response. */
+    private static final String EXPAND_NOW_TRIGGER = "expand-now";
+    /**
+     * DOM id of the admin-only cross-account expansion button. Unlike {@link #EXPAND_NOW_TRIGGER}
+     * its form is conditional, which is why {@link #focusable} has to check before naming it.
+     */
+    private static final String ADMIN_EXPAND_NOW_TRIGGER = "admin-expand-now";
+
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
     private final CurrentUser currentUser;
@@ -75,10 +83,9 @@ public class ReviewController {
      * building a redirect URL after a non-htmx action), or {@code null} if nothing is pending.
      * <p>
      * {@code outcome} (issue #155) is the focus/announcement target the caller resolved before
-     * this method re-queries current state; it's downgraded by {@link #focusable} when its chosen
-     * successor doesn't turn up among the rows about to render, and published as the {@code
-     * outcome} model attribute -- absent entirely on a full page render, where {@code outcome} is
-     * {@code null} coming in.
+     * this method re-queries current state; it's downgraded by {@link #focusable} when the element
+     * it names won't be in the response, and published as the {@code outcome} model attribute --
+     * absent entirely on a full page render, where {@code outcome} is {@code null} coming in.
      * <p>
      * Also overwrites {@code pendingCount} (Minor 2, #148 fix round 3): {@link NavModelAdvice}'s
      * {@code @ModelAttribute} runs BEFORE the handler method body -- including before this action's
@@ -105,7 +112,7 @@ public class ReviewController {
             }
             model.addAttribute("rowsByType", rowsByType);
         }
-        ActionOutcome focusable = focusable(outcome, rowsByType);
+        ActionOutcome focusable = focusable(outcome, rowsByType, adminTriggerRenders(model));
         if (focusable != null) {
             model.addAttribute("outcome", focusable);
         }
@@ -113,19 +120,42 @@ public class ReviewController {
     }
 
     /**
-     * Downgrades ROW focus to the group anchor when the successor picked before the mutation isn't
-     * among the rows about to render -- another tab decided it in the meantime, or the group
-     * auto-advanced. Without this the response would carry an {@code autofocus} for an element that
-     * isn't there, and focus would silently drop to {@code <body>} again.
+     * Downgrades a focus target that won't be in the response to the group anchor. Two ways that
+     * happens: the ROW successor picked before the mutation isn't among the rows about to render
+     * (another tab decided it, or the group auto-advanced), or a TRIGGER names the admin button on
+     * a page where its form doesn't render. Without this the response would carry an {@code
+     * autofocus} for an element that isn't there, and focus would silently drop to {@code <body>}
+     * again -- the exact failure issue #155 exists to remove.
      */
-    private static ActionOutcome focusable(ActionOutcome outcome, Map<ArtistSource, List<Artist>> rowsByType) {
-        if (outcome == null || outcome.focus() != ActionOutcome.Focus.ROW) {
-            return outcome;
+    private static ActionOutcome focusable(ActionOutcome outcome, Map<ArtistSource, List<Artist>> rowsByType,
+                                           boolean adminTriggerRenders) {
+        if (outcome == null) {
+            return null;
         }
-        boolean stillPending = rowsByType.values().stream()
-                .flatMap(List::stream)
-                .anyMatch(a -> outcome.artistId().equals(a.getId()));
-        return stillPending ? outcome : outcome.withoutRowFocus();
+        return switch (outcome.focus()) {
+            case ROW -> rowsByType.values().stream()
+                    .flatMap(List::stream)
+                    .anyMatch(a -> outcome.artistId().equals(a.getId()))
+                    ? outcome : outcome.downgradedToAnchor();
+            // The self-service expand-now button renders unconditionally, so it never needs the
+            // check; the admin one is gated in the template, and an admin CAN reach that endpoint
+            // with the form absent (a hand-rolled POST, or a page rendered before the allow-list
+            // shrank), which would otherwise leave the response pointing at nothing.
+            case TRIGGER -> adminTriggerRenders || !ADMIN_EXPAND_NOW_TRIGGER.equals(outcome.triggerId())
+                    ? outcome : outcome.downgradedToAnchor();
+            case ANCHOR -> outcome;
+        };
+    }
+
+    /**
+     * Whether candidates.html will actually render the admin's cross-account expansion form: the
+     * same condition as its {@code th:if}, read from the model attributes {@link NavModelAdvice}
+     * populated before this handler body ran. Read from the model rather than recomputed from
+     * config so it can't drift from what the template branches on.
+     */
+    private static boolean adminTriggerRenders(Model model) {
+        return Boolean.TRUE.equals(model.getAttribute("isAdmin"))
+                && model.getAttribute("otherOwnerEmails") instanceof List<?> others && !others.isEmpty();
     }
 
     /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
@@ -244,7 +274,8 @@ public class ReviewController {
                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
         expandJobRepository.redueAll(currentUser.email(), java.time.Instant.now());
-        return actionResult(hxRequest, model, via, ActionOutcome.keepFocus("Expansion requested."));
+        return actionResult(hxRequest, model, via,
+                ActionOutcome.trigger(EXPAND_NOW_TRIGGER, "Expansion requested."));
     }
 
     /**
@@ -263,7 +294,7 @@ public class ReviewController {
         requireAdmin();
         expandJobRepository.redueAll(targetOwner, java.time.Instant.now());
         return actionResult(hxRequest, model, null,
-                ActionOutcome.keepFocus("Expansion requested for " + targetOwner + "."));
+                ActionOutcome.trigger(ADMIN_EXPAND_NOW_TRIGGER, "Expansion requested for " + targetOwner + "."));
     }
 
     /**

@@ -44,6 +44,11 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     private static final String TOM_PETTY = "Tom Petty and the Heartbreakers";
     private static final String WILCO = "Wilco";
 
+    // application.yml's defaults, which nothing in this suite overrides (src/test/resources/
+    // application.properties only turns the pollers off): this address is the admin AND the whole
+    // allow-list, so NavModelAdvice's otherOwnerEmails is empty for every test in this class.
+    private static final String ADMIN_EMAIL = "rob.sartin@gmail.com";
+
     private Long savePending(String owner, String name, ArtistSource source, String discoveredVia) {
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, "note for " + name);
         artist.setOwner(owner);
@@ -156,7 +161,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).contains("Nothing pending. Run expansion to find more.");
+        assertThat(body).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -239,7 +244,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).contains("Nothing pending. Run expansion to find more.");
+        assertThat(body).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -391,7 +396,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         // No group left, so the anchor doesn't render -- the empty-state paragraph takes the focus.
         assertThat(countAutofocusElements(body)).isEqualTo(1);
         assertThat(body).containsPattern("<p[^>]*tabindex=\"-1\"[^>]*autofocus|<p[^>]*autofocus[^>]*tabindex=\"-1\"");
-        assertThat(body).contains("Nothing pending");
+        assertThat(body).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -414,7 +419,7 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void expandNowLeavesFocusOnItsOwnButton() throws Exception {
+    void expandNowFocusesTheSwappedInCopyOfItsOwnTriggerButton() throws Exception {
         String owner = "actions-expand-focus@example.com";
         savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
 
@@ -426,10 +431,35 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        // The button survives the swap, so htmx's built-in id-based restore keeps focus on it --
-        // moving focus away with autofocus would be worse than doing nothing.
-        assertThat(body).doesNotContain("autofocus");
-        assertThat(body).contains("id=\"expand-now\"");
+        // The trigger cannot hold its own focus across the swap, and relying on htmx's built-in
+        // id-based restore does NOT work here (measured in a browser against the vendored 2.0.3
+        // build): hx-disabled-elt="find button" sets `disabled` on this button when the request
+        // starts, which BLURS it, so document.activeElement is already <body> when the swap runs --
+        // and the id-restore is gated on the focused element having LEFT the document, which <body>
+        // never does. So the server marks the swapped-in copy of the button autofocus instead; the
+        // settle-task focus([autofocus]) runs on it after it is re-inserted and re-enabled.
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"expand-now\"[^>]*autofocus|autofocus[^>]*id=\"expand-now\"");
+    }
+
+    @Test
+    void adminExpandNowFallsBackToTheAnchorWhenItsOwnTriggerIsNotOnThePage() throws Exception {
+        // The admin form is gated (candidates.html) on there being another allow-listed owner to
+        // target, and this suite runs on application.yml's defaults, where the allow-list is the
+        // admin alone -- so the button a TRIGGER outcome would name is not rendered at all. The
+        // response must still carry exactly one autofocus (here the empty state, since the admin's
+        // own queue is empty) rather than dangle one at an element that isn't there.
+        String body = mockMvc.perform(post("/artists/admin/expand-now")
+                        .param("targetOwner", "someone-else@example.com")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN_EMAIL))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("id=\"admin-expand-now\"");
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).contains("Expansion requested for someone-else@example.com.");
     }
 
     @Test
@@ -465,7 +495,11 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(body).contains("Rejected Alpha Centauri.");
-        assertThat(body).contains("Nothing left to review.");
+        // The announcement's "where you are now" half, matched as its own rendered <span>: the
+        // visible empty state now uses the SAME sentence (deliberately -- one state, one phrasing),
+        // so a bare contains("Nothing left to review.") would pass on the paragraph alone even if
+        // the announcement had gone missing.
+        assertThat(body).contains("<span> Nothing left to review.</span>");
     }
 
     @Test

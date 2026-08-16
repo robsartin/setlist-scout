@@ -69,31 +69,43 @@ class ActionOutcomeTest {
     }
 
     @Test
-    @DisplayName("anchor and keepFocus carry no row, and keepFocus focuses nothing at all")
-    void anchorAndKeepFocus() {
+    @DisplayName("anchor and trigger carry no row, and only trigger claims a button id")
+    void anchorAndTrigger() {
         assertThat(ActionOutcome.anchor("Approved all 12 Members from Wilco.").focusesAnchor()).isTrue();
         assertThat(ActionOutcome.anchor("m").focusesRow(1L, "approve")).isFalse();
+        assertThat(ActionOutcome.anchor("m").focusesTrigger("expand-now")).isFalse();
 
-        ActionOutcome kept = ActionOutcome.keepFocus("Expansion requested.");
-        assertThat(kept.focus()).isEqualTo(ActionOutcome.Focus.NONE);
-        assertThat(kept.focusesAnchor()).isFalse();
-        assertThat(kept.focusesRow(1L, "approve")).isFalse();
-        assertThat(kept.message()).isEqualTo("Expansion requested.");
+        ActionOutcome expandNow = ActionOutcome.trigger("expand-now", "Expansion requested.");
+        assertThat(expandNow.focus()).isEqualTo(ActionOutcome.Focus.TRIGGER);
+        assertThat(expandNow.focusesTrigger("expand-now")).isTrue();
+        assertThat(expandNow.focusesTrigger("admin-expand-now")).as("the other trigger button").isFalse();
+        assertThat(expandNow.focusesAnchor()).isFalse();
+        assertThat(expandNow.focusesRow(1L, "approve")).isFalse();
+        assertThat(expandNow.message()).isEqualTo("Expansion requested.");
     }
 
     @Test
-    @DisplayName("withoutRowFocus downgrades ROW to the anchor and leaves the message and other kinds alone")
-    void withoutRowFocusDowngrades() {
+    @DisplayName("downgradedToAnchor drops ROW and TRIGGER targeting, keeps the message, no-ops on ANCHOR")
+    void downgradedToAnchorDropsTheSpecificTarget() {
         ActionOutcome row = ActionOutcome.afterRow(
                 List.of(row("Alpha", 1L), row("Bravo", 2L)), 1L, "approve", "Approved Alpha.");
 
-        ActionOutcome downgraded = row.withoutRowFocus();
+        ActionOutcome downgradedRow = row.downgradedToAnchor();
 
-        assertThat(downgraded.focusesAnchor()).isTrue();
-        assertThat(downgraded.artistId()).isNull();
-        assertThat(downgraded.message()).isEqualTo("Approved Alpha.");
+        assertThat(downgradedRow.focusesAnchor()).isTrue();
+        assertThat(downgradedRow.artistId()).isNull();
+        assertThat(downgradedRow.message()).isEqualTo("Approved Alpha.");
 
-        ActionOutcome kept = ActionOutcome.keepFocus("Expansion requested.");
-        assertThat(kept.withoutRowFocus()).isEqualTo(kept);
+        // The admin trigger is downgraded the same way when its form isn't on the page.
+        ActionOutcome downgradedTrigger =
+                ActionOutcome.trigger("admin-expand-now", "Expansion requested for x@example.com.")
+                        .downgradedToAnchor();
+
+        assertThat(downgradedTrigger.focusesAnchor()).isTrue();
+        assertThat(downgradedTrigger.focusesTrigger("admin-expand-now")).isFalse();
+        assertThat(downgradedTrigger.message()).isEqualTo("Expansion requested for x@example.com.");
+
+        ActionOutcome anchor = ActionOutcome.anchor("Approved all 12 Members from Wilco.");
+        assertThat(anchor.downgradedToAnchor()).isSameAs(anchor);
     }
 }

@@ -293,8 +293,12 @@ Focus is managed server-side: because every action swaps a whole region with
 `outerHTML`, the focused element is destroyed and focus would drop to `<body>`.
 `review.ActionOutcome` picks exactly one element per response — the next row's
 same-decision button in the acted row's own relation group, the current
-group's anchor, or nothing when the trigger itself survives — and the template
-marks it `autofocus`, which htmx honours in swapped-in content. The successor
+group's anchor, or the swapped-in copy of the button that triggered the action
+— and the template marks it `autofocus`, which htmx honours in swapped-in
+content. Every htmx response carries **exactly one** `autofocus`; only a full
+page render carries none. Even the trigger buttons need it: `hx-disabled-elt`
+blurs them at request start, so htmx's built-in id-based restore (gated on the
+focused element having left the document) never fires for them. The successor
 is scoped to that relation group, so clearing the relation group's last row
 lands on the group anchor rather than carrying focus into the next relation
 type — intended, and confirmed with the repo owner. Clearing the whole

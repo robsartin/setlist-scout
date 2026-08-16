@@ -228,7 +228,7 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).contains("Nothing pending. Run expansion to find more.");
+        assertThat(body).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -330,7 +330,7 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                         .header("HX-Request", "true").with(csrf())
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(afterThird).contains("Nothing pending. Run expansion to find more.");
+        assertThat(afterThird).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -404,7 +404,12 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).doesNotContain("hx-swap-oob");
         // The old inert live region -- inside the swap target, so replaced wholesale every time --
         // is gone, and with it the re-announcement of the group title and count on every action.
-        assertThat(body).doesNotContain("<div class=\"artist-group-header\" aria-live=\"polite\">");
+        // Asserted as a COUNT rather than doesNotContain on the old markup: any attribute reorder,
+        // added class or whitespace change would make that pass vacuously while aria-live was
+        // genuinely back inside #candidates-app. One aria-live on the whole page, and the assertion
+        // above pins whose it is.
+        assertThat(body).as("only the layout's permanent #sr-status carries aria-live")
+                .containsOnlyOnce("aria-live");
     }
 
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {

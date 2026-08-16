@@ -46,8 +46,12 @@
               th:text="' ' + ${current.total} + ' left in ' + ${current.via} + '.'"> </span>
         <span th:if="${current == null}"> Nothing left to review.</span>
     </p>
+    <!--/* The visible empty state and the announcement's "where you are now" half (above) say the
+           same sentence on purpose: focus lands here at the same moment the live region speaks, so
+           two different phrasings for one state read as two different states. The guidance stays
+           visible-only -- it tells the user what to do next, not what just happened. */-->
     <p th:if="${current == null}" tabindex="-1"
-       th:autofocus="${outcome != null and outcome.focusesAnchor()}">Nothing pending. Run expansion to find more.</p>
+       th:autofocus="${outcome != null and outcome.focusesAnchor()}">Nothing left to review. Run expansion to find more.</p>
 
     <div th:if="${current != null}" class="candidates-layout">
         <!--/* Minor 4 (#148 fix round 3): production has ~294 sidebar groups (below) between the
@@ -169,7 +173,15 @@
         <form class="inline" th:hx-post="@{/artists/expand-now}" hx-target="#candidates-app" hx-swap="outerHTML"
               hx-disabled-elt="find button" method="post" th:action="@{/artists/expand-now}">
             <input type="hidden" name="via" th:if="${current != null}" th:value="${current.via}"/>
-            <button type="submit" id="expand-now">Run expansion now</button>
+            <!--/* #155: the trigger cannot keep its own focus across the swap. hx-disabled-elt
+                   above disables (and so BLURS) this button when the request starts, leaving
+                   document.activeElement as <body> -- and htmx's built-in id-based restore only
+                   fires for an element that LEFT the document, which <body> never does (measured
+                   in a browser against the vendored 2.0.3 build). So the server names this button
+                   in the outcome and the swapped-in copy carries autofocus, which the settle-task
+                   focus([autofocus]) honours after re-insertion. */-->
+            <button type="submit" id="expand-now"
+                    th:autofocus="${outcome != null and outcome.focusesTrigger('expand-now')}">Run expansion now</button>
         </form>
         <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
                and only when there's another allow-listed user to pick -- see NavModelAdvice. The
@@ -183,7 +195,12 @@
             <select id="admin-expand-target" name="targetOwner">
                 <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
             </select>
-            <button type="submit" id="admin-expand-now">Run expansion for user</button>
+            <!--/* Same reasoning as the expand-now button above. This form is conditional, so
+                   ReviewController#focusable checks it will actually render before letting the
+                   outcome name it -- an autofocus pointing at an absent element would drop focus
+                   to <body>, which is the bug, not the fix. */-->
+            <button type="submit" id="admin-expand-now"
+                    th:autofocus="${outcome != null and outcome.focusesTrigger('admin-expand-now')}">Run expansion for user</button>
         </form>
     </div>
 </div>
