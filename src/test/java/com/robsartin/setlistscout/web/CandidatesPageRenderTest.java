@@ -172,6 +172,14 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains(TOM_PETTY);
         assertThat(body).contains("Mike Campbell");
         assertThat(body).doesNotContain("<head").doesNotContain("topbar");
+
+        // #155: this swap destroys the previously-focused element exactly like a per-row action
+        // does, so it needs a focus target too -- the group anchor, since there's no acted-on row
+        // to succeed. Regression this guards: simplifying the controller's `fragment` condition to
+        // `hxRequest != null` (dropping the history-restore check) still passes every other test on
+        // this path.
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
     }
 
     @Test
@@ -193,6 +201,13 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
 
         assertThat(body).contains("topbar");
         assertThat(body).contains("<head");
+
+        // #155: a history restore is a full page render -- it must NOT carry autofocus, or the
+        // browser honours it natively on load and yanks focus into the middle of the list instead
+        // of leaving it at the top of the document. Regression this guards: the same simplified
+        // `fragment` condition that would break the assertion above would also make this one an
+        // (incorrect) ANCHOR-focus fragment response.
+        assertThat(countAutofocusElements(body)).isEqualTo(0);
     }
 
     @Test

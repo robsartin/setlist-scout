@@ -345,21 +345,6 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     /**
-     * How many ELEMENTS carry the autofocus attribute. Counting raw substrings would read
-     * Thymeleaf's `autofocus="autofocus"` (the expanded form it serialises boolean attributes to)
-     * as two, so this matches the attribute on a tag instead.
-     */
-    private static int countAutofocusElements(String body) {
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("<[^>]*\\bautofocus\\b[^>]*>").matcher(body);
-        int count = 0;
-        while (m.find()) {
-            count++;
-        }
-        return count;
-    }
-
-    /**
      * The aria-label of the single button carrying autofocus. Both attributes live on the same
      * <button> tag, in either order, so the match is anchored on the tag rather than on ordering.
      */
