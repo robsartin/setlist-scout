@@ -292,17 +292,19 @@ ships the literal string `@{/x}` — Thymeleaf only resolves `@{...}` inside a
 Focus is managed server-side: because every action swaps a whole region with
 `outerHTML`, the focused element is destroyed and focus would drop to `<body>`.
 `review.ActionOutcome` picks exactly one element per response — the next row's
-same-decision button in the acted row's own relation group (so clearing a
-group's last row lands on that group's own anchor, not the next group's —
-intended, not an oversight), the current group's anchor, or nothing when the
-trigger itself survives — and the template marks it `autofocus`, which htmx
-honours in swapped-in content. The app deliberately ships **no custom
-JavaScript**. The same response carries an `hx-swap-oob="innerHTML"` update for
-`#sr-status`, the one permanent `role="status"` region (in the layout, outside
-every swap target) — `innerHTML` is load-bearing, not stylistic, since htmx's
-default `hx-swap-oob="true"` replaces the node instead and drops `role`/
-`aria-live` to null, silently losing every announcement after the first;
-`CandidateActionsTest` pins the exact string.
+same-decision button in the acted row's own relation group, the current
+group's anchor, or nothing when the trigger itself survives — and the template
+marks it `autofocus`, which htmx honours in swapped-in content. The successor
+is scoped to that relation group, so clearing the relation group's last row
+lands on the group anchor rather than carrying focus into the next relation
+type — intended, and confirmed with the repo owner. Clearing the whole
+base-artist group instead auto-advances the page, landing on that new group's
+anchor. The app deliberately ships **no custom JavaScript**. The same response
+carries an `hx-swap-oob="innerHTML"` update for `#sr-status`, the one permanent
+`role="status"` region (in the layout, outside every swap target) — `innerHTML`
+is load-bearing, not stylistic, since htmx's default `hx-swap-oob="true"`
+replaces the node and drops `role`/`aria-live` to null, silently losing every
+announcement after the first; `CandidateActionsTest` pins the exact string.
 
 **Auth**: Google OAuth2/OIDC via a custom `OidcUserService` that checks the
 verified email against an allow-list *during the OIDC exchange*, before a
