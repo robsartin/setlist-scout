@@ -173,6 +173,15 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("Mike Campbell");
         assertThat(body).doesNotContain("<head").doesNotContain("topbar");
 
+        // #155: one assertion, two invariants. The permanent live region lives in the shared
+        // layout, outside #candidates-app -- this bare fragment IS #candidates-app's subtree, so
+        // it must contain no trace of the region at all. Separately, this GET resolves via
+        // ActionOutcome.anchor(null) (a null message), so the OOB gate on candidates.html
+        // (outcome.message != null, not merely outcome != null) must suppress the OOB update too.
+        // Either regression -- the region leaking into the swap target, or the gate loosening to
+        // fire on a null message -- would put the substring "sr-status" back into this response.
+        assertThat(body).doesNotContain("sr-status");
+
         // #155: this swap destroys the previously-focused element exactly like a per-row action
         // does, so it needs a focus target too -- the group anchor, since there's no acted-on row
         // to succeed. Regression this guards: simplifying the controller's `fragment` condition to
@@ -387,9 +396,10 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        // The region ships empty with every page, from the shared layout.
-        assertThat(body).contains("id=\"sr-status\"");
-        assertThat(body).contains("role=\"status\"");
+        // The region ships empty with every page, from the shared layout. One contiguous
+        // substring, not independent id/role checks -- id, role, AND aria-live all have to land
+        // on the SAME element, or this no longer proves the live region has the right semantics.
+        assertThat(body).contains("<p id=\"sr-status\" role=\"status\" aria-live=\"polite\"");
         // ...and a full page render never carries an out-of-band update.
         assertThat(body).doesNotContain("hx-swap-oob");
         // The old inert live region -- inside the swap target, so replaced wholesale every time --
