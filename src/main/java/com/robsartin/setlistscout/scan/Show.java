@@ -40,6 +40,14 @@ public class Show {
     @Column(nullable = false)
     private Instant discoveredAt = Instant.now();
 
+    /**
+     * Set when the owner hides this show from the default Shows list (issue #166); {@code null}
+     * means visible. Survives re-scan by construction: {@code ScanUnitRunner#persistNew} skips a
+     * show that already exists by natural key rather than refreshing it, and that check never
+     * looks at this column, so a later scan re-discovering the same show never touches it.
+     */
+    private Instant hiddenAt;
+
     protected Show() {
         // JPA
     }
@@ -66,4 +74,7 @@ public class Show {
     public String getSource() { return source; }
     public String getTicketUrl() { return ticketUrl; }
     public Instant getDiscoveredAt() { return discoveredAt; }
+    public Instant getHiddenAt() { return hiddenAt; }
+    public void setHiddenAt(Instant hiddenAt) { this.hiddenAt = hiddenAt; }
+    public boolean isHidden() { return hiddenAt != null; }
 }

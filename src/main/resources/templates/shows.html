@@ -16,7 +16,9 @@
                   th:text="'(' + ${settings.city} + ', ' + ${settings.state} + ')'">(Austin, TX)</span>
         </form>
         <form class="inline" th:action="@{/scan-now}" method="post"
-              hx-post="/scan-now" hx-target="#shows-region" hx-swap="outerHTML">
+              th:hx-post="@{/scan-now}" hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+            <input type="hidden" name="sort" th:value="${currentSort}"/>
+            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
             <button type="submit">Scan now</button>
         </form>
         <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
@@ -25,7 +27,9 @@
                convenience, not the access control. */-->
         <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
               th:action="@{/admin/scan-now}" method="post"
-              hx-post="/admin/scan-now" hx-target="#shows-region" hx-swap="outerHTML">
+              th:hx-post="@{/admin/scan-now}" hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+            <input type="hidden" name="sort" th:value="${currentSort}"/>
+            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
             <label for="admin-scan-target">Admin: scan for</label>
             <select id="admin-scan-target" name="targetOwner">
                 <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
@@ -35,30 +39,64 @@
     </div>
 
     <!--/*
-      showsRegion is the htmx swap target for "Scan now": it re-dues the owner's scan jobs and
-      swaps in this fragment with a one-shot "queued" confirmation (scanQueued) -- the paced
-      poller drains the jobs on its own cadence, so there's no synchronous scan to wait on here.
-      aria-live announces the confirmation for screen readers. scanQueuedFor is set only by the
-      admin cross-account action (#136) and names the owner the scan was actually queued for,
-      since that's not necessarily whoever's looking at this page.
+      showsRegion is the htmx swap target for every action on this page (Scan now, admin Scan now,
+      Hide, Unhide): it re-dues/mutates, then swaps in this fragment with a one-shot confirmation
+      where relevant (scanQueued) -- the paced poller drains scan jobs on its own cadence, so
+      there's no synchronous scan to wait on here. scanQueuedFor is set only by the admin
+      cross-account action (#136) and names the owner the scan was actually queued for, since
+      that's not necessarily whoever's looking at this page.
+
+      tabindex="-1" + th:autofocus (issue #166, reusing the shape #155 established for Candidates):
+      this fragment root is the FOCUS ANCHOR whenever a hide/unhide's outcome has nothing more
+      specific to name (the acted-on row just left the list and had no successor, or there's
+      nothing to announce at all, e.g. a foreign-owner no-op). It's always present regardless of
+      how many rows render, unlike Candidates' bifurcated anchor/empty-state.
+
+      No aria-live here anymore (issue #166 drive-by fix): this whole element gets replaced by
+      every action's outerHTML swap, so to a screen reader it's a brand-new region each time, not a
+      mutation of a persistent one -- the exact reason fragments/layout.html's #sr-status lives
+      OUTSIDE every swap target instead. The "scan queued" notices below are now visual-only; the
+      real announcement for every action on this page is the OOB #sr-status paragraph.
     */-->
-    <div th:fragment="showsRegion" id="shows-region" aria-live="polite">
-        <p th:if="${scanQueued == true and scanQueuedFor == null}" class="notice" role="status">
+    <div th:fragment="showsRegion" id="shows-region" tabindex="-1"
+         th:autofocus="${outcome != null and outcome.focusesAnchor()}">
+        <!--/* #155-style OOB announcement (issue #166): htmx extracts this before the primary swap,
+               so it never lands inside #shows-region, and because it's emitted only when there's a
+               message, a full page render (outcome always null there) can't produce a duplicate id. */-->
+        <p id="sr-status" hx-swap-oob="innerHTML" class="visually-hidden"
+           th:if="${outcome != null and outcome.message != null}"
+           th:text="${outcome.message}">Hid Radiohead at Moody Center on Fri, Sep 5 2026 8:00 PM.</p>
+
+        <p th:if="${scanQueued == true and scanQueuedFor == null}" class="notice">
             Scan queued — newly found shows will appear here as they're picked up. Reload in a minute or two.
         </p>
-        <p th:if="${scanQueuedFor != null}" class="notice" role="status">
+        <p th:if="${scanQueuedFor != null}" class="notice">
             Scan queued for <span th:text="${scanQueuedFor}">user</span>.
+        </p>
+
+        <!--/* "show hidden" toggle (issue #166): a plain link + full navigation, like the sort
+               headers below, not an htmx action -- revealing/hiding the hidden rows is a VIEW
+               change, not a mutation, so there's nothing to announce and no focus to manage; a
+               normal <a> is already fully keyboard-operable for that. Carries the current sort so
+               toggling doesn't reset it. The count only shows while there's something to reveal
+               that isn't already on screen -- once the toggle is on, the hidden rows are right
+               there in the table, so repeating the count would be redundant. */-->
+        <p class="note">
+            <a th:if="${not showHidden}" th:href="@{/(sort=${currentSort}, showHidden=true)}">Show hidden<span
+                    th:if="${hiddenCount > 0}" class="count" th:text="' (' + ${hiddenCount} + ')'"> (0)</span></a>
+            <a th:if="${showHidden}" th:href="@{/(sort=${currentSort}, showHidden=false)}">Hide hidden shows</a>
         </p>
 
         <div class="table-scroll">
             <table>
                 <thead>
                 <tr>
-                    <th><a href="?sort=artist">Band</a></th>
-                    <th><a href="?sort=eventDate">Date / Time</a></th>
-                    <th><a href="?sort=venue">Venue</a></th>
-                    <th><a href="?sort=price">Price</a></th>
-                    <th><a href="?sort=discoveredAt">Found</a></th>
+                    <th><a th:href="@{/(sort='artist', showHidden=${showHidden})}">Band</a></th>
+                    <th><a th:href="@{/(sort='eventDate', showHidden=${showHidden})}">Date / Time</a></th>
+                    <th><a th:href="@{/(sort='venue', showHidden=${showHidden})}">Venue</a></th>
+                    <th><a th:href="@{/(sort='price', showHidden=${showHidden})}">Price</a></th>
+                    <th><a th:href="@{/(sort='discoveredAt', showHidden=${showHidden})}">Found</a></th>
+                    <th>Actions</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -67,6 +105,7 @@
                         <span th:text="${show.artistName}">Band</span>
                         <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
                               class="chip tribute">Tribute</span>
+                        <span th:if="${show.hidden}" class="note">(hidden)</span>
                     </td>
                     <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
                     <td>
@@ -76,11 +115,45 @@
                     </td>
                     <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
                     <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
+                    <td>
+                        <!--/* Owner-scoped server-side (ShowController#toggleHidden via
+                               findByIdAndOwner); sort/showHidden hidden inputs carry the current
+                               view state through the swap, same technique as candidates.html's
+                               group-action forms carrying `via`/`type`/`decision`. */-->
+                        <form th:if="${not show.hidden}" class="inline" method="post"
+                              th:action="@{/shows/{id}/hide(id=${show.id})}"
+                              th:hx-post="@{/shows/{id}/hide(id=${show.id})}"
+                              hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                            <input type="hidden" name="sort" th:value="${currentSort}"/>
+                            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                            <button type="submit" class="btn-sm"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id)}"
+                                    th:aria-label="'Hide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide</button>
+                        </form>
+                        <form th:if="${show.hidden}" class="inline" method="post"
+                              th:action="@{/shows/{id}/unhide(id=${show.id})}"
+                              th:hx-post="@{/shows/{id}/unhide(id=${show.id})}"
+                              hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                            <input type="hidden" name="sort" th:value="${currentSort}"/>
+                            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                            <button type="submit" class="btn-sm"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id)}"
+                                    th:aria-label="'Unhide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Unhide</button>
+                        </form>
+                    </td>
                 </tr>
                 </tbody>
             </table>
         </div>
-        <p th:if="${#lists.isEmpty(shows)}">No shows found yet. Try "Scan now", or check back after the next scheduled scan.</p>
+        <!--/* Empty-state text depends on WHY the list is empty (issue #166): plain "no shows" is
+               only true when nothing's hidden either, otherwise it would mislead someone who has
+               shows but hid all of them into thinking a scan is what they need. */-->
+        <p th:if="${#lists.isEmpty(shows) and (showHidden or hiddenCount == 0)}">No shows found yet. Try "Scan now", or check back after the next scheduled scan.</p>
+        <p th:if="${#lists.isEmpty(shows) and not showHidden and hiddenCount > 0}">
+            No visible shows right now, but <span th:text="${hiddenCount}">1</span>
+            <span th:text="${hiddenCount == 1 ? 'show is' : 'shows are'}">shows are</span> hidden.
+            <a th:href="@{/(sort=${currentSort}, showHidden=true)}">Show hidden</a>.
+        </p>
     </div>
 </div>
 </body>
