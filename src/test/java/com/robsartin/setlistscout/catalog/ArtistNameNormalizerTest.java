@@ -74,4 +74,45 @@ class ArtistNameNormalizerTest {
         assertThat(ArtistNameNormalizer.normalize("The National"))
                 .isNotEqualTo(ArtistNameNormalizer.normalize("National Park Radio"));
     }
+
+    @Test
+    @DisplayName("issue #157: the real production pair -- spaced vs. unspaced hyphen -- normalizes equal")
+    void hyphenSpacingCollapsesForRealProductionPair() {
+        assertThat(ArtistNameNormalizer.normalize("Paul Quinichette - John Coltrane Quintet"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Paul Quinichette-John Coltrane Quintet"));
+    }
+
+    @Test
+    @DisplayName("issue #157: any whitespace touching a hyphen collapses away, one-sided or both")
+    void hyphenSpacingVariantsAllCollapseToTheSameForm() {
+        String unspaced = ArtistNameNormalizer.normalize("Foo-Bar");
+        assertThat(ArtistNameNormalizer.normalize("Foo - Bar")).isEqualTo(unspaced);
+        assertThat(ArtistNameNormalizer.normalize("Foo- Bar")).isEqualTo(unspaced);
+        assertThat(ArtistNameNormalizer.normalize("Foo -Bar")).isEqualTo(unspaced);
+    }
+
+    @Test
+    @DisplayName("issue #157: word substitution (\"and\" vs \"&\") still does NOT match -- pins the "
+            + "conservative philosophy the class doc calls out; hyphen-spacing is not a license for "
+            + "general fuzzy matching")
+    void wordSubstitutionStillDoesNotMatch() {
+        assertThat(ArtistNameNormalizer.normalize("Tom Petty and The Heartbreakers"))
+                .isNotEqualTo(ArtistNameNormalizer.normalize("Tom Petty & The Heartbreakers"));
+    }
+
+    @Test
+    @DisplayName("issue #157: real production non-Latin names stay distinct and non-blank -- the "
+            + "hyphen-spacing fix must not regress the ASCII-stripping bug the issue also profiled")
+    void nonLatinProductionNamesStayDistinct() {
+        String hebrew = ArtistNameNormalizer.normalize("אסף רייז");
+        String japanese1 = ArtistNameNormalizer.normalize("灰野敬二");
+        String japanese2 = ArtistNameNormalizer.normalize("サイケアウツ");
+
+        assertThat(hebrew).isNotBlank();
+        assertThat(japanese1).isNotBlank();
+        assertThat(japanese2).isNotBlank();
+        assertThat(hebrew).isNotEqualTo(japanese1);
+        assertThat(hebrew).isNotEqualTo(japanese2);
+        assertThat(japanese1).isNotEqualTo(japanese2);
+    }
 }

@@ -62,6 +62,21 @@ class ArtistNameMatcherTest {
     }
 
     @Test
+    @DisplayName("issue #157: finds a REJECTED artist whose name differs only by spacing around a "
+            + "hyphen -- the real production pair, proving the reappearance guard now catches it")
+    void findsHyphenSpacingVariantOfARejectedArtist() {
+        ArtistNameStatusView existing =
+                view(5L, "Paul Quinichette - John Coltrane Quintet", ArtistStatus.REJECTED);
+        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(existing));
+
+        Optional<ArtistNameStatusView> found =
+                matcher.findExistingMatch(OWNER, "Paul Quinichette-John Coltrane Quintet");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getId()).isEqualTo(5L);
+    }
+
+    @Test
     @DisplayName("finds a match regardless of the existing row's status")
     void findsMatchRegardlessOfStatus() {
         ArtistNameStatusView existing = view(3L, "Wilco", ArtistStatus.APPROVED);
