@@ -87,7 +87,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        # metrics is NOT publicly readable: SecurityConfig's permitAll matches only the exact
+        # literal "/actuator/health" (not a prefix like "/actuator/**"), so /actuator/metrics
+        # falls through to anyRequest().authenticated() same as the rest of the app -- see #162
+        # and ActuatorMetricsSecurityTest. This is what makes Hikari's hikaricp.connections.*
+        # gauges (active/idle/pending/timeout/usage/acquire) readable for pool-sizing decisions.
+        # prometheus is deliberately not added -- there's no scraper today, and metrics' plain
+        # hand-inspectable JSON is enough (also avoids a new micrometer-registry-prometheus dep).
+        include: health, metrics
 
 logging:
   structured:
