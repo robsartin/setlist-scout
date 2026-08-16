@@ -30,11 +30,20 @@ python3 scripts/check_adrs.py                       # ADR numbering contiguous +
   success early, and never just "wait for a notification" (nothing will wake you). Verify the log
   you're reading belongs to *this* run: a stale log from an earlier build will happily show a
   green line that has nothing to do with your change.
-- **Async-await flakes:** integration tests wait on `@Async` AFTER_COMMIT listeners via
-  `awaitUntil`. Under CI load (a container per test class, contended Hikari pools) these can take
-  far longer than locally. If one fails on CI but passes locally — `PollerFlowTest.expandHappyPath`
-  is the usual suspect — suspect the deadline before suspecting the code. Raising `AWAIT_TIMEOUT`
-  is free: the loop returns as soon as the condition holds, so it only bounds the failure path.
+- **Scattered failures that pass on rerun: read the actual exception before calling it a flake.**
+  Two unrelated causes produce that same console signature, and telling them apart takes one look:
+  - An **assertion** failure on an `awaitUntil` → the async-await flake. Integration tests wait on
+    `@Async` AFTER_COMMIT listeners; under CI load (a container per test class, contended Hikari
+    pools) these take far longer than locally. `PollerFlowTest.expandHappyPath` is the usual
+    suspect. Suspect the deadline before the code — raising `AWAIT_TIMEOUT` is free, since the loop
+    returns as soon as the condition holds and the deadline only bounds the failure path.
+  - **`MockitoException: cannot mock this class`** → never a bug in the named test. Mockito's agent
+    failed to attach. Fixed in #160 by passing `mockito-core` as an explicit `-javaagent` in
+    `build.gradle.kts`; `-XX:-EnableDynamicAgentLoading` sits beside it so that if the wiring is
+    ever dropped, **every** mock-using test fails immediately instead of a random few. If you see
+    this, the build config broke — don't touch the test.
+
+  The tell for the second one: the failing classes have nothing to do with your change.
 - Docker Desktop must be running (Testcontainers).
 - Harmless: Hikari / `eventPublicationRegistry` shutdown WARNs at the end of every green build.
 
