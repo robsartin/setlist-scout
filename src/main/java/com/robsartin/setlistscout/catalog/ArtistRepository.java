@@ -92,6 +92,16 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndStatusAndDiscoveredViaAndSource(
         String owner, ArtistStatus status, String discoveredVia, ArtistSource source);
 
+    /**
+     * The IS-NULL counterpart to {@link #findByOwnerAndStatusAndDiscoveredViaAndSource}, for the
+     * "Ungrouped" bucket (issue #156): {@code discoveredVia = 'Ungrouped'} (the sentinel string the
+     * grouped-count query above maps a null {@code discoveredVia} to for display) can never match a
+     * NULL column in SQL, so a row-fetch for that bucket needs an explicit {@code IS NULL} query
+     * rather than reusing the exact-match method above with the sentinel as its parameter.
+     */
+    List<Artist> findByOwnerAndStatusAndDiscoveredViaIsNullAndSource(
+        String owner, ArtistStatus status, ArtistSource source);
+
     /** Total pending candidates for the owner -- the nav badge. */
     long countByOwnerAndStatus(String owner, ArtistStatus status);
 }
