@@ -33,6 +33,30 @@
        user decisions -- exactly the bug this is fixing. */-->
 <div th:fragment="candidatesApp" id="candidates-app" class="candidates-app"
      hx-history="false" hx-sync="closest main:queue all">
+    <!--/* Issue #154: nav badge OOB sync. fragments/layout.html's badge lives in <header>, OUTSIDE
+           this fragment's own #candidates-app swap target, so it's otherwise unreachable by any
+           action here -- most visible on "Reject all", where the count can drop by hundreds and
+           visibly not move. This companion shares that badge's id and carries hx-swap-oob="true":
+           htmx finds it anywhere in the response (nested is fine -- allowNestedOobSwaps defaults
+           true in the vendored 2.0.3 build, confirmed by reading its source, not just the docs) and
+           patches the header element in place, independent of where #candidates-app's own swap
+           lands.
+
+           Gated on oobNavBadge (set only by ReviewController#candidatesAppFragment) so the
+           full-page render -- where candidatesApp is also th:replace'd inline inside <main>, and
+           the header's own badge already reflects the fresh count -- doesn't get a second element
+           with the same id.
+
+           pendingCount here is ReviewController#populateCandidates's post-action recomputation, NOT
+           NavModelAdvice's pre-action @ModelAttribute (that one runs before the handler body, so
+           it's always one step behind -- see populateCandidates' Javadoc).
+
+           Always rendered (never th:if'd away like the header's own span) so the id stays put in
+           the DOM as an OOB target for the next action too; empty text when there's nothing pending
+           reproduces the header's "tag omitted" look (.count carries no box/background) without
+           actually removing the element htmx needs to find. */-->
+    <span th:if="${oobNavBadge}" id="nav-candidates-badge" class="count" hx-swap-oob="true"
+          th:text="${pendingCount != null and pendingCount > 0 ? pendingCount : ''}">0</span>
     <p th:if="${current == null}">Nothing pending. Run expansion to find more.</p>
 
     <div th:if="${current != null}" class="candidates-layout">

@@ -328,6 +328,75 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("31 pending total");
     }
 
+    @Test
+    void htmxRejectResponseIncludesOutOfBandNavBadgeWithPostActionCount() throws Exception {
+        // Issue #154: the nav badge (fragments/layout.html) sits OUTSIDE #candidates-app, so a
+        // normal htmx swap can never reach it -- it's stuck showing whatever count was there at
+        // the last full page load, no matter how many actions run afterward. The fragment
+        // response must carry an out-of-band copy of the badge, using the SAME post-action
+        // recount as the in-page total (ReviewController#populateCandidates), not
+        // NavModelAdvice's pre-action @ModelAttribute (which runs before the handler body).
+        String owner = "candidates-oob-badge@example.com";
+        seedTwoGroups(owner); // 30 Wilco + 2 Tom Petty = 32 pending
+        Long aWilcoRow = artistRepository.findByOwnerAndStatus(owner, ArtistStatus.PENDING_REVIEW).stream()
+                .filter(a -> WILCO.equals(a.getDiscoveredVia()))
+                .findFirst().orElseThrow().getId();
+
+        String body = mockMvc.perform(post("/artists/{id}/reject", aWilcoRow)
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+
+        // Both totals must agree: the in-page running total (globalbar) and the nav badge's OOB copy.
+        assertThat(body).contains("31 pending total");
+        assertThat(body).contains("hx-swap-oob=\"true\"");
+        var badgeValues = Pattern.compile("<span[^>]*id=\"nav-candidates-badge\"[^>]*>([^<]*)</span>")
+                .matcher(body).results().map(r -> r.group(1)).toList();
+        assertThat(badgeValues).as("exactly one OOB nav badge, carrying the post-action count: %s", body)
+                .containsExactly("31");
+    }
+
+    @Test
+    void rejectAllHtmxResponseClearsTheOutOfBandNavBadge() throws Exception {
+        // The most visible symptom in the issue: after "Reject all", the badge should vanish (same
+        // as a fresh page load with nothing pending), not keep showing the pre-action count.
+        String owner = "candidates-oob-badge-reject-all@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        String body = mockMvc.perform(post("/artists/reject-all-pending")
+                        .header("HX-Request", "true").with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andReturn().getResponse().getContentAsString();
+
+        var badgeValues = Pattern.compile("<span[^>]*id=\"nav-candidates-badge\"[^>]*>([^<]*)</span>")
+                .matcher(body).results().map(r -> r.group(1)).toList();
+        assertThat(badgeValues)
+                .as("OOB badge should be present but empty (hidden), not stuck at the old count: %s", body)
+                .containsExactly("");
+    }
+
+    @Test
+    void fullPageRenderShowsExactlyOneCorrectNavBadgeNoOobDuplicate() throws Exception {
+        // No regression to the non-htmx path (issue #154): the full page must still show exactly
+        // one nav-candidates-badge element, with the right count. The OOB companion is gated to
+        // bare-fragment htmx responses only (ReviewController#candidatesAppFragment) -- if it
+        // leaked into the full-page render too (candidatesApp is th:replace'd inline inside
+        // <main>), the id would be duplicated: invalid HTML, and two elements that could disagree.
+        String owner = "candidates-full-page-badge@example.com";
+        seedTwoGroups(owner); // 32 pending
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        var badgeValues = Pattern.compile("<span[^>]*id=\"nav-candidates-badge\"[^>]*>([^<]*)</span>")
+                .matcher(body).results().map(r -> r.group(1)).toList();
+        assertThat(badgeValues).as("exactly one nav badge, header's own copy, no OOB duplicate: %s", body)
+                .containsExactly("32");
+    }
+
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, "note for " + name);
         artist.setOwner(owner);
