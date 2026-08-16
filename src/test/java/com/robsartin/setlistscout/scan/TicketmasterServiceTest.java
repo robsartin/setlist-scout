@@ -58,7 +58,7 @@ class TicketmasterServiceTest {
                         }
                         """));
 
-        List<Show> shows = service.searchShows("Dawes", "78701", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -89,7 +89,7 @@ class TicketmasterServiceTest {
                         ]}}
                         """));
 
-        List<Show> shows = service.searchShows("Dawes", "78701", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -102,7 +102,7 @@ class TicketmasterServiceTest {
     void shouldReturnEmptyWhenNoEmbedded() {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
 
-        List<Show> shows = service.searchShows("Dawes", "78701", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
@@ -114,7 +114,7 @@ class TicketmasterServiceTest {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
 
         try (LogCapture logs = LogCapture.attachAt(TicketmasterService.class, Level.DEBUG)) {
-            List<Show> shows = service.searchShows("Dawes", "78701", 50,
+            List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
                     LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
             assertThat(shows).isEmpty();
@@ -147,7 +147,7 @@ class TicketmasterServiceTest {
                         ]}}
                         """));
 
-        List<Show> shows = service.searchShows("Dawes", "78701", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -161,7 +161,7 @@ class TicketmasterServiceTest {
     void shouldReturnEmptyOnServerError() {
         server.enqueue(new MockResponse().setResponseCode(500));
 
-        List<Show> shows = service.searchShows("Dawes", "78701", 50,
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
@@ -197,7 +197,7 @@ class TicketmasterServiceTest {
                         }
                         """));
 
-        List<Show> shows = service.searchShows("the Best", "78701", 50,
+        List<Show> shows = service.searchShows("the Best", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -219,7 +219,7 @@ class TicketmasterServiceTest {
                         ]}}
                         """));
 
-        List<Show> shows = service.searchShows("the Best", "78701", 50,
+        List<Show> shows = service.searchShows("the Best", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
@@ -247,7 +247,7 @@ class TicketmasterServiceTest {
                         }
                         """));
 
-        List<Show> shows = service.searchShows("Tom Petty", "78701", 50,
+        List<Show> shows = service.searchShows("Tom Petty", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -275,7 +275,7 @@ class TicketmasterServiceTest {
                         }
                         """));
 
-        List<Show> shows = service.searchShows("Tom Petty", "78701", 50,
+        List<Show> shows = service.searchShows("Tom Petty", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).hasSize(1);
@@ -283,15 +283,32 @@ class TicketmasterServiceTest {
     }
 
     @Test
-    @DisplayName("should send the ZIP as postalCode plus the radius")
-    void shouldSendPostalCodeAndRadius() throws InterruptedException {
+    @DisplayName("should send geoPoint (not postalCode) plus the radius when lat/long are present")
+    void shouldSendGeoPointInsteadOfPostalCodeWhenLatLongPresent() throws InterruptedException {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
 
-        service.searchShows("Dawes", "78701", 50,
+        // 43.6311,-71.4997 (Meredith NH) -> geohash drv0hyz98, the exact pairing verified
+        // against the live Ticketmaster API while diagnosing #152.
+        service.searchShows("Dawes", "78701", 43.6311, -71.4997, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getPath()).contains("geoPoint=drv0hyz98");
+        assertThat(request.getPath()).contains("radius=50");
+        assertThat(request.getPath()).doesNotContain("postalCode");
+    }
+
+    @Test
+    @DisplayName("should fall back to postalCode plus the radius when lat/long are null")
+    void shouldFallBackToPostalCodeWhenLatLongAreNull() throws InterruptedException {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
+
+        service.searchShows("Dawes", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         RecordedRequest request = server.takeRequest();
         assertThat(request.getPath()).contains("postalCode=78701");
         assertThat(request.getPath()).contains("radius=50");
+        assertThat(request.getPath()).doesNotContain("geoPoint");
     }
 }

@@ -31,7 +31,7 @@ public class TicketmasterShowSource implements ShowSource {
 
     @Override
     public List<Show> search(ScanQuery q) {
-        return ticketmaster.searchShows(q.artistName(), q.postalCode(), q.radiusMiles(),
-                q.windowStart(), q.windowEnd());
+        return ticketmaster.searchShows(q.artistName(), q.postalCode(), q.latitude(), q.longitude(),
+                q.radiusMiles(), q.windowStart(), q.windowEnd());
     }
 }

@@ -51,6 +51,7 @@
   Tribute acts don't appear in MusicBrainz lineup relations or Last.fm "similar artist" queries, so neither existing source finds them.
 - [0018: ZIP-code search location with Zippopotam.us geocoding](0018-zip-code-search-location.md)
   A ZIP code is a more precise, familiar way to say "near here" than city/state, and enables a real distance radius for both Ticketmaster and Bandsintown.
+  Related: [0026: Ticketmaster geoPoint search, not postalCode](0026-ticketmaster-geopoint-search.md)
 - [0019: Band official-site tour scraping (hybrid JSON-LD + LLM)](0019-band-site-tour-scraping.md)
   Many artists announce tour dates only on their own site; scrape them via MusicBrainz-discovered URLs, schema.org Event JSON-LD, and an LLM fallback.
 - [0020: Schema migrations via Flyway (replacing ddl-auto=update)](0020-flyway-schema-migrations.md)
@@ -73,3 +74,6 @@
 - [0025: Blueprint-managed hosting for auto-propagating DB credential rotation](0025-blueprint-managed-hosting-for-credential-rotation.md) — _Accepted_
   A dashboard-linked Datastore URL is a snapshot, not a live reference — it doesn't follow Postgres credential rotation. Adopting Render Blueprint management (`render.yaml` + `fromDatabase` refs) makes rotation auto-propagate with no manual re-link.
   Related: [0008: Hosting on Render](0008-hosting-on-render.md), [16. Hosting on Render requires a Dockerfile, not native Java support](0016-hosting-on-render-requires-a-dockerfile-not-native-java-support.md)
+- [0026: Ticketmaster geoPoint search, not postalCode](0026-ticketmaster-geopoint-search.md) — _Accepted_
+  Ticketmaster's postal-code index doesn't cover every ZIP and silently returns a well-formed zero-result response for the ones it misses, indistinguishable from a legitimate "nothing nearby" — found via #152, where one production owner got zero Ticketmaster results the entire time.
+  Related: [0018: ZIP-code search location with Zippopotam.us geocoding](0018-zip-code-search-location.md)
