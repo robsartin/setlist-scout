@@ -134,7 +134,7 @@ class ReviewControllerTest {
     void reviewGroupApprovesGroupAndRedirects() {
         Artist member1 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
         Artist member2 = pending("Benmont Tench", ArtistSource.MEMBER_EXPANSION, 2L);
-        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                 OWNER, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION))
                 .thenReturn(List.of(member1, member2));
 
@@ -150,7 +150,7 @@ class ReviewControllerTest {
     @DisplayName("reviewGroup (htmx) rejects every pending row in that group and returns the Candidates app fragment")
     void reviewGroupHtmxRejectsGroupAndReturnsFragment() {
         Artist member1 = pending("Mike Campbell", ArtistSource.MEMBER_EXPANSION, 1L);
-        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+        when(artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                 OWNER, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", ArtistSource.MEMBER_EXPANSION))
                 .thenReturn(List.of(member1));
 
@@ -172,7 +172,7 @@ class ReviewControllerTest {
         // Not verifyNoInteractions: actionResult now always re-resolves the current group (for
         // auto-advance) via populateCandidates, which legitimately reads countByStatusGroupedByViaAndSource
         // even on a no-op decision. What still must never happen is the mutation loop's own query.
-        verify(artistRepository, org.mockito.Mockito.never()).findByOwnerAndStatusAndDiscoveredViaAndSource(
+        verify(artistRepository, org.mockito.Mockito.never()).findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                 any(), any(), any(), any());
     }
 

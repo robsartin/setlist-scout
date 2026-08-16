@@ -90,7 +90,7 @@ public class ReviewController {
         if (resolved.current() != null) {
             Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
             for (var rg : resolved.current().relationGroups()) {
-                rowsByType.put(rg.source(), artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                rowsByType.put(rg.source(), artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                         owner, ArtistStatus.PENDING_REVIEW, resolved.current().via(), rg.source()));
             }
             model.addAttribute("rowsByType", rowsByType);
@@ -144,7 +144,7 @@ public class ReviewController {
             // Malformed decision: do nothing rather than silently defaulting to reject.
             return actionResult(hxRequest, model, via);
         }
-        for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+        for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                 currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type)) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);
         }

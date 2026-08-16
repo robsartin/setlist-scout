@@ -69,7 +69,7 @@ class CandidateQueryTest extends AbstractPostgresIntegrationTest {
 
         assertThat(artistRepository.countByOwnerAndStatus(OWNER, PENDING_REVIEW)).isEqualTo(5);
 
-        List<Artist> all = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+        List<Artist> all = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                 OWNER, PENDING_REVIEW, "Tom Petty", MEMBER_EXPANSION);
         assertThat(all).hasSize(2);
     }

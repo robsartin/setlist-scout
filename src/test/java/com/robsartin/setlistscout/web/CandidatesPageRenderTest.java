@@ -328,6 +328,25 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("31 pending total");
     }
 
+    @Test
+    void candidateRowsRenderAlphabeticallyWithinTheirRelationGroup() throws Exception {
+        String owner = "candidates-row-order@example.com";
+        // Saved deliberately out of order: insertion order is Zeta, Alpha, Mike.
+        savePending(owner, "Zeta Reticuli", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(get("/artists/candidates").param("via", TOM_PETTY)
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body.indexOf("Alpha Centauri"))
+                .as("rows render A-Z, not in insertion order")
+                .isLessThan(body.indexOf("Mike Campbell"));
+        assertThat(body.indexOf("Mike Campbell")).isLessThan(body.indexOf("Zeta Reticuli"));
+    }
+
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, "note for " + name);
         artist.setOwner(owner);

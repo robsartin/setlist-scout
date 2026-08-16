@@ -88,8 +88,8 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
         """)
     List<CandidateGroupCount> countByStatusGroupedByViaAndSource(String owner, ArtistStatus status);
 
-    /** All of one group's rows, for per-group bulk actions. */
-    List<Artist> findByOwnerAndStatusAndDiscoveredViaAndSource(
+    /** All of one group's rows, in the order the page renders them (issue #155). */
+    List<Artist> findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
         String owner, ArtistStatus status, String discoveredVia, ArtistSource source);
 
     /** Total pending candidates for the owner -- the nav badge. */
