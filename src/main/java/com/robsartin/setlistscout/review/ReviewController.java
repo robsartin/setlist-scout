@@ -187,11 +187,14 @@ public class ReviewController {
             // Malformed decision: do nothing rather than silently defaulting to reject.
             return actionResult(hxRequest, model, via, ActionOutcome.anchor(null));
         }
-        for (Artist a : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
-                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type)) {
+        List<Artist> rows = artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
+                currentUser.email(), ArtistStatus.PENDING_REVIEW, via, type);
+        for (Artist a : rows) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);
         }
-        return actionResult(hxRequest, model, via, ActionOutcome.anchor(null));
+        String verb = status == ArtistStatus.APPROVED ? "Approved" : "Rejected";
+        return actionResult(hxRequest, model, via, ActionOutcome.anchor(
+                verb + " " + rows.size() + " " + CandidateGroups.label(type) + " from " + via + "."));
     }
 
     /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
@@ -215,20 +218,24 @@ public class ReviewController {
     @PostMapping("/approve-all-pending")
     public String approveAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                     Model model) {
-        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
+        List<Artist> pending = artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW);
+        for (Artist a : pending) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
         }
-        return actionResult(hxRequest, model, null, ActionOutcome.anchor(null));
+        return actionResult(hxRequest, model, null,
+                ActionOutcome.anchor("Approved all " + pending.size() + " remaining candidates."));
     }
 
     /** Reject everything still pending in one action -- clears out a noisy batch after picking the keepers. */
     @PostMapping("/reject-all-pending")
     public String rejectAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                    Model model) {
-        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
+        List<Artist> pending = artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW);
+        for (Artist a : pending) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
         }
-        return actionResult(hxRequest, model, null, ActionOutcome.anchor(null));
+        return actionResult(hxRequest, model, null,
+                ActionOutcome.anchor("Rejected all " + pending.size() + " remaining candidates."));
     }
 
     /** Manually request expansion: mark all of this owner's expand jobs due-now (the poller drains them). */
@@ -237,7 +244,7 @@ public class ReviewController {
                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
         expandJobRepository.redueAll(currentUser.email(), java.time.Instant.now());
-        return actionResult(hxRequest, model, via, ActionOutcome.anchor(null));
+        return actionResult(hxRequest, model, via, ActionOutcome.keepFocus("Expansion requested."));
     }
 
     /**
@@ -255,7 +262,8 @@ public class ReviewController {
                                  Model model) {
         requireAdmin();
         expandJobRepository.redueAll(targetOwner, java.time.Instant.now());
-        return actionResult(hxRequest, model, null, ActionOutcome.anchor(null));
+        return actionResult(hxRequest, model, null,
+                ActionOutcome.keepFocus("Expansion requested for " + targetOwner + "."));
     }
 
     /**

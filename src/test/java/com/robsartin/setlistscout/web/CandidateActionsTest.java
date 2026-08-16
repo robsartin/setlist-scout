@@ -344,6 +344,84 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
     }
 
+    @Test
+    void aRelationTypeBulkActionFocusesTheGroupAnchor() throws Exception {
+        String owner = "actions-bulk-anchor@example.com";
+        savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Jackson Browne", ArtistSource.SIMILAR_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/candidates/group")
+                        .param("via", TOM_PETTY)
+                        .param("type", ArtistSource.MEMBER_EXPANSION.name())
+                        .param("decision", "approve")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
+    }
+
+    @Test
+    void clearingEverythingFocusesTheEmptyState() throws Exception {
+        String owner = "actions-empty-focus@example.com";
+        savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Wilco Member 1", ArtistSource.MEMBER_EXPANSION, WILCO);
+
+        String body = mockMvc.perform(post("/artists/reject-all-pending")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // No group left, so the anchor doesn't render -- the empty-state paragraph takes the focus.
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("<p[^>]*tabindex=\"-1\"[^>]*autofocus|<p[^>]*autofocus[^>]*tabindex=\"-1\"");
+        assertThat(body).contains("Nothing pending");
+    }
+
+    @Test
+    void sidebarNavigationFocusesTheNewGroupsAnchor() throws Exception {
+        String owner = "actions-sidebar-focus@example.com";
+        for (int i = 1; i <= 3; i++) {
+            savePending(owner, "Wilco Member " + i, ArtistSource.MEMBER_EXPANSION, WILCO);
+        }
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/artists/candidates").param("via", TOM_PETTY)
+                        .header("HX-Request", "true")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
+    }
+
+    @Test
+    void expandNowLeavesFocusOnItsOwnButton() throws Exception {
+        String owner = "actions-expand-focus@example.com";
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/expand-now")
+                        .param("via", TOM_PETTY)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // The button survives the swap, so htmx's built-in id-based restore keeps focus on it --
+        // moving focus away with autofocus would be worse than doing nothing.
+        assertThat(body).doesNotContain("autofocus");
+        assertThat(body).contains("id=\"expand-now\"");
+    }
+
     /**
      * The aria-label of the single button carrying autofocus. Both attributes live on the same
      * <button> tag, in either order, so the match is anchored on the tag rather than on ordering.
