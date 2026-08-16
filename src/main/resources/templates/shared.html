@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Shared Shows', 'shared', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <h1>Shared Shows</h1>
+
+    <!--/* No pairing yet. Only the admin can create one, so everyone else gets an explanation
+           rather than a form they cannot submit. */-->
+    <th:block th:if="${scan == null}">
+        <p class="page-sub">A shared scan tracks the artists you and another user both follow, at a
+            location you choose together.</p>
+
+        <div class="settings" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}">
+            <form th:action="@{/shared}" method="post">
+                <label for="shared-create-label">Name</label>
+                <input id="shared-create-label" type="text" name="label" value="Shared" required/>
+                <label for="shared-create-target">Shared with</label>
+                <select id="shared-create-target" name="ownerB" required>
+                    <option th:each="email : ${otherOwnerEmails}" th:value="${email}"
+                            th:text="${email}">user@example.com</option>
+                </select>
+                <button type="submit">Create shared scan</button>
+            </form>
+        </div>
+        <p th:unless="${isAdmin}">No shared scan has been set up yet.</p>
+    </th:block>
+
+    <th:block th:if="${scan != null}">
+        <p class="page-sub">
+            <span th:text="${scan.label}">Shared</span> &mdash; artists you and
+            <span th:text="${otherParticipant}">someone</span> both follow.
+        </p>
+
+        <div class="settings">
+            <form th:action="@{'/shared/' + ${scan.id} + '/settings'}" method="post">
+                Near ZIP
+                <label class="visually-hidden" for="shared-zip">Postal code</label>
+                <input id="shared-zip" type="text" name="postalCode" th:value="${settings.postalCode}"
+                       size="5" maxlength="5" pattern="[0-9]{5}" required/>
+                within
+                <label class="visually-hidden" for="shared-radius">Radius in miles</label>
+                <input id="shared-radius" type="number" name="radiusMiles"
+                       th:value="${settings.radiusMiles}" min="1" max="500"/> miles, next
+                <label class="visually-hidden" for="shared-months">Months ahead</label>
+                <input id="shared-months" type="number" name="monthsAhead"
+                       th:value="${settings.monthsAhead}" min="1" max="24"/> months
+                <button type="submit">Save</button>
+                <span th:if="${settings.city != null}"
+                      th:text="'(' + ${settings.city} + ', ' + ${settings.state} + ')'">(Chicago, IL)</span>
+            </form>
+            <form class="inline" th:action="@{'/shared/' + ${scan.id} + '/scan-now'}" method="post">
+                <button type="submit">Scan now</button>
+            </form>
+        </div>
+
+        <!--/* Three distinct states, and they must stay distinct. "We can't search yet",
+               "you two follow no one in common", and "we searched and found nothing" are
+               different answers; collapsing them into one "no results" is the failure mode the
+               spec calls out. Order matters -- each th:if is guarded so exactly one can render. */-->
+        <p th:if="${settings.latitude == null}">
+            Set a location above before this can search &mdash; we don't have coordinates for that ZIP yet.
+        </p>
+        <p th:if="${settings.latitude != null and sharedArtistCount == 0}">
+            You and <span th:text="${otherParticipant}">them</span> don't follow any of the same artists
+            yet, so there's nothing to search for.
+        </p>
+        <p th:if="${settings.latitude != null and sharedArtistCount > 0 and #lists.isEmpty(shows)}">
+            You share <strong th:text="${sharedArtistCount}">0</strong> artists, but none of them are
+            playing near <span th:text="${settings.city} ?: ${settings.postalCode}">there</span> in the
+            next <span th:text="${settings.monthsAhead}">6</span> months. Shows appear here as the
+            scan runs in the background.
+        </p>
+
+        <div class="table-scroll" th:if="${not #lists.isEmpty(shows)}">
+            <table>
+                <caption class="visually-hidden">Shows for artists both users follow</caption>
+                <thead>
+                <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Artist</th>
+                    <th scope="col">Venue</th>
+                    <th scope="col">City</th>
+                    <th scope="col">Price</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Tickets</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="show : ${shows}">
+                    <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
+                    <td th:text="${show.artistName}">Artist</td>
+                    <td th:text="${show.venueName}">Venue</td>
+                    <td th:text="${show.venueCity}">City</td>
+                    <td th:text="${show.price != null} ? '$' + ${show.price} : '—'">Price</td>
+                    <td th:text="${show.source}">Source</td>
+                    <td>
+                        <a th:if="${show.ticketUrl != null}" th:href="${show.ticketUrl}"
+                           th:aria-label="'Tickets for ' + ${show.artistName} + ' at ' + ${show.venueName}">Tickets</a>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </th:block>
+</div>
+</body>
+</html>
