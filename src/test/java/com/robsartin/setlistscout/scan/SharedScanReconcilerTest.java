@@ -117,16 +117,21 @@ class SharedScanReconcilerTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("an activation for a shared owner does NOT trigger another reconcile -- no infinite loop")
-    void reconcilingASharedOwnerDoesNotRecurse() {
+    @DisplayName("reconcile settles -- it does not keep re-triggering itself")
+    void reconcileSettlesToTheIntersectionWithoutRepeating() {
         seed(ROB, "Tom Petty", ArtistStatus.SEED);
         seed(DAVID, "Tom petty", ArtistStatus.SEED);
 
         reconciler.reconcile(scan);
 
-        // Creating the shared artist publishes ArtistActivated(sharedKey). If the listener did not
-        // ignore shared owners it would reconcile again, publish again, and never terminate.
-        // Reaching a settled single artist at all is the assertion.
+        // Creating the shared artist publishes ArtistActivated(sharedKey), which this same class
+        // also listens for. Verified empirically (Task 4 fix round, #163): recursion cannot
+        // actually form today, guard or no guard -- findByOwnerAIgnoreCaseOrOwnerBIgnoreCase
+        // matches only the ownerA/ownerB participant columns, and a shared key is never stored
+        // there, so onParticipantArtistChanged's lookup comes back empty regardless. This test
+        // therefore observes that reconcile settles to a stable single artist, not that the guard
+        // is what prevents a loop -- see onParticipantArtistChanged's Javadoc for what the guard
+        // actually protects against.
         List<String> settled = awaitUntil(this::activeSharedNames, names -> names.size() == 1);
         assertThat(settled).containsExactly("Tom Petty");
     }

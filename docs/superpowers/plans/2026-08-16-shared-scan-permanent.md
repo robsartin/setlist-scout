@@ -963,7 +963,11 @@ git commit -m "feat: normalized intersection of two owners' active artists (#163
 
 ### Task 4: `SharedScanReconciler` — materialize the intersection
 
-**The recursion hazard, read this first.** This class both *publishes* activation events (by creating artists under the shared key) and *listens* to them. Without an explicit guard it reconciles → creates an artist → `ArtistActivated(sharedKey)` fires → reconciles again, forever. The `isSharedScanKey` early return in `onArtistActivated` is what prevents that, and `reconcilingASharedOwnerDoesNotRecurse` is what pins it.
+**On the recursion guard — corrected after implementation.** This class both *publishes* activation events (by creating artists under the shared key) and *listens* to them, which looks like a recursion trap: reconcile → create artist → `ArtistActivated(sharedKey)` → listener → reconcile → forever.
+
+Tested empirically during Task 4 by removing the guard: **no recursion occurs.** `SharedScanRepository#findByOwnerAIgnoreCaseOrOwnerBIgnoreCase` matches only the `ownerA`/`ownerB` columns, which always hold real emails, so a shared key can never match and the loop cannot form. Keep the `isSharedScanKey` early return regardless — it states the invariant directly (a shared scan is never a participant in another shared scan) rather than depending on the incidental shape of another class's query, and it is what would still hold if that query broadened or another publisher emitted the event for a shared key.
+
+The test observes that reconcile **settles**; it would pass with the guard removed. Do not describe it as pinning the guard.
 
 **Files:**
 - Create: `src/main/java/com/robsartin/setlistscout/scan/SharedScanReconciler.java`
@@ -2075,7 +2079,7 @@ git commit -m "feat: /shared page -- participant-visible shared shows with edita
 
 **Two things in this plan are load-bearing and easy to "simplify" into bugs:**
 
-1. **`SharedScanReconciler#onParticipantArtistChanged`'s early return on shared keys.** It looks like a redundant defensive check. It is the only thing preventing infinite recursion: reconcile creates an artist under the shared key → `ArtistActivated(sharedKey)` → this listener → reconcile again. Never remove it.
+1. **`SharedScanReconciler#onParticipantArtistChanged`'s early return on shared keys.** Keep it, but for the accurate reason: recursion cannot form today anyway, because `SharedScanRepository` matches only the participant columns and those always hold real emails. The guard states the invariant directly instead of relying on that incidental fact, so it is what survives if the query ever broadens. Verified empirically in Task 4 by removing it — nothing looped.
 2. **The source allow-list in `ScanJobListener`.** A deny-list would silently include any source added later. band-site is excluded because it bills an LLM call per artist, and a shared scan's artists are already covered by both participants' own scans.
 
 **`AdminGuard` already exists** — extracted in commit `6da8bbf` earlier on this branch. Use it; do not re-create it.
