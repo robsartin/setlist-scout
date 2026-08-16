@@ -33,6 +33,8 @@ public class ReviewController {
      * page-sub until a manual reload.
      */
     private static final String HX_HISTORY_RESTORE_REQUEST = "HX-History-Restore-Request";
+    /** Fragment view name shared by every bare-fragment htmx response on this page. */
+    private static final String CANDIDATES_APP_FRAGMENT = "candidates :: candidatesApp";
 
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
@@ -62,7 +64,7 @@ public class ReviewController {
                              @RequestHeader(value = HX_HISTORY_RESTORE_REQUEST, required = false) String historyRestore,
                              Model model) {
         populateCandidates(model, via);
-        return (hxRequest != null && historyRestore == null) ? "candidates :: candidatesApp" : "candidates";
+        return (hxRequest != null && historyRestore == null) ? candidatesAppFragment(model) : "candidates";
     }
 
     /**
@@ -112,6 +114,25 @@ public class ReviewController {
                         owner, ArtistStatus.PENDING_REVIEW, source)
                 : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
                         owner, ArtistStatus.PENDING_REVIEW, via, source);
+    }
+
+    /**
+     * Returns the bare {@code candidatesApp} fragment view, and flags the model so that fragment
+     * also renders an out-of-band swap of the nav badge (issue #154): {@code fragments/layout.html}'s
+     * badge sits OUTSIDE {@code #candidates-app}, so a normal htmx swap -- which only ever touches
+     * its target's subtree -- can never reach it. {@code hx-swap-oob="true"} lets htmx patch it
+     * anywhere in the response document regardless of the primary swap target (vendored htmx 2.0.3
+     * finds it via a document-wide scan and matches it to the live DOM by id, independent of
+     * nesting -- {@code allowNestedOobSwaps} defaults true and this app never overrides it).
+     * <p>
+     * Only set here, never for the full-page {@code "candidates"} view: that view already renders
+     * {@code fragments/layout.html}'s own badge fresh (same shared {@code Model}, same overwritten
+     * {@code pendingCount} -- see {@link #populateCandidates}), so a second copy of the same id
+     * inside {@code <main>} would just be a duplicate-id no-op at best.
+     */
+    private String candidatesAppFragment(Model model) {
+        model.addAttribute("oobNavBadge", true);
+        return CANDIDATES_APP_FRAGMENT;
     }
 
     /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
@@ -261,7 +282,7 @@ public class ReviewController {
     private String actionResult(String hxRequest, Model model, String via) {
         String resolvedVia = populateCandidates(model, via);
         if (hxRequest != null) {
-            return "candidates :: candidatesApp";
+            return candidatesAppFragment(model);
         }
         if (resolvedVia != null) {
             return "redirect:/artists/candidates?via="
