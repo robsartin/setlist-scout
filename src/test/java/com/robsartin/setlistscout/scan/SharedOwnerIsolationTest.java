@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
@@ -31,6 +32,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * these are the tests that contain that widening: a synthetic owner's rows must never surface on a
  * real user's pages. The isolation is by construction (different owner), which is exactly why it
  * deserves assertions rather than a comment -- nothing else would catch a regression.
+ * <p>Note on what is NOT tested here: an end-to-end "a synthetic key cannot authenticate" test is
+ * not reachable from MockMvc. The allow-list gate lives inside SecurityConfig's
+ * allowListedOidcUserService, which runs during the OIDC user-info exchange, and oidcLogin()
+ * injects an already-authenticated principal past that step by design -- so such a test would pass
+ * whether or not the gate worked, which is worse than no test. The invariant is covered instead
+ * from two reachable directions: SharedScanOwnerTest pins that a generated key is never
+ * email-shaped and a real address is never a shared key, and the test below pins that no
+ * allow-listed address is a shared-scan key.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,6 +55,7 @@ class SharedOwnerIsolationTest extends AbstractPostgresIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private ArtistRepository artistRepository;
     @Autowired private ShowRepository showRepository;
+    @Autowired private AppProperties appProperties;
 
     private String sharedKey;
 
@@ -91,11 +101,11 @@ class SharedOwnerIsolationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("a synthetic owner key can never authenticate -- it is not an allow-listed address")
-    void syntheticOwnerCannotAuthenticate() throws Exception {
-        // SecurityConfig authorises against setlistscout.auth.allowed-emails; a generated key can
-        // never match one. Asserting it here means a future change to that matcher trips this test.
-        mockMvc.perform(get("/").with(oidcLogin().idToken(t -> t.claim("email", sharedKey))))
-                .andExpect(status().is4xxClientError());
+    @DisplayName("no allow-listed address is a shared-scan key -- a synthetic owner can never be configured to log in")
+    void noAllowListedAddressIsASharedScanKey() {
+        assertThat(appProperties.auth().allowedEmails())
+                .as("a shared scan is a scan context, not a person; configuring one as a login "
+                        + "would hand it a session and a Shows page")
+                .noneMatch(SharedScanOwner::isSharedScanKey);
     }
 }
