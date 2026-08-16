@@ -1476,12 +1476,20 @@ class SharedOwnerIsolationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("a synthetic owner key can never authenticate -- it is not an allow-listed address")
-    void syntheticOwnerCannotAuthenticate() throws Exception {
-        // SecurityConfig authorises against setlistscout.auth.allowed-emails; a generated key can
-        // never match one. Asserting it here means a future change to that matcher trips this test.
-        mockMvc.perform(get("/").with(oidcLogin().idToken(t -> t.claim("email", sharedKey))))
-                .andExpect(status().is4xxClientError());
+    @DisplayName("no allow-listed address is a shared-scan key -- a synthetic owner can never be configured to log in")
+    void noAllowListedAddressIsASharedScanKey() {
+        // CORRECTED DURING IMPLEMENTATION. This originally asserted a synthetic key gets a 4xx from
+        // MockMvc, which cannot work: the allow-list gate lives inside SecurityConfig's
+        // allowListedOidcUserService, invoked during the OIDC user-info exchange, and oidcLogin()
+        // injects an already-authenticated principal past it -- so that test passes whether or not
+        // the gate works, which is worse than no test. The invariant is covered from two reachable
+        // directions instead: SharedScanOwnerTest pins that a generated key is never email-shaped
+        // and a real address is never a shared key, and this pins the remaining real failure mode,
+        // misconfiguration.
+        assertThat(appProperties.auth().allowedEmails())
+                .as("a shared scan is a scan context, not a person; configuring one as a login "
+                        + "would hand it a session and a Shows page")
+                .noneMatch(SharedScanOwner::isSharedScanKey);
     }
 }
 ```
