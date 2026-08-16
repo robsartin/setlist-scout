@@ -116,6 +116,15 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("hx-disabled-elt=\"find button\"");
         assertThat(body).doesNotContain("hx-disabled-elt=\"this\"");
 
+        // #164: htmx's default .htmx-request class lands on whatever element issues the request --
+        // the <form>, since that's where hx-post lives -- unless hx-indicator says otherwise.
+        // "find button" redirects it to the form's own submit button instead, the SAME element
+        // hx-disabled-elt above already disables, so app.css has one element to style for both
+        // states (see the .htmx-request rule there). Declared once on #candidates-app, like
+        // hx-sync just before it, and inherited by every nested form -- pin both the value AND
+        // that it lives on that shared ancestor, not scattered per-form.
+        assertThat(body).containsPattern("id=\"candidates-app\"[^>]*hx-indicator=\"find button\"");
+
         // Minor 4 (#148 fix round 3): a skip link past the ~294-entry sidebar to the focused group,
         // for keyboard users -- see app.css's .visually-hidden:focus and the id="current-group"
         // skip target below.
