@@ -7,6 +7,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Shared base for integration tests that boot a Spring context against a real Postgres
@@ -70,5 +72,19 @@ public abstract class AbstractPostgresIntegrationTest {
             last = fetch.get();
         }
         return last;
+    }
+
+    /**
+     * How many ELEMENTS carry the autofocus attribute. Counting raw substrings would read
+     * Thymeleaf's `autofocus="autofocus"` (the expanded form it serialises boolean attributes to)
+     * as two, so this matches the attribute on a tag instead.
+     */
+    protected static int countAutofocusElements(String body) {
+        Matcher m = Pattern.compile("<[^>]*\\bautofocus\\b[^>]*>").matcher(body);
+        int count = 0;
+        while (m.find()) {
+            count++;
+        }
+        return count;
     }
 }

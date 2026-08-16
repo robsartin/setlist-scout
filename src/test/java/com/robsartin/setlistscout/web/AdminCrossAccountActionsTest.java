@@ -182,6 +182,29 @@ class AdminCrossAccountActionsTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void adminExpandNowFocusesTheSwappedInCopyOfItsOwnTriggerButton() throws Exception {
+        seedExpandJob(OTHER_ALLOWED_EMAIL);
+
+        String body = mockMvc.perform(post("/artists/admin/expand-now")
+                        .param("targetOwner", OTHER_ALLOWED_EMAIL)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN_EMAIL))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // #155: like the self-service expand-now, this trigger cannot hold its own focus across the
+        // swap -- hx-disabled-elt="find button" disables (and so BLURS) it at request start, leaving
+        // document.activeElement as <body>, which htmx's id-based restore deliberately skips. The
+        // swapped-in copy of the button carries autofocus instead. This is the only class that
+        // allow-lists a second user, so it is the only place the admin form actually renders.
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern(
+                "id=\"admin-expand-now\"[^>]*autofocus|autofocus[^>]*id=\"admin-expand-now\"");
+        assertThat(body).contains("Expansion requested for " + OTHER_ALLOWED_EMAIL + ".");
+    }
+
+    @Test
     void showsPageOffersAdminDropdownOnlyToTheAdmin() throws Exception {
         String adminBody = mockMvc.perform(get("/")
                         .with(oidcLogin().idToken(t -> t.claim("email", ADMIN_EMAIL))))

@@ -172,6 +172,23 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains(TOM_PETTY);
         assertThat(body).contains("Mike Campbell");
         assertThat(body).doesNotContain("<head").doesNotContain("topbar");
+
+        // #155: one assertion, two invariants. The permanent live region lives in the shared
+        // layout, outside #candidates-app -- this bare fragment IS #candidates-app's subtree, so
+        // it must contain no trace of the region at all. Separately, this GET resolves via
+        // ActionOutcome.anchor(null) (a null message), so the OOB gate on candidates.html
+        // (outcome.message != null, not merely outcome != null) must suppress the OOB update too.
+        // Either regression -- the region leaking into the swap target, or the gate loosening to
+        // fire on a null message -- would put the substring "sr-status" back into this response.
+        assertThat(body).doesNotContain("sr-status");
+
+        // #155: this swap destroys the previously-focused element exactly like a per-row action
+        // does, so it needs a focus target too -- the group anchor, since there's no acted-on row
+        // to succeed. Regression this guards: simplifying the controller's `fragment` condition to
+        // `hxRequest != null` (dropping the history-restore check) still passes every other test on
+        // this path.
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"current-group\"[^>]*autofocus");
     }
 
     @Test
@@ -193,6 +210,13 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
 
         assertThat(body).contains("topbar");
         assertThat(body).contains("<head");
+
+        // #155: a history restore is a full page render -- it must NOT carry autofocus, or the
+        // browser honours it natively on load and yanks focus into the middle of the list instead
+        // of leaving it at the top of the document. Regression this guards: the same simplified
+        // `fragment` condition that would break the assertion above would also make this one an
+        // (incorrect) ANCHOR-focus fragment response.
+        assertThat(countAutofocusElements(body)).isEqualTo(0);
     }
 
     @Test
@@ -204,7 +228,7 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).contains("Nothing pending. Run expansion to find more.");
+        assertThat(body).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -306,7 +330,7 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                         .header("HX-Request", "true").with(csrf())
                         .with(oidcLogin().idToken(t -> t.claim("email", owner))))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(afterThird).contains("Nothing pending. Run expansion to find more.");
+        assertThat(afterThird).contains("Nothing left to review. Run expansion to find more.");
     }
 
     @Test
@@ -326,6 +350,52 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(body).contains("31 pending total");
+    }
+
+    @Test
+    void candidateRowsRenderAlphabeticallyWithinTheirRelationGroup() throws Exception {
+        String owner = "candidates-row-order@example.com";
+        // Saved deliberately out of order: insertion order is Zeta, Alpha, Mike.
+        savePending(owner, "Zeta Reticuli", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Mike Campbell", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(get("/artists/candidates").param("via", TOM_PETTY)
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body.indexOf("Alpha Centauri"))
+                .as("rows render A-Z, not in insertion order")
+                .isLessThan(body.indexOf("Mike Campbell"));
+        assertThat(body.indexOf("Mike Campbell")).isLessThan(body.indexOf("Zeta Reticuli"));
+    }
+
+    @Test
+    void ungroupedBucketRowsAlsoRenderAlphabetically() throws Exception {
+        // The Ungrouped bucket (issue #156) takes a DIFFERENT repository method than every other
+        // group -- an explicit IS NULL query, since discoveredVia = 'Ungrouped' can never match a
+        // NULL column -- so the A-Z order asserted above does not automatically cover it. It has to,
+        // because ActionOutcome.afterRow (issue #155) picks "the next row" out of exactly this list:
+        // an unordered bucket would name a successor the page cannot be relied on to reproduce.
+        // A SEED artist's discoveredVia is null by construction, which is what puts it here.
+        String owner = "candidates-ungrouped-order@example.com";
+        // Saved deliberately out of order: insertion order is Zeta, Alpha, Mike.
+        savePending(owner, "Zeta Reticuli", ArtistSource.SEED_LIST, null);
+        savePending(owner, "Alpha Centauri", ArtistSource.SEED_LIST, null);
+        savePending(owner, "Mike Campbell", ArtistSource.SEED_LIST, null);
+
+        String body = mockMvc.perform(get("/artists/candidates").param("via", "Ungrouped")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).as("the Ungrouped bucket must render its rows at all (issue #156)")
+                .contains("Alpha Centauri").contains("Mike Campbell").contains("Zeta Reticuli");
+        assertThat(body.indexOf("Alpha Centauri"))
+                .as("Ungrouped rows render A-Z, not in insertion order: %s", body)
+                .isLessThan(body.indexOf("Mike Campbell"));
+        assertThat(body.indexOf("Mike Campbell")).isLessThan(body.indexOf("Zeta Reticuli"));
     }
 
     @Test
@@ -395,6 +465,53 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
                 .matcher(body).results().map(r -> r.group(1)).toList();
         assertThat(badgeValues).as("exactly one nav badge, header's own copy, no OOB duplicate: %s", body)
                 .containsExactly("32");
+    }
+
+    @Test
+    void aFullPageLoadNeverStealsFocus() throws Exception {
+        String owner = "candidates-no-autofocus@example.com";
+        seedTwoGroups(owner);
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // autofocus is for htmx swaps only -- on a normal page load the browser would honour it
+        // natively and yank the user into the middle of the list.
+        assertThat(body).doesNotContain("autofocus");
+    }
+
+    @Test
+    void theLiveRegionIsPermanentAndOutsideTheSwapTarget() throws Exception {
+        String owner = "candidates-live-region@example.com";
+        seedTwoGroups(owner);
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // The region ships empty with every page, from the shared layout. One contiguous
+        // substring, not independent id/role checks -- id, role, AND aria-live all have to land
+        // on the SAME element, or this no longer proves the live region has the right semantics.
+        assertThat(body).contains("<p id=\"sr-status\" role=\"status\" aria-live=\"polite\"");
+        // ...and a full page render never carries an out-of-band update.
+        assertThat(body).doesNotContain("hx-swap-oob");
+        // The old inert live region -- inside the swap target, so replaced wholesale every time --
+        // is gone, and with it the re-announcement of the group title and count on every action.
+        // Asserted as a COUNT rather than doesNotContain on the old markup: any attribute reorder,
+        // added class or whitespace change would make that pass vacuously while aria-live was
+        // genuinely back inside #candidates-app. One aria-live on the whole page, and the assertion
+        // above pins whose it is.
+        assertThat(body).as("only the layout's permanent #sr-status carries aria-live")
+                .containsOnlyOnce("aria-live");
+        // ...and neither OOB companion leaks onto the full page: #154's nav badge is gated on
+        // ${oobNavBadge} (bare-fragment responses only) and #155's #sr-status update on
+        // outcome.message, which is null here. The doesNotContain above covers BOTH -- a duplicate
+        // id="nav-candidates-badge" inside <main> would be exactly as invalid as a duplicate
+        // id="sr-status". fullPageRenderShowsExactlyOneCorrectNavBadgeNoOobDuplicate counts the
+        // badge elements directly; this pins the attribute that would give either one away.
     }
 
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {

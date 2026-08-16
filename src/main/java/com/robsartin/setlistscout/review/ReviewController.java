@@ -36,6 +36,14 @@ public class ReviewController {
     /** Fragment view name shared by every bare-fragment htmx response on this page. */
     private static final String CANDIDATES_APP_FRAGMENT = "candidates :: candidatesApp";
 
+    /** DOM id of the "Run expansion now" button (candidates.html); rendered on every response. */
+    private static final String EXPAND_NOW_TRIGGER = "expand-now";
+    /**
+     * DOM id of the admin-only cross-account expansion button. Unlike {@link #EXPAND_NOW_TRIGGER}
+     * its form is conditional, which is why {@link #focusable} has to check before naming it.
+     */
+    private static final String ADMIN_EXPAND_NOW_TRIGGER = "admin-expand-now";
+
     private final ArtistRepository artistRepository;
     private final ExpandJobRepository expandJobRepository;
     private final CurrentUser currentUser;
@@ -63,14 +71,23 @@ public class ReviewController {
                              @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                              @RequestHeader(value = HX_HISTORY_RESTORE_REQUEST, required = false) String historyRestore,
                              Model model) {
-        populateCandidates(model, via);
-        return (hxRequest != null && historyRestore == null) ? candidatesAppFragment(model) : "candidates";
+        boolean fragment = hxRequest != null && historyRestore == null;
+        // A fragment swap (sidebar navigation) destroys the focused element like any other action,
+        // so it gets the anchor. A full page render -- including a history restore -- must not carry
+        // autofocus at all: the browser would honour it natively on load.
+        populateCandidates(model, via, fragment ? ActionOutcome.anchor(null) : null);
+        return fragment ? candidatesAppFragment(model) : "candidates";
     }
 
     /**
      * Resolves the current group and populates the model for either the full page or the
      * {@code candidatesApp} fragment. Returns the resolved current group's {@code via} (for
      * building a redirect URL after a non-htmx action), or {@code null} if nothing is pending.
+     * <p>
+     * {@code outcome} (issue #155) is the focus/announcement target the caller resolved before
+     * this method re-queries current state; it's downgraded by {@link #focusable} when the element
+     * it names won't be in the response, and published as the {@code outcome} model attribute --
+     * absent entirely on a full page render, where {@code outcome} is {@code null} coming in.
      * <p>
      * Also overwrites {@code pendingCount} (Minor 2, #148 fix round 3): {@link NavModelAdvice}'s
      * {@code @ModelAttribute} runs BEFORE the handler method body -- including before this action's
@@ -81,7 +98,7 @@ public class ReviewController {
      * (unlike the nav badge, which stays stale -- see {@code .globalbar .count-label}) accurate
      * immediately after the mutation that just happened in this same request.
      */
-    private String populateCandidates(Model model, String requestedVia) {
+    private String populateCandidates(Model model, String requestedVia, ActionOutcome outcome) {
         String owner = currentUser.email();
         var groups = CandidateGroups.from(
                 artistRepository.countByStatusGroupedByViaAndSource(owner, ArtistStatus.PENDING_REVIEW));
@@ -89,12 +106,16 @@ public class ReviewController {
         model.addAttribute("current", resolved.current());
         model.addAttribute("others", resolved.others());
         model.addAttribute("pendingCount", groups.stream().mapToLong(CandidateGroups.BaseArtistGroup::total).sum());
+        Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
         if (resolved.current() != null) {
-            Map<ArtistSource, List<Artist>> rowsByType = new LinkedHashMap<>();
             for (var rg : resolved.current().relationGroups()) {
                 rowsByType.put(rg.source(), groupRows(owner, resolved.current().via(), rg.source()));
             }
             model.addAttribute("rowsByType", rowsByType);
+        }
+        ActionOutcome focusable = focusable(outcome, rowsByType, adminTriggerRenders(model));
+        if (focusable != null) {
+            model.addAttribute("outcome", focusable);
         }
         return resolved.current() != null ? resolved.current().via() : null;
     }
@@ -107,13 +128,57 @@ public class ReviewController {
      * discoveredVia} to for display (issue #156): {@code discoveredVia = 'Ungrouped'} can never
      * match a NULL column in SQL, so that sentinel needs its own {@code IS NULL} query rather than
      * the exact-match one below.
+     * <p>
+     * BOTH branches are name-ordered (issue #155). "The next row" -- what {@link
+     * ActionOutcome#afterRow} resolves and what {@link #focusable} then re-checks against these
+     * very lists -- is only defined if the render and the successor lookup agree on an order the
+     * database reproduces, so the Ungrouped bucket cannot be the one bucket left unordered.
      */
     private List<Artist> groupRows(String owner, String via, ArtistSource source) {
         return CandidateGroups.UNGROUPED.equals(via)
-                ? artistRepository.findByOwnerAndStatusAndDiscoveredViaIsNullAndSource(
+                ? artistRepository.findByOwnerAndStatusAndDiscoveredViaIsNullAndSourceOrderByNameAsc(
                         owner, ArtistStatus.PENDING_REVIEW, source)
-                : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSource(
+                : artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
                         owner, ArtistStatus.PENDING_REVIEW, via, source);
+    }
+
+    /**
+     * Downgrades a focus target that won't be in the response to the group anchor. Two ways that
+     * happens: the ROW successor picked before the mutation isn't among the rows about to render
+     * (another tab decided it, or the group auto-advanced), or a TRIGGER names the admin button on
+     * a page where its form doesn't render. Without this the response would carry an {@code
+     * autofocus} for an element that isn't there, and focus would silently drop to {@code <body>}
+     * again -- the exact failure issue #155 exists to remove.
+     */
+    private static ActionOutcome focusable(ActionOutcome outcome, Map<ArtistSource, List<Artist>> rowsByType,
+                                           boolean adminTriggerRenders) {
+        if (outcome == null) {
+            return null;
+        }
+        return switch (outcome.focus()) {
+            case ROW -> rowsByType.values().stream()
+                    .flatMap(List::stream)
+                    .anyMatch(a -> outcome.artistId().equals(a.getId()))
+                    ? outcome : outcome.downgradedToAnchor();
+            // The self-service expand-now button renders unconditionally, so it never needs the
+            // check; the admin one is gated in the template, and an admin CAN reach that endpoint
+            // with the form absent (a hand-rolled POST, or a page rendered before the allow-list
+            // shrank), which would otherwise leave the response pointing at nothing.
+            case TRIGGER -> adminTriggerRenders || !ADMIN_EXPAND_NOW_TRIGGER.equals(outcome.triggerId())
+                    ? outcome : outcome.downgradedToAnchor();
+            case ANCHOR -> outcome;
+        };
+    }
+
+    /**
+     * Whether candidates.html will actually render the admin's cross-account expansion form: the
+     * same condition as its {@code th:if}, read from the model attributes {@link NavModelAdvice}
+     * populated before this handler body ran. Read from the model rather than recomputed from
+     * config so it can't drift from what the template branches on.
+     */
+    private static boolean adminTriggerRenders(Model model) {
+        return Boolean.TRUE.equals(model.getAttribute("isAdmin"))
+                && model.getAttribute("otherOwnerEmails") instanceof List<?> others && !others.isEmpty();
     }
 
     /**
@@ -147,20 +212,33 @@ public class ReviewController {
     @PostMapping("/{id}/approve")
     public String approve(@PathVariable Long id, @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           Model model) {
-        String owner = currentUser.email();
-        String via = artistRepository.findByIdAndOwner(id, owner).map(Artist::getDiscoveredVia).orElse(null);
-        activationService.changeStatus(id, owner, ArtistStatus.APPROVED);
-        return actionResult(hxRequest, model, via);
+        return decide(id, ArtistStatus.APPROVED, "approve", "Approved", hxRequest, model);
     }
 
     /** Reject one candidate. Owner-scoped via changeStatus (no-op if this owner doesn't own {@code id}). */
     @PostMapping("/{id}/reject")
     public String reject(@PathVariable Long id, @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                          Model model) {
+        return decide(id, ArtistStatus.REJECTED, "reject", "Rejected", hxRequest, model);
+    }
+
+    /**
+     * The shared per-row decision path (issue #155). Resolves the focus successor BEFORE mutating,
+     * while the acted-on row is still in the list: doing it afterwards would mean comparing names in
+     * Java against an order Postgres produced, and the two disagree on case and punctuation.
+     */
+    private String decide(Long id, ArtistStatus status, String decision, String verb, String hxRequest, Model model) {
         String owner = currentUser.email();
-        String via = artistRepository.findByIdAndOwner(id, owner).map(Artist::getDiscoveredVia).orElse(null);
-        activationService.changeStatus(id, owner, ArtistStatus.REJECTED);
-        return actionResult(hxRequest, model, via);
+        Artist acted = artistRepository.findByIdAndOwner(id, owner).orElse(null);
+        String via = acted != null ? acted.getDiscoveredVia() : null;
+        ActionOutcome outcome = acted == null
+                ? ActionOutcome.anchor(null)
+                : ActionOutcome.afterRow(
+                        artistRepository.findByOwnerAndStatusAndDiscoveredViaAndSourceOrderByNameAsc(
+                                owner, ArtistStatus.PENDING_REVIEW, via, acted.getSource()),
+                        id, decision, verb + " " + acted.getName() + ".");
+        activationService.changeStatus(id, owner, status);
+        return actionResult(hxRequest, model, via, outcome);
     }
 
     /**
@@ -179,12 +257,15 @@ public class ReviewController {
             status = ArtistStatus.REJECTED;
         } else {
             // Malformed decision: do nothing rather than silently defaulting to reject.
-            return actionResult(hxRequest, model, via);
+            return actionResult(hxRequest, model, via, ActionOutcome.anchor(null));
         }
-        for (Artist a : groupRows(currentUser.email(), via, type)) {
+        List<Artist> rows = groupRows(currentUser.email(), via, type);
+        for (Artist a : rows) {
             activationService.changeStatus(a.getId(), currentUser.email(), status);
         }
-        return actionResult(hxRequest, model, via);
+        String verb = status == ArtistStatus.APPROVED ? "Approved" : "Rejected";
+        return actionResult(hxRequest, model, via, ActionOutcome.anchor(
+                verb + " " + rows.size() + " " + CandidateGroups.label(type) + " from " + via + "."));
     }
 
     /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
@@ -208,20 +289,24 @@ public class ReviewController {
     @PostMapping("/approve-all-pending")
     public String approveAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                     Model model) {
-        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
+        List<Artist> pending = artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW);
+        for (Artist a : pending) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.APPROVED);
         }
-        return actionResult(hxRequest, model, null);
+        return actionResult(hxRequest, model, null,
+                ActionOutcome.anchor("Approved all " + pending.size() + " remaining candidates."));
     }
 
     /** Reject everything still pending in one action -- clears out a noisy batch after picking the keepers. */
     @PostMapping("/reject-all-pending")
     public String rejectAllPending(@RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                    Model model) {
-        for (Artist a : artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW)) {
+        List<Artist> pending = artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.PENDING_REVIEW);
+        for (Artist a : pending) {
             activationService.changeStatus(a.getId(), currentUser.email(), ArtistStatus.REJECTED);
         }
-        return actionResult(hxRequest, model, null);
+        return actionResult(hxRequest, model, null,
+                ActionOutcome.anchor("Rejected all " + pending.size() + " remaining candidates."));
     }
 
     /** Manually request expansion: mark all of this owner's expand jobs due-now (the poller drains them). */
@@ -230,7 +315,8 @@ public class ReviewController {
                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                             Model model) {
         expandJobRepository.redueAll(currentUser.email(), java.time.Instant.now());
-        return actionResult(hxRequest, model, via);
+        return actionResult(hxRequest, model, via,
+                ActionOutcome.trigger(EXPAND_NOW_TRIGGER, "Expansion requested."));
     }
 
     /**
@@ -248,7 +334,8 @@ public class ReviewController {
                                  Model model) {
         requireAdmin();
         expandJobRepository.redueAll(targetOwner, java.time.Instant.now());
-        return actionResult(hxRequest, model, null);
+        return actionResult(hxRequest, model, null,
+                ActionOutcome.trigger(ADMIN_EXPAND_NOW_TRIGGER, "Expansion requested for " + targetOwner + "."));
     }
 
     /**
@@ -278,9 +365,13 @@ public class ReviewController {
      * regions, always in sync, never stale). Non-JS fallback -&gt; redirect back to
      * {@code /artists/candidates}, carrying the resolved via as a query param so a full page load
      * lands in the same place htmx would have.
+     * <p>
+     * {@code outcome} (issue #155) carries the focus target through to {@link #populateCandidates}
+     * unchanged -- it's meaningless on the non-htmx redirect branch below (a fresh GET recomputes
+     * its own {@code null} outcome), but is harmless to have resolved either way.
      */
-    private String actionResult(String hxRequest, Model model, String via) {
-        String resolvedVia = populateCandidates(model, via);
+    private String actionResult(String hxRequest, Model model, String via, ActionOutcome outcome) {
+        String resolvedVia = populateCandidates(model, via, outcome);
         if (hxRequest != null) {
             return candidatesAppFragment(model);
         }

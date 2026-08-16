@@ -33,6 +33,28 @@
        user decisions -- exactly the bug this is fixing. */-->
 <div th:fragment="candidatesApp" id="candidates-app" class="candidates-app"
      hx-history="false" hx-sync="closest main:queue all">
+    <!--/* TWO out-of-band elements ride along in one response (#155 + #154), which htmx handles:
+           it scans the WHOLE response document for [hx-swap-oob], swaps each one against the live
+           DOM by id, and strips them all from the content before the primary #candidates-app swap.
+           Their gates are deliberately DIFFERENT and must not be unified -- the sidebar-navigation
+           htmx GET moves focus but has nothing to announce (a null message), so it emits the badge
+           and NOT the status update. What they share is that neither may appear on a full-page
+           render, where the layout already carries the real #sr-status and the real nav badge and a
+           second copy of either id would be a duplicate-id bug. */-->
+
+    <!--/* #155: out-of-band update for the layout's permanent #sr-status region. htmx extracts
+           this before the primary swap, so it never lands inside #candidates-app -- and because it
+           is emitted only when there's a message, a full page render can't produce a duplicate id.
+           Nested OOB is fine here: the vendored build defaults allowNestedOobSwaps to true. The
+           two halves are "what happened" (from the controller) and "where you are now" (from the
+           already-resolved model), which is why no count has to be threaded through. */-->
+    <p id="sr-status" hx-swap-oob="innerHTML" class="visually-hidden"
+       th:if="${outcome != null and outcome.message != null}">
+        <span th:text="${outcome.message}">Approved Mike Campbell.</span>
+        <span th:if="${current != null}"
+              th:text="' ' + ${current.total} + ' left in ' + ${current.via} + '.'"> </span>
+        <span th:if="${current == null}"> Nothing left to review.</span>
+    </p>
     <!--/* Issue #154: nav badge OOB sync. fragments/layout.html's badge lives in <header>, OUTSIDE
            this fragment's own #candidates-app swap target, so it's otherwise unreachable by any
            action here -- most visible on "Reject all", where the count can drop by hundreds and
@@ -54,10 +76,18 @@
            Always rendered (never th:if'd away like the header's own span) so the id stays put in
            the DOM as an OOB target for the next action too; empty text when there's nothing pending
            reproduces the header's "tag omitted" look (.count carries no box/background) without
-           actually removing the element htmx needs to find. */-->
+           actually removing the element htmx needs to find.
+
+           No autofocus here, and none is wanted: this element never reaches the swapped-in subtree
+           (htmx strips it), so the exactly-one-autofocus-per-response invariant is untouched. */-->
     <span th:if="${oobNavBadge}" id="nav-candidates-badge" class="count" hx-swap-oob="true"
           th:text="${pendingCount != null and pendingCount > 0 ? pendingCount : ''}">0</span>
-    <p th:if="${current == null}">Nothing pending. Run expansion to find more.</p>
+    <!--/* The visible empty state and the announcement's "where you are now" half (above) say the
+           same sentence on purpose: focus lands here at the same moment the live region speaks, so
+           two different phrasings for one state read as two different states. The guidance stays
+           visible-only -- it tells the user what to do next, not what just happened. */-->
+    <p th:if="${current == null}" tabindex="-1"
+       th:autofocus="${outcome != null and outcome.focusesAnchor()}">Nothing left to review. Run expansion to find more.</p>
 
     <div th:if="${current != null}" class="candidates-layout">
         <!--/* Minor 4 (#148 fix round 3): production has ~294 sidebar groups (below) between the
@@ -84,9 +114,11 @@
             </ul>
         </aside>
 
-        <section class="artist-group card" id="current-group" tabindex="-1">
-            <div class="artist-group-header" aria-live="polite">
-                <h2 th:text="${current.via}">Base artist</h2>
+        <section class="artist-group card" id="current-group" tabindex="-1"
+                 aria-labelledby="current-group-title"
+                 th:autofocus="${outcome != null and outcome.focusesAnchor()}">
+            <div class="artist-group-header">
+                <h2 id="current-group-title" th:text="${current.via}">Base artist</h2>
                 <span class="count" th:text="${current.total}">0</span>
             </div>
 
@@ -140,12 +172,16 @@
                         <form class="inline" th:hx-post="@{/artists/{id}/approve(id=${a.id})}"
                               hx-target="#candidates-app" hx-swap="outerHTML" hx-disabled-elt="find button"
                               method="post" th:action="@{/artists/{id}/approve(id=${a.id})}">
-                            <button type="submit" class="btn-good btn-sm" th:aria-label="'Approve ' + ${a.name}">Approve</button>
+                            <button type="submit" class="btn-good btn-sm"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(a.id, 'approve')}"
+                                    th:aria-label="'Approve ' + ${a.name}">Approve</button>
                         </form>
                         <form class="inline" th:hx-post="@{/artists/{id}/reject(id=${a.id})}"
                               hx-target="#candidates-app" hx-swap="outerHTML" hx-disabled-elt="find button"
                               method="post" th:action="@{/artists/{id}/reject(id=${a.id})}">
-                            <button type="submit" class="btn-bad btn-sm" th:aria-label="'Reject ' + ${a.name}">Reject</button>
+                            <button type="submit" class="btn-bad btn-sm"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(a.id, 'reject')}"
+                                    th:aria-label="'Reject ' + ${a.name}">Reject</button>
                         </form>
                     </div>
                 </div>
@@ -173,7 +209,15 @@
         <form class="inline" th:hx-post="@{/artists/expand-now}" hx-target="#candidates-app" hx-swap="outerHTML"
               hx-disabled-elt="find button" method="post" th:action="@{/artists/expand-now}">
             <input type="hidden" name="via" th:if="${current != null}" th:value="${current.via}"/>
-            <button type="submit">Run expansion now</button>
+            <!--/* #155: the trigger cannot keep its own focus across the swap. hx-disabled-elt
+                   above disables (and so BLURS) this button when the request starts, leaving
+                   document.activeElement as <body> -- and htmx's built-in id-based restore only
+                   fires for an element that LEFT the document, which <body> never does (measured
+                   in a browser against the vendored 2.0.3 build). So the server names this button
+                   in the outcome and the swapped-in copy carries autofocus, which the settle-task
+                   focus([autofocus]) honours after re-insertion. */-->
+            <button type="submit" id="expand-now"
+                    th:autofocus="${outcome != null and outcome.focusesTrigger('expand-now')}">Run expansion now</button>
         </form>
         <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
                and only when there's another allow-listed user to pick -- see NavModelAdvice. The
@@ -187,7 +231,12 @@
             <select id="admin-expand-target" name="targetOwner">
                 <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
             </select>
-            <button type="submit">Run expansion for user</button>
+            <!--/* Same reasoning as the expand-now button above. This form is conditional, so
+                   ReviewController#focusable checks it will actually render before letting the
+                   outcome name it -- an autofocus pointing at an absent element would drop focus
+                   to <body>, which is the bug, not the fix. */-->
+            <button type="submit" id="admin-expand-now"
+                    th:autofocus="${outcome != null and outcome.focusesTrigger('admin-expand-now')}">Run expansion for user</button>
         </form>
     </div>
 </div>

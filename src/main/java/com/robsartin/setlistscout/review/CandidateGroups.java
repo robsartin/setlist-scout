@@ -87,7 +87,8 @@ public final class CandidateGroups {
         return idx == -1 ? RELATION_ORDER.size() : idx;
     }
 
-    private static String label(ArtistSource source) {
+    /** Display name for a relation type -- also used for bulk-action announcements (issue #155). */
+    static String label(ArtistSource source) {
         return switch (source) {
             case MEMBER_EXPANSION -> "Members";
             case SIMILAR_EXPANSION -> "Similar";

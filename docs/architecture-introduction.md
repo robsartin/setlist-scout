@@ -289,6 +289,27 @@ Thymeleaf fragment (e.g. `"candidates :: rowDone"`); absent → full-page
 ships the literal string `@{/x}` — Thymeleaf only resolves `@{...}` inside a
 `th:*` attribute, so it has to be `th:hx-get`.
 
+Focus is managed server-side: because every action swaps a whole region with
+`outerHTML`, the focused element is destroyed and focus would drop to `<body>`.
+`review.ActionOutcome` picks exactly one element per response — the next row's
+same-decision button in the acted row's own relation group, the current
+group's anchor, or the swapped-in copy of the button that triggered the action
+— and the template marks it `autofocus`, which htmx honours in swapped-in
+content. Every htmx response carries **exactly one** `autofocus`; only a full
+page render carries none. Even the trigger buttons need it: `hx-disabled-elt`
+blurs them at request start, so htmx's built-in id-based restore (gated on the
+focused element having left the document) never fires for them. The successor
+is scoped to that relation group, so clearing the relation group's last row
+lands on the group anchor rather than carrying focus into the next relation
+type — intended, and confirmed with the repo owner. Clearing the whole
+base-artist group instead auto-advances the page, landing on that new group's
+anchor. The app deliberately ships **no custom JavaScript**. The same response
+carries an `hx-swap-oob="innerHTML"` update for `#sr-status`, the one permanent
+`role="status"` region (in the layout, outside every swap target) — `innerHTML`
+is load-bearing, not stylistic, since htmx's default `hx-swap-oob="true"`
+replaces the node and drops `role`/`aria-live` to null, silently losing every
+announcement after the first; `CandidateActionsTest` pins the exact string.
+
 **Auth**: Google OAuth2/OIDC via a custom `OidcUserService` that checks the
 verified email against an allow-list *during the OIDC exchange*, before a
 session exists — deliberately hooked on `oidcUserService` rather than a plain
