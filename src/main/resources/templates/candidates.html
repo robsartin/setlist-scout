@@ -33,6 +33,19 @@
        user decisions -- exactly the bug this is fixing. */-->
 <div th:fragment="candidatesApp" id="candidates-app" class="candidates-app"
      hx-history="false" hx-sync="closest main:queue all">
+    <!--/* #155: out-of-band update for the layout's permanent #sr-status region. htmx extracts
+           this before the primary swap, so it never lands inside #candidates-app -- and because it
+           is emitted only when there's a message, a full page render can't produce a duplicate id.
+           Nested OOB is fine here: the vendored build defaults allowNestedOobSwaps to true. The
+           two halves are "what happened" (from the controller) and "where you are now" (from the
+           already-resolved model), which is why no count has to be threaded through. */-->
+    <p id="sr-status" hx-swap-oob="innerHTML" class="visually-hidden"
+       th:if="${outcome != null and outcome.message != null}">
+        <span th:text="${outcome.message}">Approved Mike Campbell.</span>
+        <span th:if="${current != null}"
+              th:text="' ' + ${current.total} + ' left in ' + ${current.via} + '.'"> </span>
+        <span th:if="${current == null}"> Nothing left to review.</span>
+    </p>
     <p th:if="${current == null}" tabindex="-1"
        th:autofocus="${outcome != null and outcome.focusesAnchor()}">Nothing pending. Run expansion to find more.</p>
 
@@ -64,7 +77,7 @@
         <section class="artist-group card" id="current-group" tabindex="-1"
                  aria-labelledby="current-group-title"
                  th:autofocus="${outcome != null and outcome.focusesAnchor()}">
-            <div class="artist-group-header" aria-live="polite">
+            <div class="artist-group-header">
                 <h2 id="current-group-title" th:text="${current.via}">Base artist</h2>
                 <span class="count" th:text="${current.total}">0</span>
             </div>

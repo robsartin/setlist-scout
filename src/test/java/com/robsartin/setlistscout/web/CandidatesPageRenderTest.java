@@ -377,6 +377,26 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).doesNotContain("autofocus");
     }
 
+    @Test
+    void theLiveRegionIsPermanentAndOutsideTheSwapTarget() throws Exception {
+        String owner = "candidates-live-region@example.com";
+        seedTwoGroups(owner);
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // The region ships empty with every page, from the shared layout.
+        assertThat(body).contains("id=\"sr-status\"");
+        assertThat(body).contains("role=\"status\"");
+        // ...and a full page render never carries an out-of-band update.
+        assertThat(body).doesNotContain("hx-swap-oob");
+        // The old inert live region -- inside the swap target, so replaced wholesale every time --
+        // is gone, and with it the re-announcement of the group title and count on every action.
+        assertThat(body).doesNotContain("<div class=\"artist-group-header\" aria-live=\"polite\">");
+    }
+
     private Artist pendingArtist(String owner, String name, ArtistSource source, String discoveredVia) {
         Artist artist = new Artist(name, source, ArtistStatus.PENDING_REVIEW, discoveredVia, "note for " + name);
         artist.setOwner(owner);

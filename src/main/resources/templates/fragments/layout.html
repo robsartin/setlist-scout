@@ -8,6 +8,12 @@
     <script th:src="@{/js/htmx.min.js}"></script>
 </head>
 <body>
+<!--/* #155: the one live region for the whole app. It lives OUTSIDE <main>, and therefore outside
+       every htmx swap target, on purpose: a region that is itself replaced by a swap is a brand-new
+       region as far as a screen reader is concerned, and its arriving content is generally not
+       announced. Actions update it out-of-band with hx-swap-oob="innerHTML" so this node persists
+       and only its contents change. Ships empty on every page load. */-->
+<p id="sr-status" role="status" aria-live="polite" class="visually-hidden"></p>
 <header class="topbar">
     <div class="topbar-inner">
         <span class="brand"><span class="dot" aria-hidden="true"></span> Setlist Scout</span>

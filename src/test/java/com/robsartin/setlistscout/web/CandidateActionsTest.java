@@ -136,7 +136,12 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         // Benmont Tench is still pending in the same group -- current group unchanged, just refreshed.
         assertThat(body).contains(TOM_PETTY);
         assertThat(body).contains("Benmont Tench");
-        assertThat(body).doesNotContain("Mike Campbell");
+        // #155: "Mike Campbell" itself now legitimately appears once more, inside the OOB
+        // announcement ("Approved Mike Campbell."). Anchor on "<" (the candidate row's rendered
+        // form is "...cand-name\">Mike Campbell</span>...") so this still catches a real
+        // regression -- the row itself reappearing -- without tripping on the new announcement
+        // text, which always ends the name in "." rather than "<".
+        assertThat(body).doesNotContain("Mike Campbell<");
     }
 
     @Test
@@ -213,7 +218,12 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(body).contains(WILCO);
-        assertThat(body).doesNotContain(TOM_PETTY);
+        // #155: the OOB announcement now legitimately names the just-cleared group once
+        // ("Rejected 1 Members from Tom Petty and the Heartbreakers."). Anchor on "<" -- every
+        // rendered-group form (sidebar entry, current-group-title) puts the via name directly
+        // before a closing tag, while the announcement always puts it before "." -- so this still
+        // catches Tom Petty reappearing as an actual group, without tripping on the new sentence.
+        assertThat(body).doesNotContain(TOM_PETTY + "<");
     }
 
     @Test
@@ -420,6 +430,62 @@ class CandidateActionsTest extends AbstractPostgresIntegrationTest {
         // moving focus away with autofocus would be worse than doing nothing.
         assertThat(body).doesNotContain("autofocus");
         assertThat(body).contains("id=\"expand-now\"");
+    }
+
+    @Test
+    void anActionAnnouncesWhatHappenedOutOfBand() throws Exception {
+        String owner = "actions-announce@example.com";
+        Long alpha = savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/approve", alpha)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // innerHTML, not the default outerHTML: the live-region NODE has to survive, or a screen
+        // reader treats each swap as a brand-new region and announces nothing.
+        assertThat(body).containsPattern("id=\"sr-status\"[^>]*hx-swap-oob=\"innerHTML\"|hx-swap-oob=\"innerHTML\"[^>]*id=\"sr-status\"");
+        assertThat(body).contains("Approved Alpha Centauri.");
+        assertThat(body).contains("1 left in " + TOM_PETTY);
+    }
+
+    @Test
+    void clearingTheQueueAnnouncesThatNothingIsLeft() throws Exception {
+        String owner = "actions-announce-empty@example.com";
+        Long only = savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/{id}/reject", only)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Rejected Alpha Centauri.");
+        assertThat(body).contains("Nothing left to review.");
+    }
+
+    @Test
+    void aRelationTypeBulkActionAnnouncesTheCountAndRelationType() throws Exception {
+        String owner = "actions-announce-bulk@example.com";
+        savePending(owner, "Alpha Centauri", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Bravo Company", ArtistSource.MEMBER_EXPANSION, TOM_PETTY);
+        savePending(owner, "Jackson Browne", ArtistSource.SIMILAR_EXPANSION, TOM_PETTY);
+
+        String body = mockMvc.perform(post("/artists/candidates/group")
+                        .param("via", TOM_PETTY)
+                        .param("type", ArtistSource.MEMBER_EXPANSION.name())
+                        .param("decision", "reject")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Rejected 2 Members from " + TOM_PETTY + ".");
     }
 
     /**
