@@ -68,6 +68,15 @@ fieldset.decision label { margin-right:.6rem; white-space:nowrap; }
 button, .btn { font:inherit; font-weight:600; cursor:pointer; border-radius:8px; padding:.4rem .8rem; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); font-size:.9rem; }
 button:hover, .btn:hover { border-color:var(--primary); }
 button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+/* #148 fix round 4: hx-disabled-elt="find button" (candidates.html) sets the `disabled` attribute
+   during a request; without this rule the base button rule's cursor:pointer and the .btn-good/
+   .btn-bad tint colors would still look fully active. Token-based color swap rather than opacity:
+   opacity blends both text and background toward whatever sits behind the button, and .btn-good/
+   .btn-bad are already close to the 4.5:1 AA floor at full strength (4.65:1 / 5.34:1 light-mode) --
+   any opacity strong enough to read as "disabled" pushes them under AA. Swapping to --muted text
+   on a flat --surface-2 background is AA-safe regardless of theme or which surface the button
+   sits on (verified >=5.6:1 for every button/background pairing this page uses, both themes). */
+button:disabled, .btn:disabled { color:var(--muted); background:var(--surface-2); cursor:not-allowed; }
 .btn-primary { background:var(--primary); color:var(--on-primary); border-color:var(--primary); }
 .btn-primary:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
 .btn-good { color:var(--good); background:var(--good-bg); border-color:transparent; }
@@ -87,17 +96,34 @@ form.inline { display:inline; }
 .globalbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
 .globalbar .count-label { margin-right:auto; font-weight:600; }
 
+/* Two-column focused-group layout (#148): sidebar + current group side by side on wide
+   viewports, collapsing to a single column on narrow ones. This file has no width-based
+   @media breakpoints anywhere else -- every other responsive rule (.topbar-inner, nav.main,
+   .globalbar, .cand) reflows fluidly via flex-wrap instead, so this follows the same
+   convention: fixed flex-basis on both children plus flex-wrap does the collapsing without a
+   new breakpoint concept. */
+.candidates-layout { display:flex; gap:1.25rem; align-items:flex-start; flex-wrap:wrap; }
+.candidates-layout .group-sidebar { flex:0 1 240px; min-width:0; }
+.candidates-layout .artist-group { flex:1 1 420px; min-width:0; }
+
+/* #148 follow-up: production has ~295 base-artist groups, so this list can run to hundreds of
+   entries. Bounding its height and scrolling it internally (rather than the whole page) keeps
+   the focused group -- the actual content -- from being pushed far below the fold, on both a
+   tall desktop sidebar and a narrow viewport where .candidates-layout wraps this above the
+   group. overflow-y:auto (never hidden) plus no tabindex here means a keyboard user tabbing to
+   an entry below the fold still gets the browser's native scroll-into-view for free. */
+.group-sidebar ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.3rem; max-height:60vh; overflow-y:auto; }
+.group-sidebar li a { display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.45rem .6rem; border-radius:8px; color:var(--text); text-decoration:none; }
+.group-sidebar li a:hover { background:var(--surface-2); }
+
 .artist-group-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:.7rem; }
 .artist-group-header h2 { margin:0; }
 
 .relgroup { border:1px solid var(--border); border-radius:8px; background:var(--surface-2); }
 .relgroup + .relgroup { margin-top:.55rem; }
-.relgroup summary { cursor:pointer; display:flex; align-items:center; gap:.6rem; padding:.55rem .75rem; list-style:none; }
-.relgroup summary::-webkit-details-marker { display:none; }
-.relgroup summary::before { content:"\25B8"; color:var(--muted); display:inline-block; transition:transform .15s; }
-.relgroup[open] summary::before { transform:rotate(90deg); }
-.relgroup summary .group-actions { margin-left:auto; display:flex; gap:.4rem; flex-wrap:wrap; }
-.relgroup .body { padding:.75rem; border-top:1px solid var(--border); }
+.relgroup-header { display:flex; align-items:center; gap:.6rem; padding:.55rem .75rem; }
+.relgroup-header .group-actions { margin-left:auto; display:flex; gap:.4rem; flex-wrap:wrap; }
+.relgroup .cand-list { padding:.75rem; border-top:1px solid var(--border); }
 
 .cand-list { display:flex; flex-direction:column; gap:.5rem; }
 .cand { display:flex; align-items:center; gap:.6rem; padding:.5rem .6rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap; }
@@ -107,7 +133,7 @@ form.inline { display:inline; }
 .connection-paths { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.3rem; }
 .connection-paths li { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
 
-.lazy-hint { color:var(--muted); font-size:.88rem; margin:0; }
 .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.visually-hidden:focus { position:static; width:auto; height:auto; padding:.4rem .8rem; margin:0; overflow:visible; clip:auto; white-space:normal; }
 .htmx-swapping { opacity:.4; transition:opacity .2s; }
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }

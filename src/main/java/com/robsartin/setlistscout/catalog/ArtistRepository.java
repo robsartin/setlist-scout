@@ -1,6 +1,5 @@
 package com.robsartin.setlistscout.catalog;
 
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -88,10 +87,6 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
          GROUP BY a.discoveredVia, a.source
         """)
     List<CandidateGroupCount> countByStatusGroupedByViaAndSource(String owner, ArtistStatus status);
-
-    /** A page slice of one group's rows, for lazy load + "show more". */
-    List<Artist> findByOwnerAndStatusAndDiscoveredViaAndSource(
-        String owner, ArtistStatus status, String discoveredVia, ArtistSource source, Pageable pageable);
 
     /** All of one group's rows, for per-group bulk actions. */
     List<Artist> findByOwnerAndStatusAndDiscoveredViaAndSource(
