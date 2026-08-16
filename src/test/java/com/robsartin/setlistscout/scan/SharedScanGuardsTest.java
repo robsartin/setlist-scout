@@ -77,7 +77,7 @@ class SharedScanGuardsTest extends AbstractPostgresIntegrationTest {
 
         publishActivated(sharedKey, artist);
 
-        List<?> jobs = awaitUntil(() -> expandJobRepository.findAll(), j -> !j.isEmpty());
+        List<?> jobs = awaitAbsence(() -> expandJobRepository.findAll(), j -> !j.isEmpty());
         assertThat(jobs)
                 .as("expansion for a shared scan would fill a Candidates queue nobody can see "
                         + "and bill LLM calls per artist")
