@@ -3,16 +3,18 @@ package com.robsartin.setlistscout.scan;
 import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
+import com.robsartin.setlistscout.settings.GeocodingService;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.SharedScanOwner;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Which shared scans a user may see, and their contents (#163).
@@ -30,19 +32,22 @@ public class SharedScanService {
     private final SettingsService settingsService;
     private final SharedScanReconciler reconciler;
     private final AppProperties appProperties;
+    private final TransactionTemplate transactionTemplate;
 
     public SharedScanService(SharedScanRepository sharedScanRepository,
                               ShowRepository showRepository,
                               ArtistRepository artistRepository,
                               SettingsService settingsService,
                               SharedScanReconciler reconciler,
-                              AppProperties appProperties) {
+                              AppProperties appProperties,
+                              TransactionTemplate transactionTemplate) {
         this.sharedScanRepository = sharedScanRepository;
         this.showRepository = showRepository;
         this.artistRepository = artistRepository;
         this.settingsService = settingsService;
         this.reconciler = reconciler;
         this.appProperties = appProperties;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /** Every shared scan {@code email} participates in. Empty for an unauthenticated caller. */
@@ -91,17 +96,29 @@ public class SharedScanService {
     /**
      * Provision a new shared scan: allocate its synthetic owner key, create its settings row, and
      * populate its artists from the participants' current intersection.
+     * <p>
+     * Deliberately NOT {@code @Transactional} at this level (ADR-0024). A brand-new owner key's
+     * settings row always needs geocoding -- it can never already exist -- and that geocode is a
+     * slow external HTTP call to Zippopotam.us that must not run while holding a DB connection
+     * open. It is resolved here first, before any transaction starts; the actual writes -- the
+     * {@link SharedScan} row, the settings row (built from that already-resolved geocode, via
+     * {@code SettingsService#getOrCreateSettings(String, Optional)}), and {@link
+     * SharedScanReconciler#reconcile}'s artist activations -- still all commit together in one
+     * {@link TransactionTemplate}-managed transaction, so {@code ArtistActivated}/{@code
+     * ArtistDeactivated} still only ever publish from a committing transaction.
      *
      * @throws ResponseStatusException 400 -- see {@link #validateNewPairing}.
      */
-    @Transactional
     public SharedScan create(String label, String ownerA, String ownerB) {
         validateNewPairing(ownerA, ownerB);
-        SharedScan scan = sharedScanRepository.save(
-                new SharedScan(SharedScanOwner.newKey(), ownerA, ownerB, label));
-        settingsService.getOrCreateSettings(scan.getOwnerKey());
-        reconciler.reconcile(scan);
-        return scan;
+        Optional<GeocodingService.GeoResult> geocode = settingsService.geocodeDefault();
+        return transactionTemplate.execute(status -> {
+            SharedScan scan = sharedScanRepository.save(
+                    new SharedScan(SharedScanOwner.newKey(), ownerA, ownerB, label));
+            settingsService.getOrCreateSettings(scan.getOwnerKey(), geocode);
+            reconciler.reconcile(scan);
+            return scan;
+        });
     }
 
     /**
