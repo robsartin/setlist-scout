@@ -116,7 +116,15 @@ directly on `Artist`.
 Two more tables round out the schema but aren't FK-linked to `Artist` — they
 match by owner and name/string rather than by id: `show_event` (found shows,
 unique per `owner, artistName, eventDateTime, venueName`) and
-`search_settings` (one row per owner: postal code, radius, months-ahead window).
+`search_settings` (one row per owner — real or shared: postal code, radius, months-ahead window).
+
+A third, `shared_scan` (`owner_key` UNIQUE, `owner_a`, `owner_b`, `label`), holds identity only for
+a **shared scan** (#163) — two users' intersected artist lists, scanned at a location neither has
+saved, served at `/shared`. Its `owner_key` (`"shared:<uuid>"`) is what `artist`,
+`search_settings`, `scan_job`, and `show_event` above are keyed by, the same as any other owner.
+`owner` throughout this document is therefore an opaque scope key, not necessarily a real user's
+email — see `shared.SharedScanOwner` and
+[ADR-0027](adr/0027-shared-scan-synthetic-owner-key.md).
 
 `scan_job` and `expand_job` share their column shape via `shared.AbstractJob`
 (`@MappedSuperclass`) — same lifecycle, same poller mechanics, one entity per
@@ -181,6 +189,14 @@ table):
 | `ArtistDeactivated` | `catalog.ArtistActivationService` | both `*JobListener`s — delete that artist's job rows |
 | `SettingsChanged` | `settings` module | `scan.ScanJobListener` only — re-dues all scan jobs (expansion isn't location-sensitive) |
 | `RelationDiscovered` | `expansion.ExpandUnitRunner` | `catalog.RelationDiscoveredListener` — upserts a `PENDING_REVIEW` `Artist` and an `ArtistEdge`, deduped by name across any existing status including `REJECTED` |
+
+For a shared-scan owner, "each enqueues a job per source" above is narrower:
+`ScanJobListener` enqueues cheap sources only (`ticketmaster`, `bandsintown`),
+and `ExpandJobListener` skips entirely — a shared scan has no reviewer to show
+expansion candidates to, and expansion bills an LLM call per artist.
+`ScanJobBackfill` / `ExpandJobBackfill` apply the identical guard, since
+backfill reaches the same enqueue calls directly on every startup, bypassing
+the listener ([ADR-0027](adr/0027-shared-scan-synthetic-owner-key.md)).
 
 **A rule that has already caused two production bugs**
 ([ADR-0024](adr/0024-event-and-durable-write-invariant.md)): an event
@@ -267,12 +283,13 @@ calls (no SDK dependency) against `/v1/messages`, each with a package-private
 
 ## 7. Web layer
 
-Five page templates, all extending the shared `fragments/layout.html` shell
-(nav: Shows / Artists / Candidates badge / Rejected / Settings):
+Six page templates, all extending the shared `fragments/layout.html` shell
+(nav: Shows / Shared / Artists / Candidates badge / Rejected / Settings):
 
 | Route | Controller | Template |
 |---|---|---|
 | `GET /` | `scan.ShowController` | `shows.html` |
+| `GET /shared` | `scan.SharedScanController` | `shared.html` (two participants' shared shows + location settings) |
 | `GET /artists` | `catalog.ArtistController` | `artists.html` |
 | `GET /artists/candidates` | `review.ReviewController` | `candidates.html` |
 | `GET /artists/rejected` | `review.ReviewController` | `rejected.html` |

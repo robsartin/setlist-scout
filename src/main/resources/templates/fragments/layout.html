@@ -19,6 +19,7 @@
         <span class="brand"><span class="dot" aria-hidden="true"></span> Setlist Scout</span>
         <nav class="main" aria-label="Primary">
             <a th:href="@{/}" th:attr="aria-current=${navActive == 'shows'} ? 'page' : null">Shows</a>
+            <a th:href="@{/shared}" th:attr="aria-current=${navActive == 'shared'} ? 'page' : null">Shared</a>
             <a th:href="@{/artists}" th:attr="aria-current=${navActive == 'artists'} ? 'page' : null">Artists</a>
             <a th:href="@{/artists/candidates}" th:attr="aria-current=${navActive == 'candidates'} ? 'page' : null">
                 <!--/* id (issue #154): a stable out-of-band swap target. This span sits OUTSIDE

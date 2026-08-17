@@ -53,6 +53,16 @@ public abstract class AbstractPostgresIntegrationTest {
     private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(90);
 
     /**
+     * Deadline for proving a NEGATIVE -- "this must never be enqueued", "this must never appear".
+     * Deliberately short, and deliberately NOT {@link #AWAIT_TIMEOUT}: a negative assertion's poll
+     * can only be satisfied when the behaviour under test is broken, so on every passing run it is
+     * guaranteed to run the deadline out in full. A generous timeout is free on the happy path for
+     * a positive wait and pure cost for a negative one. 10s is ample here -- an unguarded listener
+     * enqueues within the same transaction commit, not eventually.
+     */
+    private static final Duration NEGATIVE_PROOF_TIMEOUT = Duration.ofSeconds(10);
+
+    /**
      * Bounded manual poll -- no fixed sleep -- for an async effect (e.g. an
      * {@code @ApplicationModuleListener}'s durable write) to land. Awaitility isn't a project
      * dependency; this is a plain poll-loop helper. Returns the last fetched value regardless of
@@ -60,7 +70,27 @@ public abstract class AbstractPostgresIntegrationTest {
      * instead of a bare "empty" assertion.
      */
     protected static <T> T awaitUntil(Supplier<T> fetch, Predicate<T> condition) {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
+        return poll(fetch, condition, AWAIT_TIMEOUT);
+    }
+
+    /**
+     * Bounded poll for an effect that must NOT happen. Returns as soon as {@code appears} becomes
+     * true (so a genuine regression fails fast with real data to assert on), and otherwise gives up
+     * after {@link #NEGATIVE_PROOF_TIMEOUT} rather than {@link #AWAIT_TIMEOUT}. Callers assert the
+     * absence on the returned value.
+     */
+    protected static <T> T awaitAbsence(Supplier<T> fetch, Predicate<T> appears) {
+        return poll(fetch, appears, NEGATIVE_PROOF_TIMEOUT);
+    }
+
+    /**
+     * Shared bounded poll loop behind {@link #awaitUntil} and {@link #awaitAbsence} -- identical
+     * mechanics, different deadline per caller. No fixed sleep; returns the last fetched value
+     * regardless of whether {@code condition} was ever satisfied, so a timeout still fails with a
+     * useful diff instead of a bare "empty" assertion.
+     */
+    private static <T> T poll(Supplier<T> fetch, Predicate<T> condition, Duration timeout) {
+        Instant deadline = Instant.now().plus(timeout);
         T last = fetch.get();
         while (!condition.test(last) && Instant.now().isBefore(deadline)) {
             try {

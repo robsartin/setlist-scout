@@ -6,6 +6,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 /** Owns settings persistence + geocoding: the owner's default row and updates from the settings form. */
 @Service
 public class SettingsService {
@@ -27,13 +29,35 @@ public class SettingsService {
 
     /** The user's settings, creating a default row (default ZIP, geocoded) on their first visit. */
     public SearchSettings getOrCreateSettings(String owner) {
-        return settingsRepository.findByOwner(owner).orElseGet(() -> {
-            var d = appProperties.defaults();
-            SearchSettings settings = new SearchSettings(owner, d.city(), d.state(), d.radiusMiles(), d.monthsAhead());
-            settings.setPostalCode(d.postalCode());
-            applyGeocode(settings, d.postalCode());
-            return settingsRepository.save(settings);
-        });
+        return settingsRepository.findByOwner(owner).orElseGet(() -> newDefaultSettings(owner, geocodeDefault()));
+    }
+
+    /**
+     * Same as {@link #getOrCreateSettings(String)}, but for a caller that already resolved the
+     * default-ZIP geocode itself via {@link #geocodeDefault()} -- skips this method's own geocode
+     * lookup for a brand-new owner's row entirely, rather than making the same network call twice.
+     */
+    public SearchSettings getOrCreateSettings(String owner, Optional<GeocodingService.GeoResult> precomputedDefaultGeocode) {
+        return settingsRepository.findByOwner(owner).orElseGet(() -> newDefaultSettings(owner, precomputedDefaultGeocode));
+    }
+
+    /**
+     * Resolves the app's default-ZIP geocode on its own, for a caller that must complete this slow
+     * external lookup BEFORE opening its own transaction (ADR-0024) -- see {@code
+     * SharedScanService#create}, which provisions a brand-new owner key whose settings row always
+     * needs this (it can never already exist), and cannot hold its creating transaction's DB
+     * connection open across the network call that would otherwise make.
+     */
+    public Optional<GeocodingService.GeoResult> geocodeDefault() {
+        return geocodingService.geocode(appProperties.defaults().postalCode());
+    }
+
+    private SearchSettings newDefaultSettings(String owner, Optional<GeocodingService.GeoResult> geocode) {
+        var d = appProperties.defaults();
+        SearchSettings settings = new SearchSettings(owner, d.city(), d.state(), d.radiusMiles(), d.monthsAhead());
+        settings.setPostalCode(d.postalCode());
+        geocode.ifPresent(geo -> applyGeocodeResult(settings, geo));
+        return settingsRepository.save(settings);
     }
 
     @Transactional
@@ -51,11 +75,13 @@ public class SettingsService {
     }
 
     private void applyGeocode(SearchSettings settings, String postalCode) {
-        geocodingService.geocode(postalCode).ifPresent(geo -> {
-            settings.setLatitude(geo.latitude());
-            settings.setLongitude(geo.longitude());
-            settings.setCity(geo.city());
-            settings.setState(geo.state());
-        });
+        geocodingService.geocode(postalCode).ifPresent(geo -> applyGeocodeResult(settings, geo));
+    }
+
+    private void applyGeocodeResult(SearchSettings settings, GeocodingService.GeoResult geo) {
+        settings.setLatitude(geo.latitude());
+        settings.setLongitude(geo.longitude());
+        settings.setCity(geo.city());
+        settings.setState(geo.state());
     }
 }

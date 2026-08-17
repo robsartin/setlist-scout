@@ -5,6 +5,7 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
+import com.robsartin.setlistscout.shared.SharedScanOwner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -54,6 +55,13 @@ public class ExpandJobBackfill implements ApplicationRunner {
         List<Artist> active = artistRepository.findByStatusIn(
                 List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
         for (Artist artist : active) {
+            // #163: same guard as ExpandJobListener. findByStatusIn has NO owner filter, so this
+            // startup backfill sees shared-scan artists too; without this it would re-enqueue the
+            // expansion jobs the listener guard exists to prevent, on every restart.
+            if (SharedScanOwner.isSharedScanKey(artist.getOwner())) {
+                continue;
+            }
+
             for (RelationSource source : relationSources) {
                 if (!source.appliesTo(artist.getStatus())) {
                     continue;

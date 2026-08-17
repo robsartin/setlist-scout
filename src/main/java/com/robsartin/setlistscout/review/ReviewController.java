@@ -1,18 +1,16 @@
 package com.robsartin.setlistscout.review;
 
-import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
+import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CurrentUser;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,16 +46,16 @@ public class ReviewController {
     private final ExpandJobRepository expandJobRepository;
     private final CurrentUser currentUser;
     private final ArtistActivationService activationService;
-    private final AppProperties appProperties;
+    private final AdminGuard adminGuard;
 
     public ReviewController(ArtistRepository artistRepository, ExpandJobRepository expandJobRepository,
                            CurrentUser currentUser, ArtistActivationService activationService,
-                           AppProperties appProperties) {
+                           AdminGuard adminGuard) {
         this.artistRepository = artistRepository;
         this.expandJobRepository = expandJobRepository;
         this.currentUser = currentUser;
         this.activationService = activationService;
-        this.appProperties = appProperties;
+        this.adminGuard = adminGuard;
     }
 
     /**
@@ -323,7 +321,7 @@ public class ReviewController {
      * Admin-only cross-account escape hatch (#136): re-due a DIFFERENT owner's expand jobs.
      * Reuses the exact same redueAll mechanism as the self-service {@link #expandNow} above, just
      * parameterized by {@code targetOwner} instead of {@code currentUser.email()}. See
-     * {@link #requireAdmin()} and {@code ShowController#requireAdmin} for the shared rationale.
+     * {@link com.robsartin.setlistscout.shared.AdminGuard#require()} for the shared rationale.
      * The response re-renders the ADMIN's own Candidates page (not the target owner's), so {@code
      * via} is {@code null} -- there's no "current group" carried across a cross-account action, it
      * always falls back to the admin's own biggest-first group via {@link #populateCandidates}.
@@ -332,23 +330,10 @@ public class ReviewController {
     public String adminExpandNow(@RequestParam String targetOwner,
                                  @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                  Model model) {
-        requireAdmin();
+        adminGuard.require();
         expandJobRepository.redueAll(targetOwner, java.time.Instant.now());
         return actionResult(hxRequest, model, null,
                 ActionOutcome.trigger(ADMIN_EXPAND_NOW_TRIGGER, "Expansion requested for " + targetOwner + "."));
-    }
-
-    /**
-     * Placeholder admin gate for #136: reuses the same config-driven allow-list pattern as
-     * {@code SecurityConfig}'s OIDC login check (see {@code AppProperties.Auth#adminEmail}), not a
-     * real roles system -- that would be real infrastructure (migration, entity, an admin-toggle
-     * UI) for an app with exactly two allowed users today. Revisit if the app ever grows past that.
-     */
-    private void requireAdmin() {
-        String owner = currentUser.email();
-        if (owner == null || !owner.equalsIgnoreCase(appProperties.auth().adminEmail())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
     }
 
     /** Scoped by owner so a user can only change the status of their own artists. */

@@ -29,6 +29,10 @@ the reasoning behind each major design decision.
    just re-due your jobs to
    "now" and queue them for the next poller tick — they don't run a scan synchronously,
    so the page shows a brief "queued" confirmation rather than results.
+5. **Shared scans** — an admin can pair two allow-listed users into a **shared scan**: the artists
+   they both follow, scanned at a location neither has saved, on `/shared`. It reuses the same
+   durable job/poller machinery as a personal scan rather than separate infrastructure, refreshes
+   automatically, and both participants see the same results.
 
 **Not yet wired up:** Austin-local sources (venue calendars, Austin Chronicle,
 Do512, KUTX) don't have clean JSON APIs, so they need scraping rather than a

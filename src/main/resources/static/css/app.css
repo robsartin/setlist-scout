@@ -67,7 +67,7 @@ fieldset.decision label { margin-right:.6rem; white-space:nowrap; }
 /* Buttons */
 button, .btn { font:inherit; font-weight:600; cursor:pointer; border-radius:8px; padding:.4rem .8rem; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); font-size:.9rem; }
 button:hover, .btn:hover { border-color:var(--primary); }
-button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
 /* #155: the group anchor is focused programmatically after every swap (and by the skip link), so
    it gets the same ring as interactive elements. :focus, not :focus-visible -- programmatic focus
    on a tabindex="-1" element is not reliably "visible" across browsers, and a keyboard user being
