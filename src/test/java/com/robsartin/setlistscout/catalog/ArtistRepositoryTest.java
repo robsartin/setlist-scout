@@ -60,6 +60,7 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
     @Transactional
     void insertIfAbsentCreatesRowWhenAbsent() {
         artistRepository.insertIfAbsent(OWNER, "Discovered Candidate Band",
+                ArtistNameNormalizer.normalize("Discovered Candidate Band"),
                 ArtistSource.SIMILAR_EXPANSION.name(), ArtistStatus.PENDING_REVIEW.name(),
                 "Base Artist", "similar to Base Artist", Instant.now());
 
@@ -87,6 +88,7 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
         // race shape: two concurrent RelationDiscovered deliveries for the same candidate, one
         // of which already committed by the time this one's insert runs.
         assertThatCode(() -> artistRepository.insertIfAbsent(OWNER, "Discovered Candidate Band",
+                ArtistNameNormalizer.normalize("Discovered Candidate Band"),
                 ArtistSource.SIMILAR_EXPANSION.name(), ArtistStatus.PENDING_REVIEW.name(),
                 "Different Discovery Path", "different note", Instant.now()))
                 .as("ON CONFLICT DO NOTHING never throws, unlike a raw save() against the unique constraint")
@@ -105,10 +107,10 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
     @DisplayName("the (owner, name) unique constraint is case-sensitive at the DB level")
     @Transactional
     void uniqueConstraintIsCaseSensitive() {
-        artistRepository.insertIfAbsent(OWNER, "Radiohead", ArtistSource.SEED_LIST.name(),
-                ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
-        artistRepository.insertIfAbsent(OWNER, "radiohead", ArtistSource.SEED_LIST.name(),
-                ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
+        artistRepository.insertIfAbsent(OWNER, "Radiohead", ArtistNameNormalizer.normalize("Radiohead"),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
+        artistRepository.insertIfAbsent(OWNER, "radiohead", ArtistNameNormalizer.normalize("radiohead"),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
 
         List<Artist> all = artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW);
         assertThat(all).as("case-variant names are distinct rows at the DB constraint level "
