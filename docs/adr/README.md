@@ -77,3 +77,6 @@
 - [0026: Ticketmaster geoPoint search, not postalCode](0026-ticketmaster-geopoint-search.md) — _Accepted_
   Ticketmaster's postal-code index doesn't cover every ZIP and silently returns a well-formed zero-result response for the ones it misses, indistinguishable from a legitimate "nothing nearby" — found via #152, where one production owner got zero Ticketmaster results the entire time.
   Related: [0018: ZIP-code search location with Zippopotam.us geocoding](0018-zip-code-search-location.md)
+- [0027: Shared scans as a synthetic owner key, not parallel infrastructure](0027-shared-scan-synthetic-owner-key.md) — _Accepted_
+  A shared scan (#163) needs everything a person's scan has — location, artist list, jobs, persisted shows — without being a person; every owner-scoped table and job already keys on an opaque string, so a shared scan gets its own `shared:<uuid>` owner key instead of parallel job tables or a nullable discriminator column that would defeat `show_event`'s uniqueness constraint.
+  Related: [0021: Adopt Spring Modulith with enforced boundaries](0021-adopt-spring-modulith-with-enforced-boundaries.md), [0023: Per-unit event-driven scan/expand work model](0023-per-unit-event-driven-scan-work-model.md)
