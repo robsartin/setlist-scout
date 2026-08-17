@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.settings.GeocodingService;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -10,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -17,8 +19,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -44,26 +49,19 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         registry.add("setlistscout.auth.allowed-emails", () -> ADMIN + "," + OTHER + "," + STRANGER);
     }
 
-    /**
-     * Deviation from the brief (documented in task-6-report.md): the brief's
-     * noLocationIsItsOwnState assumes a freshly created scan's settings have no geocode because
-     * the test environment has no network access to Zippopotam.us. That's not true here -- this
-     * sandbox reaches the real API, and it geocodes the app's real default ZIP (78701) successfully,
-     * which made the "no location yet" state never render. "00000" is the same known-invalid ZIP
-     * SettingsServiceTest already uses as its geocode-failure fixture: GeocodingService#fetch
-     * degrades to Optional.empty() on ANY error, so this 404s against the real API and equally
-     * fails closed with no network at all -- hermetic either way, instead of accidentally
-     * depending on which one this run happens to have.
-     */
-    @DynamicPropertySource
-    static void geocodingProperties(DynamicPropertyRegistry registry) {
-        registry.add("setlistscout.defaults.postal-code", () -> "00000");
-    }
-
     @Autowired private MockMvc mockMvc;
     @Autowired private SharedScanService service;
     @Autowired private SharedScanRepository sharedScanRepository;
     @Autowired private ShowRepository showRepository;
+
+    /**
+     * Replaces the real Zippopotam.us-backed bean so this class never makes a live HTTP call
+     * (finding 1 of the 2026-08-16 whole-branch review). Stubbed empty by default in
+     * {@link #setUp()} -- the "no geocode yet" state most of this class's fixtures need -- and
+     * re-stubbed to a real result in the one test that needs a successful geocode. Same pattern as
+     * {@code JobEnqueueFlowTest}/{@code PollerFlowTest}.
+     */
+    @MockitoBean private GeocodingService geocodingService;
 
     private SharedScan scan;
 
@@ -71,6 +69,7 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     void setUp() {
         showRepository.deleteAll();
         sharedScanRepository.deleteAll();
+        when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         scan = service.create("Rob & David", ADMIN, OTHER);
     }
 
@@ -165,6 +164,11 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("'no artists in common' and 'nothing playing there' are different messages")
     void emptyStatesDoNotCollapse() throws Exception {
+        // This path needs settings.latitude != null (shared.html line ~64), unlike every other
+        // test in this class -- stub a successful geocode just for this one.
+        when(geocodingService.geocode(any()))
+                .thenReturn(Optional.of(new GeocodingService.GeoResult(41.8781, -87.6298, "Chicago", "IL")));
+
         mockMvc.perform(post("/shared/" + scan.getId() + "/settings")
                         .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
                         .with(csrf())
