@@ -32,11 +32,20 @@ python3 scripts/check_adrs.py                       # ADR numbering contiguous +
   green line that has nothing to do with your change.
 - **Scattered failures that pass on rerun: read the actual exception before calling it a flake.**
   Two unrelated causes produce that same console signature, and telling them apart takes one look:
-  - An **assertion** failure on an `awaitUntil` → the async-await flake. Integration tests wait on
-    `@Async` AFTER_COMMIT listeners; under CI load (a container per test class, contended Hikari
-    pools) these take far longer than locally. `PollerFlowTest.expandHappyPath` is the usual
-    suspect. Suspect the deadline before the code — raising `AWAIT_TIMEOUT` is free, since the loop
-    returns as soon as the condition holds and the deadline only bounds the failure path.
+  - An **assertion** failure on an `awaitUntil` → **first ask whether the awaited cause ever ran
+    at all.** A timed-out wait means "it hasn't happened", which covers *slow* and *never started* —
+    and the second is far more likely than it looks. Check that the triggering work actually
+    executed (was the job claimed? was the event published? is `event_publication` growing?) before
+    touching the deadline. Instrument it: an idle executor during the wait — `active=0, queued=0`,
+    publication count static — proves nothing was ever dispatched, and no timeout will ever help.
+    **Do not raise `AWAIT_TIMEOUT` as a first move.** #132 did exactly that (30s → 90s) for
+    `PollerFlowTest.expandHappyPath` and the failure returned, because the real cause was #172:
+    the poller claims `ORDER BY next_due_at LIMIT 20` across *all* owners, and `CatalogSeeder`'s
+    143 boot-stamped jobs crowded the test's own job out of the batch once a run took longer than
+    60s. A test that waits on work that was never scheduled cannot be fixed by waiting longer.
+    When the wait is genuinely for an async listener that *did* start, prefer
+    `awaitQuiescence()` (added in #182) — it waits on `event_publication` draining, which
+    distinguishes "still running" from "never ran".
   - **`MockitoException: cannot mock this class`** → never a bug in the named test. Mockito's agent
     failed to attach. Fixed in #160 by passing `mockito-core` as an explicit `-javaagent` in
     `build.gradle.kts`; `-XX:-EnableDynamicAgentLoading` sits beside it so that if the wiring is

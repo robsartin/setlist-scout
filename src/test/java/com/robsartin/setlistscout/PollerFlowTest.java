@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
+import com.robsartin.setlistscout.catalog.CatalogSeeder;
 import com.robsartin.setlistscout.expansion.ExpandJob;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.expansion.ExpandPoller;
@@ -77,11 +78,11 @@ import static org.mockito.Mockito.when;
         "setlistscout.expand-tick-ms=3600000",
         // The Task 4 startup backfill (scan.ScanJobBackfill / expansion.ExpandJobBackfill) is a
         // synchronous ApplicationRunner: it runs once during context refresh, before any @Test
-        // method's own `when(...)` stubbing has happened. CatalogSeeder always seeds real SEED
-        // artists at startup regardless, so backfill would try to enqueue jobs for them using
+        // method's own `when(...)` stubbing has happened, so it would enqueue jobs using
         // ticketmasterShowSource/lastFmSource below while their id() is still an unstubbed-null
-        // Mockito default -- a real NOT NULL violation, unlike the async ScanJobListener/
-        // ExpandJobListener path this class doesn't otherwise exercise for those seeded artists.
+        // Mockito default -- a real NOT NULL violation. Off here, together with the stubbed-out
+        // CatalogSeeder below: between them, NOTHING but a @Test method itself ever writes a row
+        // to scan_job / expand_job in this context.
         "setlistscout.job-backfill-enabled=false"
 })
 class PollerFlowTest extends AbstractPostgresIntegrationTest {
@@ -130,6 +131,39 @@ class PollerFlowTest extends AbstractPostgresIntegrationTest {
     /** Stubbed empty so settings persistence never hits the network geocoder. */
     @MockitoBean
     private GeocodingService geocodingService;
+
+    /**
+     * Stubbed out so this context's job tables contain ONLY what a {@code @Test} method itself
+     * enqueues. This is what fixes issue #172, and it is a correctness fix, not a speed one.
+     * <p>
+     * {@link CatalogSeeder} is a {@code CommandLineRunner} that imports the real
+     * {@code data/seed-bands.txt} for the seed owner at startup. Each seeded artist fires
+     * {@code ArtistActivated}, whose async {@code ExpandJobListener} enqueues a real
+     * {@code expand_job} per expansion source -- 143 rows, 103 of them due, measured in this
+     * context. {@code ExpandPoller#tick()} does not claim "the test's job"; it claims a batch:
+     * <pre>{@code ORDER BY next_due_at LIMIT setlistscout.expand-batch-size (20)}</pre>
+     * over the WHOLE table, with no owner scope. The seeded rows are stamped at context-startup
+     * time and a {@code @Test} enqueues its own at {@code now() - 60s}, so which of them sorts
+     * first is decided purely by how much wall-clock time has passed since the context booted --
+     * under 60s and the test's job wins, over 60s and all 100+ seeded rows sort ahead of it and
+     * the 20-row batch never reaches it.
+     * <p>
+     * When that happens the test's job is never claimed, so {@code ExpandUnitRunner} never runs,
+     * so {@code RelationDiscovered} is never published and the listener never fires. The
+     * {@code awaitUntil} in {@link #expandHappyPath} is then waiting for an event that will never
+     * exist -- which is why raising {@code AWAIT_TIMEOUT} 30s -> 90s in #132 did not fix it and
+     * no future increase would. Verified by forcing the ordering directly (back-dating the seeded
+     * rows made it fail 100% of the time, with the job's {@code next_due_at} provably untouched by
+     * {@code tick()}). With the seeder stubbed, {@code expand_job} only ever holds the 3 rows this
+     * class enqueues itself -- so even adversarially back-dated they cannot fill a 20-row batch,
+     * and the crowd-out is arithmetically impossible rather than merely unlikely.
+     * <p>
+     * Removing the seed also stops this class silently driving the REAL expansion fleet against
+     * REAL external APIs: the claimed seed jobs ran live MusicBrainz/Discogs lookups, whose
+     * latency is exactly what pushed the run past the 60s line that triggered the bug.
+     */
+    @MockitoBean
+    private CatalogSeeder catalogSeeder;
 
     @Test
     @DisplayName("scan poller: claims a due scan_job, persists the found Show via the real "
@@ -184,6 +218,18 @@ class PollerFlowTest extends AbstractPostgresIntegrationTest {
         ExpandJob job = enqueueExpandJob(owner, baseArtistId, "lastfm");
 
         expandPoller.tick();
+
+        // Precondition, asserted before the await rather than after it: tick() claims a GLOBAL
+        // `ORDER BY next_due_at LIMIT expand-batch-size` batch, not "this job", so THIS job having
+        // run is something to check, not something to assume. A rescheduled next_due_at is the
+        // proof it ran. Without this, anything that crowds the job out of the batch (issue #172:
+        // 100+ seeded expand_jobs stamped earlier) shows up only as the awaitUntil below timing
+        // out after 90s on an event that was never published -- an assertion failure that looks
+        // like a slow listener and is actually a job that never started.
+        assertThat(expandJobRepository.findById(job.getId()).orElseThrow().getNextDueAt())
+                .as("the poller claimed and ran THIS test's expand_job (if this fails, something "
+                        + "enqueued other jobs into this context and crowded it out of the batch)")
+                .isAfter(Instant.now());
 
         // The async @ApplicationModuleListener (AFTER_COMMIT) persists the candidate slightly
         // after the poller run commits -- await it.
