@@ -99,8 +99,12 @@ mapping, or the app won't boot.
 - **Modulith boundaries** (`catalog`, `scan`, `expansion`, `settings`, `review`, `shared`) are
   enforced by `ModularityTests`. `shared` is OPEN. A module writes its own data; events cross
   boundaries.
-- **Owner-scope everything** — the app is multi-tenant by `owner` (email). Every query, action, and
-  page must be scoped, and it should be asserted in tests.
+- **Owner-scope everything** — `owner` is an opaque scope key, not always an email: usually a
+  user's, sometimes a shared-scan key (`shared:<uuid>`, see `shared.SharedScanOwner`). Every query,
+  action, and page must still be scoped, and it should be asserted in tests. A shared-scan owner
+  deliberately gets a **reduced** job set — no expansion jobs, scan jobs for cheap sources only —
+  enforced at four enqueue sites: `ScanJobListener`, `ScanJobBackfill`, `ExpandJobListener`,
+  `ExpandJobBackfill`.
 - Status changes go through `catalog.ArtistActivationService` so the domain events fire (jobs
   enqueue/cancel). Never a direct repository save.
 - ADRs live in `docs/adr/`, numbered contiguously and linked from the index — `check_adrs.py`
