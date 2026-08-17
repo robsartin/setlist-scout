@@ -2,7 +2,13 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{fragments/layout :: page('Shared Shows', 'shared', ~{::content})}">
 <body>
-<div th:fragment="content">
+<!--/* tabindex="-1" + th:autofocus (justCreated, set only by SharedScanController#create's htmx
+       branch): the anchor-focus fix for this fragment's own outerHTML swap, same shape as
+       shows.html's showsRegion -- an outerHTML swap destroys whatever was focused (here, the
+       create form's submit button, which this response doesn't even render anymore), and focus
+       would otherwise silently drop to <body>. Unset (falsy) on a plain GET, so a normal page
+       load doesn't steal focus. */-->
+<div th:fragment="content" id="shared-content" tabindex="-1" th:autofocus="${justCreated == true}">
     <h1>Shared Shows</h1>
 
     <!--/* No pairing yet. Only the admin can create one, so everyone else gets an explanation
@@ -12,7 +18,12 @@
             location you choose together.</p>
 
         <div class="settings" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}">
-            <form th:action="@{/shared}" method="post">
+            <!--/* th:hx-post/hx-target/hx-disabled-elt: same double-submit protection as shows.html's
+                   "Scan now" and candidates.html's action forms -- disables the submit button for
+                   the round trip so a double-click can't fire this twice (SharedScanController#create
+                   returns this same "shared :: content" fragment for the htmx branch). */-->
+            <form th:action="@{/shared}" th:hx-post="@{/shared}" hx-target="#shared-content"
+                  hx-swap="outerHTML" hx-disabled-elt="find button" method="post">
                 <label for="shared-create-label">Name</label>
                 <input id="shared-create-label" type="text" name="label" value="Shared" required/>
                 <label for="shared-create-target">Shared with</label>

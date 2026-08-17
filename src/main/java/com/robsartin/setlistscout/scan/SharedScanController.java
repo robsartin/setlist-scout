@@ -7,6 +7,7 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.time.Instant;
@@ -23,6 +24,9 @@ import java.util.List;
  */
 @Controller
 public class SharedScanController {
+
+    /** htmx sets this header on its requests; when present we return just the changed fragment. */
+    private static final String HX_REQUEST = "HX-Request";
 
     private final SharedScanService sharedScanService;
     private final SharedScanReconciler reconciler;
@@ -44,9 +48,13 @@ public class SharedScanController {
 
     @GetMapping("/shared")
     public String page(Model model) {
-        String email = currentUser.email();
+        populatePage(model, currentUser.email());
+        return "shared";
+    }
+
+    /** Shared by {@link #page} and {@link #create}'s htmx branch -- both render the same content fragment. */
+    private void populatePage(Model model, String email) {
         List<SharedScan> scans = sharedScanService.visibleTo(email);
-        model.addAttribute("sharedScans", scans);
         if (!scans.isEmpty()) {
             SharedScan scan = scans.get(0);
             model.addAttribute("scan", scan);
@@ -56,14 +64,33 @@ public class SharedScanController {
             // Lets the page distinguish "you have nothing in common" from "nothing playing there".
             model.addAttribute("sharedArtistCount", sharedScanService.sharedArtistCount(scan));
         }
-        return "shared";
     }
 
-    /** Admin-only: create the pairing. The other participant comes from the allow-list dropdown. */
+    /**
+     * Admin-only: create the pairing. The other participant comes from the allow-list dropdown.
+     * htmx request -&gt; the {@code content} fragment, re-populated with the new pairing (also
+     * what gives the create form's {@code hx-disabled-elt="find button"} something to swap into,
+     * so a double-click's second submit lands on a form that's already gone). Non-JS fallback ->
+     * a plain redirect, like {@code ShowController#scanNow}'s non-htmx branch.
+     * <p>
+     * {@code justCreated} drives the fragment's own {@code autofocus} (shared.html): an
+     * {@code outerHTML} swap destroys whatever was focused (the submit button, which this
+     * response no longer even renders) and focus would otherwise drop to {@code <body>} -- same
+     * anchor-focus fix as {@code shows.html}'s {@code showsRegion}, just with no row-level target
+     * to prefer over it. Left unset (falsy in the template) on the plain GET, so a normal page
+     * load doesn't steal focus.
+     */
     @PostMapping("/shared")
-    public String create(@RequestParam String label, @RequestParam String ownerB) {
+    public String create(@RequestParam String label, @RequestParam String ownerB,
+                          @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                          Model model) {
         adminGuard.require();
         sharedScanService.create(label, currentUser.email(), ownerB);
+        if (hxRequest != null) {
+            populatePage(model, currentUser.email());
+            model.addAttribute("justCreated", true);
+            return "shared :: content";
+        }
         return "redirect:/shared";
     }
 

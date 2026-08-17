@@ -152,6 +152,36 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @DisplayName("the create form has double-submit protection, matching the app's established htmx pattern")
+    void createFormHasDoubleSubmitProtection() throws Exception {
+        sharedScanRepository.deleteAll();
+        String body = pageAs(ADMIN);
+
+        assertThat(body).contains("hx-disabled-elt=\"find button\"");
+    }
+
+    @Test
+    @DisplayName("an htmx create request returns the content fragment, not a redirect")
+    void htmxCreateReturnsTheContentFragment() throws Exception {
+        sharedScanRepository.deleteAll();
+
+        String body = mockMvc.perform(post("/shared")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .header("HX-Request", "true")
+                        .param("label", "Rob & Stranger").param("ownerB", STRANGER))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Rob &amp; Stranger");
+        assertThat(body).doesNotContain("<head");
+        // The create form's submit button (whatever was focused before the swap) is gone from
+        // this response -- the fragment root must claim focus itself, or it silently drops to
+        // <body> (the same outerHTML-swap gotcha shows.html's showsRegion guards against).
+        assertThat(body).containsPattern("id=\"shared-content\"[^>]*autofocus");
+    }
+
+    @Test
     @DisplayName("'no location yet' is its own message, not an empty show list")
     void noLocationIsItsOwnState() throws Exception {
         // A freshly created scan has settings but no geocode until a ZIP is saved.
