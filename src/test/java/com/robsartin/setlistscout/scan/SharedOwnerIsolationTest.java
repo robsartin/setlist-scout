@@ -94,9 +94,22 @@ class SharedOwnerIsolationTest extends AbstractPostgresIntegrationTest {
         assertThat(pageAs("/artists", ROB)).doesNotContain("Shared Only Artist");
     }
 
+    /**
+     * NOT an owner-scoping proof, unlike {@link #sharedShowsDoNotLeakIntoPersonalShows} and
+     * {@link #sharedArtistsDoNotLeakIntoArtistsPage} above: the fixture artist in {@link #setUp()}
+     * is SEED, which could never render in a PENDING_REVIEW-only queue for ANY owner -- this
+     * assertion would still pass even if the Candidates query had no owner filter at all. A
+     * genuine version would need a PENDING_REVIEW row under {@link #sharedKey}, but that state
+     * cannot occur through any real path: {@code SharedScanGuardsTest#sharedOwnerGetsNoExpandJobs}
+     * pins that a shared-scan owner is never given an expand job, and expansion is the only thing
+     * that ever creates a PENDING_REVIEW artist. What this DOES cover: a shared scan's artist --
+     * SEED, its one reachable status -- never shows up where a reviewer would look for something
+     * to decide on.
+     */
     @Test
-    @DisplayName("a shared scan's artists never appear in the Candidates queue or its nav badge")
-    void sharedArtistsDoNotLeakIntoCandidates() throws Exception {
+    @DisplayName("a shared scan's SEED artist does not appear in the Candidates queue (its only "
+            + "reachable status is not one Candidates would show anyway -- see Javadoc)")
+    void sharedSeedArtistDoesNotAppearInCandidates() throws Exception {
         assertThat(pageAs("/artists/candidates", ROB)).doesNotContain("Shared Only Artist");
     }
 
