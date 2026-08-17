@@ -40,8 +40,7 @@ public class NavModelAdvice {
      * True only for the configured admin (#136) -- this alone drives whether the cross-account
      * "Scan now" / "Run expansion now" controls render at all. This is a UI convenience only, not
      * the security boundary: the admin endpoints re-check this same config themselves
-     * (ShowController#requireAdmin / ReviewController#requireAdmin), since a hidden button is not
-     * an access control.
+     * ({@code AdminGuard#require}), since a hidden button is not an access control.
      */
     @ModelAttribute("isAdmin")
     public boolean isAdmin() {
