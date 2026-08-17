@@ -18,6 +18,18 @@ public class Artist {
     @Column(nullable = false)
     private String name;
 
+    /**
+     * {@link ArtistNameNormalizer#normalize(String)} of {@link #name} (#176), persisted so name
+     * matching is an indexed lookup rather than a scan-and-renormalize over the whole catalog.
+     * <p>
+     * Maintained by {@link #syncNormalizedName()} for the JPA path. The two NATIVE
+     * {@code ArtistRepository#insertIfAbsent} call sites pass it explicitly instead, because
+     * lifecycle callbacks do not fire for a native query -- relying on the callback alone would
+     * leave nulls on exactly the path that creates every artist in production.
+     */
+    @Column(name = "normalized_name", nullable = false)
+    private String normalizedName;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ArtistSource source;
@@ -50,10 +62,17 @@ public class Artist {
         this.note = note;
     }
 
+    @PrePersist
+    @PreUpdate
+    void syncNormalizedName() {
+        this.normalizedName = ArtistNameNormalizer.normalize(name);
+    }
+
     public Long getId() { return id; }
     public String getOwner() { return owner; }
     public void setOwner(String owner) { this.owner = owner; }
     public String getName() { return name; }
+    public String getNormalizedName() { return normalizedName; }
     public ArtistSource getSource() { return source; }
     public ArtistStatus getStatus() { return status; }
     public void setStatus(ArtistStatus status) { this.status = status; }

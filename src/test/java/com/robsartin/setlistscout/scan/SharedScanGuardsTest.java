@@ -17,6 +17,7 @@ import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -48,9 +49,14 @@ class SharedScanGuardsTest extends AbstractPostgresIntegrationTest {
     @Autowired private TransactionTemplate transactionTemplate;
     @Autowired private ScanJobBackfill scanJobBackfill;
     @Autowired private ExpandJobBackfill expandJobBackfill;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void clean() {
+        // Every test here publishes ArtistActivated/ArtistDeactivated directly and only awaits
+        // ONE of ScanJobListener's/ExpandJobListener's two effects -- the other can still be
+        // mid-transaction when the next test's deleteAll() runs. See awaitQuiescence's Javadoc.
+        awaitQuiescence(jdbcTemplate);
         scanJobRepository.deleteAll();
         expandJobRepository.deleteAll();
         artistRepository.deleteAll();

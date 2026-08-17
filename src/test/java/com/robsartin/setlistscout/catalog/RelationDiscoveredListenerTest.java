@@ -51,7 +51,7 @@ class RelationDiscoveredListenerTest {
     }
 
     private void verifyNothingPersisted() {
-        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
         verify(artistEdgeRepository, never())
                 .insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
     }
@@ -132,7 +132,7 @@ class RelationDiscoveredListenerTest {
 
         ArgumentCaptor<String> nameCaptor = ArgumentCaptor.forClass(String.class);
         verify(artistRepository, times(2)).insertIfAbsent(
-                any(), nameCaptor.capture(), any(), any(), any(), any(), any());
+                any(), nameCaptor.capture(), any(), any(), any(), any(), any(), any());
         assertThat(nameCaptor.getAllValues())
                 .containsExactlyInAnyOrder("Panic! at the Disco", "St. Vincent");
     }
@@ -150,8 +150,9 @@ class RelationDiscoveredListenerTest {
 
         ArgumentCaptor<Instant> createdAtCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Taylor Goldsmith"),
-                eq(ArtistSource.MEMBER_EXPANSION.name()), eq(ArtistStatus.PENDING_REVIEW.name()),
-                eq("Dawes"), eq("member/lineup relation of Dawes"), createdAtCaptor.capture());
+                eq(ArtistNameNormalizer.normalize("Taylor Goldsmith")), eq(ArtistSource.MEMBER_EXPANSION.name()),
+                eq(ArtistStatus.PENDING_REVIEW.name()), eq("Dawes"), eq("member/lineup relation of Dawes"),
+                createdAtCaptor.capture());
         assertThat(createdAtCaptor.getValue()).isNotNull().isAfterOrEqualTo(before);
     }
 
@@ -183,7 +184,7 @@ class RelationDiscoveredListenerTest {
 
         listener.on(relation("Taylor Goldsmith"));
 
-        verify(artistRepository).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistRepository).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
         verify(artistEdgeRepository).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
@@ -196,7 +197,7 @@ class RelationDiscoveredListenerTest {
 
         listener.on(relation("Taylor Goldsmith"));
 
-        verify(artistRepository).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistRepository).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
         verify(artistEdgeRepository, never())
                 .insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
     }
@@ -219,7 +220,7 @@ class RelationDiscoveredListenerTest {
 
         listener.on(relation("Charlie Parker's Re-boppers"));
 
-        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
         verify(artistEdgeRepository).insertIfAbsent(eq(OWNER), eq(FROM_ARTIST_ID), eq(99L),
                 eq(ArtistSource.MEMBER_EXPANSION.name()), eq("musicbrainz"),
                 eq("member/lineup relation of Dawes"), isNull(), any(Instant.class));
@@ -236,7 +237,7 @@ class RelationDiscoveredListenerTest {
 
         listener.on(relation("Charlie Parker's Re-boppers"));
 
-        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any());
+        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
         verify(artistEdgeRepository).insertIfAbsent(eq(OWNER), eq(FROM_ARTIST_ID), eq(7L),
                 eq(ArtistSource.MEMBER_EXPANSION.name()), eq("musicbrainz"),
                 eq("member/lineup relation of Dawes"), isNull(), any(Instant.class));

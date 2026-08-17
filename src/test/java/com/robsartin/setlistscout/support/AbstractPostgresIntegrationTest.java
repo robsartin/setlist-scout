@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.support;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -81,6 +82,47 @@ public abstract class AbstractPostgresIntegrationTest {
      */
     protected static <T> T awaitAbsence(Supplier<T> fetch, Predicate<T> appears) {
         return poll(fetch, appears, NEGATIVE_PROOF_TIMEOUT);
+    }
+
+    /**
+     * Blocks until every {@code @ApplicationModuleListener} triggered so far has actually
+     * finished -- not just the one effect a particular test happened to check for.
+     * <p>
+     * Exists because a {@code @BeforeEach} that calls {@code someRepository.deleteAll()} races any
+     * listener still working from the PREVIOUS test: {@code @ApplicationModuleListener} is
+     * {@code @Async} AFTER_COMMIT, so publishing an event (directly, or as a side effect of
+     * something like {@code SharedScanReconciler#reconcile}) hands the actual DB writes to a
+     * background thread that keeps running well after the triggering test method returns. If that
+     * listener is still inside its own transaction when the next test's {@code deleteAll()} runs,
+     * the two race for real locks on the same rows -- {@code deleteAll()} can block for as long as
+     * the listener's transaction stays open and, under CI load, lose outright with
+     * {@code CannotAcquireLockException}. That is not corruption -- {@code deleteAll()} is
+     * asserting against (and trying to delete under) a database another thread is still writing
+     * to -- so the fix is to stop racing it, not to retry the delete and hope.
+     * <p>
+     * Spring Modulith already durably records this for us: every publication gets a row in
+     * {@code event_publication}, and the framework stamps {@code completion_date} the instant the
+     * listener returns successfully. A zero count of incomplete rows is therefore direct,
+     * mechanism-agnostic proof that every listener triggered so far -- not just the one whose
+     * effect a narrower {@link #awaitUntil}/{@link #awaitAbsence} call happened to observe -- has
+     * committed and is done. Waiting on that targets the actual race at its source instead of
+     * papering over the symptom.
+     * <p>
+     * Call this before tearing down state in any test whose methods trigger
+     * {@code @ApplicationModuleListener} work, directly or via
+     * {@code ApplicationEventPublisher#publishEvent} -- even one that already does its own
+     * {@link #awaitUntil}/{@link #awaitAbsence} on a specific effect, since that only proves ONE
+     * listener reached its expected state, not that every listener subscribed to the same event
+     * has finished. Uses {@link #AWAIT_TIMEOUT}, not a shorter deadline: this is a positive wait
+     * (see that constant's own Javadoc), so a generous timeout costs nothing on the happy path,
+     * where the count is already zero and this returns on the first poll.
+     */
+    protected static Long awaitQuiescence(JdbcTemplate jdbcTemplate) {
+        return poll(
+                () -> jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM event_publication WHERE completion_date IS NULL", Long.class),
+                incomplete -> incomplete != null && incomplete == 0L,
+                AWAIT_TIMEOUT);
     }
 
     /**

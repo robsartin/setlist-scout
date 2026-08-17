@@ -22,12 +22,25 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndIdIn(String owner, Collection<Long> ids);
 
     /**
-     * Every one of an owner's artists, in every status, as a lightweight (id, name, status)
-     * projection -- the source list for {@link ArtistNameMatcher}'s normalized-name scan (issue
-     * #118). Deliberately status-unfiltered: a normalized-name match against a REJECTED row is
-     * exactly the case that must be caught (a rejected artist reappearing under a new spelling).
+     * The indexed replacement for scanning every row and re-normalizing it in Java (#176). Backed by
+     * {@code idx_artist_owner_normalized_name}. Deliberately status-unfiltered, same as the scan it
+     * replaces: a normalized-name match against a REJECTED row is exactly the case {@link
+     * ArtistNameMatcher} must catch (a rejected artist reappearing under a new spelling).
+     * <p>
+     * {@code findFirst}, not a unique lookup: {@code (owner, normalized_name)} is deliberately NOT
+     * unique yet (see {@code V19__add_artist_normalized_name}), so a pre-existing duplicate variant
+     * would make a single-result query throw. This preserves the exact semantics of the
+     * {@code .findFirst()} it replaces.
+     * <p>
+     * No {@code OrderBy}: if {@code (owner, normalized_name)} ever has more than one matching row,
+     * which one this returns is unspecified -- whatever order Postgres happens to return, not
+     * guaranteed stable across calls. Harmless today: the one such pair known to exist is both
+     * REJECTED, and every caller here branches only on {@code status}, never on row identity, so
+     * either row answers "is this a rejected reappearance" the same way. Would matter if a future
+     * caller needed a SPECIFIC row (e.g. its {@code createdAt}) rather than just "does a match
+     * exist and what's its status."
      */
-    List<ArtistNameStatusView> findByOwner(String owner);
+    Optional<ArtistNameStatusView> findFirstByOwnerAndNormalizedName(String owner, String normalizedName);
 
     /**
      * Case-SENSITIVE exact-match lookup used by {@code RelationDiscoveredListener} to resolve the
@@ -60,15 +73,19 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
      * existed yet and this call created it, {@code 0} if the {@code ON CONFLICT} fired because a
      * row already existed (including one a concurrent racing call just committed -- issue #133,
      * the caller's way of telling whether IT won or lost that race).
+     * <p>
+     * {@code normalizedName} is passed by the caller rather than derived here because this is a
+     * native query -- {@code Artist}'s {@code @PrePersist} never runs for it (#176).
      */
     @Modifying
     @Query(value = """
-            INSERT INTO artist (owner, name, source, status, discovered_via, note, created_at)
-            VALUES (:owner, :name, :source, :status, :discoveredVia, :note, :createdAt)
+            INSERT INTO artist (owner, name, normalized_name, source, status, discovered_via, note, created_at)
+            VALUES (:owner, :name, :normalizedName, :source, :status, :discoveredVia, :note, :createdAt)
             ON CONFLICT (owner, name) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("owner") String owner,
                         @Param("name") String name,
+                        @Param("normalizedName") String normalizedName,
                         @Param("source") String source,
                         @Param("status") String status,
                         @Param("discoveredVia") String discoveredVia,

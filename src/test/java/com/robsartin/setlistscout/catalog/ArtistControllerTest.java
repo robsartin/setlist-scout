@@ -53,9 +53,10 @@ class ArtistControllerTest {
         return new Artist(name, source, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", "note");
     }
 
-    // ArtistNameMatcher scans every one of the owner's existing artists via ArtistRepository#findByOwner
-    // (issue #124/#118), so tests that need an existing name to match stub that instead of the retired
-    // existsByOwnerAndNameIgnoreCase pre-check. See ArtistNameMatcherTest's identical helper/ordering note.
+    // ArtistNameMatcher resolves a match via ArtistRepository#findFirstByOwnerAndNormalizedName
+    // (issue #124/#118/#176), so tests that need an existing name to match stub that instead of the
+    // retired existsByOwnerAndNameIgnoreCase pre-check. See ArtistNameMatcherTest's identical
+    // helper/ordering note.
     private static ArtistNameStatusView existingArtist(Long id, String name, ArtistStatus status) {
         ArtistNameStatusView v = mock(ArtistNameStatusView.class);
         when(v.getId()).thenReturn(id);
@@ -71,8 +72,9 @@ class ArtistControllerTest {
      * that only care that a brand-new SEED artist gets created, not the race-loser path.
      */
     private Artist stubNewSeedInsert(String name) {
-        when(artistRepository.insertIfAbsent(eq(OWNER), eq(name), eq(ArtistSource.SEED_LIST.name()),
-                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq(name), eq(ArtistNameNormalizer.normalize(name)),
+                eq(ArtistSource.SEED_LIST.name()), eq(ArtistStatus.SEED.name()), isNull(), isNull(),
+                any(Instant.class))).thenReturn(1);
         Artist resolved = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
         resolved.setOwner(OWNER);
         when(artistRepository.findByOwnerAndName(OWNER, name)).thenReturn(Optional.of(resolved));
@@ -99,7 +101,10 @@ class ArtistControllerTest {
     @DisplayName("upload adds new distinct names as seeds, skipping blanks, comments and duplicates")
     void uploadAddsNewSeeds() {
         ArtistNameStatusView dawes = existingArtist(1L, "Dawes", ArtistStatus.SEED);
-        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(dawes));
+        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize("Dawes")))
+                .thenReturn(Optional.of(dawes));
+        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize("Wilco")))
+                .thenReturn(Optional.empty());
         stubNewSeedInsert("Wilco");
         String contents = "Wilco\n\n# a comment\nDawes\n"; // Wilco new; blank + comment skipped; Dawes exists
         MockMultipartFile file = new MockMultipartFile(
@@ -110,7 +115,8 @@ class ArtistControllerTest {
 
         assertThat(view).isEqualTo("redirect:/artists");
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository, times(1)).insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+        verify(artistRepository, times(1)).insertIfAbsent(eq(OWNER), eq("Wilco"),
+                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
         assertThat(redirect.getFlashAttributes().get("uploadMessage")).asString().contains("1");
     }
@@ -136,7 +142,8 @@ class ArtistControllerTest {
 
         assertThat(view).isEqualTo("artists :: activeSection");
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"),
+                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
         assertThat(model.getAttribute("active")).isNotNull();
     }
@@ -158,7 +165,8 @@ class ArtistControllerTest {
         controller.addSeed("  Wilco  ", null, new ConcurrentModel());
 
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"),
+                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
     }
 
