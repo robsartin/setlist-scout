@@ -1,5 +1,7 @@
 # Shared Show Scan Implementation Plan
 
+**Superseded by `docs/superpowers/plans/2026-08-16-shared-scan-permanent.md`** — this plan implemented the transient, admin-only, run-and-discard design, which was replaced by a permanent, auto-refreshing one visible to both participants.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an admin-only page that answers "we're both going to be in Chicago that week — which shows do *we both* want to see?" by intersecting two owners' artist lists and searching a location neither of them has saved.

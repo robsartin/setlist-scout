@@ -1,6 +1,6 @@
 # Shared show scan: intersect two users' artist lists at a named location (#163)
 
-**Status:** approved 2026-08-16 (brainstormed interactively with Rob).
+**Status:** Superseded 2026-08-16 by `2026-08-16-shared-scan-permanent-design.md` — this transient, admin-only, run-and-discard design was replaced by a permanent, auto-refreshing one visible to both participants.
 **Issue:** #163 (`ready`).
 
 ## Goal
