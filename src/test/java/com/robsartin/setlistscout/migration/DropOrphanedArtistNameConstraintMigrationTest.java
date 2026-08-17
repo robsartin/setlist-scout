@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.migration;
 
+import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.output.MigrateResult;
 import org.junit.jupiter.api.Test;
@@ -108,21 +109,29 @@ class DropOrphanedArtistNameConstraintMigrationTest {
             assertThat(uniqueConstraintColumnSets(s)).as("composite (owner, name) constraint present")
                     .contains("name,owner");
 
-            s.execute("INSERT INTO artist (owner, name, source, status, created_at) "
-                    + "VALUES ('rob@example.com', 'Traveling Wilburys', 'SEED_LIST', 'SEED', now())");
-            assertThatThrownBy(() -> s.execute("INSERT INTO artist (owner, name, source, status, created_at) "
-                    + "VALUES ('rob@example.com', 'Traveling Wilburys', 'SEED_LIST', 'SEED', now())"))
+            String wilburysNormalizedName = ArtistNameNormalizer.normalize("Traveling Wilburys");
+            s.execute("INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
+                    + "VALUES ('rob@example.com', 'Traveling Wilburys', '" + wilburysNormalizedName
+                    + "', 'SEED_LIST', 'SEED', now())");
+            assertThatThrownBy(() -> s.execute(
+                    "INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
+                            + "VALUES ('rob@example.com', 'Traveling Wilburys', '" + wilburysNormalizedName
+                            + "', 'SEED_LIST', 'SEED', now())"))
                     .as("same owner + same name is still rejected (composite constraint enforced)")
-                    .isInstanceOf(SQLException.class);
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("artist_owner_name_key");
         }
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
             // 6. The actual bug: two DIFFERENT owners with the same artist name must now both
             // succeed -- this is what the orphaned constraint was wrongly blocking in production.
-            s.execute("INSERT INTO artist (owner, name, source, status, created_at) "
-                    + "VALUES ('rob@example.com', 'Mudcrutch', 'SEED_LIST', 'SEED', now())");
-            s.execute("INSERT INTO artist (owner, name, source, status, created_at) "
-                    + "VALUES ('david@example.com', 'Mudcrutch', 'SEED_LIST', 'SEED', now())");
+            String mudcrutchNormalizedName = ArtistNameNormalizer.normalize("Mudcrutch");
+            s.execute("INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
+                    + "VALUES ('rob@example.com', 'Mudcrutch', '" + mudcrutchNormalizedName
+                    + "', 'SEED_LIST', 'SEED', now())");
+            s.execute("INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
+                    + "VALUES ('david@example.com', 'Mudcrutch', '" + mudcrutchNormalizedName
+                    + "', 'SEED_LIST', 'SEED', now())");
 
             ResultSet rs = s.executeQuery("SELECT count(*) FROM artist WHERE name = 'Mudcrutch'");
             rs.next();
