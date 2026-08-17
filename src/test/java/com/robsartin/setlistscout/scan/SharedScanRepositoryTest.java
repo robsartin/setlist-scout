@@ -67,6 +67,23 @@ class SharedScanRepositoryTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @DisplayName("existsBy...AAndBOrAAndB finds a pairing in either direction, case-insensitively, "
+            + "and not an unrelated pair -- the SharedScanService#create duplicate-pairing check")
+    void existsByEitherDirectionFindsADuplicatePairing() {
+        save(ROB, DAVID);
+
+        assertThat(repository.existsByOwnerAIgnoreCaseAndOwnerBIgnoreCaseOrOwnerAIgnoreCaseAndOwnerBIgnoreCase(
+                ROB, DAVID, DAVID, ROB)).as("same direction as stored").isTrue();
+        assertThat(repository.existsByOwnerAIgnoreCaseAndOwnerBIgnoreCaseOrOwnerAIgnoreCaseAndOwnerBIgnoreCase(
+                DAVID, ROB, ROB, DAVID)).as("reverse direction from stored").isTrue();
+        assertThat(repository.existsByOwnerAIgnoreCaseAndOwnerBIgnoreCaseOrOwnerAIgnoreCaseAndOwnerBIgnoreCase(
+                "ROB@EXAMPLE.COM", "DAVID@EXAMPLE.COM", "DAVID@EXAMPLE.COM", "ROB@EXAMPLE.COM"))
+                .as("case-insensitive").isTrue();
+        assertThat(repository.existsByOwnerAIgnoreCaseAndOwnerBIgnoreCaseOrOwnerAIgnoreCaseAndOwnerBIgnoreCase(
+                ROB, STRANGER, STRANGER, ROB)).as("an unrelated pair is not a match").isFalse();
+    }
+
+    @Test
     @DisplayName("includes() and otherParticipant() are case-insensitive and reciprocal")
     void participantHelpers() {
         SharedScan scan = save(ROB, DAVID);
