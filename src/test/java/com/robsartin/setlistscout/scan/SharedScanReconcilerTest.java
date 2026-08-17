@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,11 +37,15 @@ class SharedScanReconcilerTest extends AbstractPostgresIntegrationTest {
     @Autowired private SharedScanRepository sharedScanRepository;
     @Autowired private ArtistRepository artistRepository;
     @Autowired private ScanJobRepository scanJobRepository;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private SharedScan scan;
 
     @BeforeEach
     void setUp() {
+        // Drains any @ApplicationModuleListener work still in flight from the previous test
+        // before deleting the rows it might be writing -- see awaitQuiescence's Javadoc.
+        awaitQuiescence(jdbcTemplate);
         scanJobRepository.deleteAll();
         artistRepository.deleteAll();
         sharedScanRepository.deleteAll();
