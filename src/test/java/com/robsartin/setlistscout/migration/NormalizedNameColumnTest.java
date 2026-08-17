@@ -19,16 +19,25 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * #176. Every artist row must carry the normalizer's output in {@code normalized_name}, whichever
- * path created it. The native-insert case is the one a JPA lifecycle callback would silently miss.
+ * #176. Every LIVE write to {@code artist} must carry the normalizer's output in
+ * {@code normalized_name}, whichever path created the row -- the native-insert case is the one a
+ * JPA lifecycle callback would silently miss -- and the column itself must carry the NOT NULL and
+ * owner-first index constraints the migration's performance claim depends on.
+ *
+ * <p>This does NOT cover the migration's one-time backfill of rows that already existed before
+ * V19 ran -- {@code @SpringBootTest} auto-migrates a fresh container straight to latest, so there
+ * is no way to seed a row before V19 from within this class. See
+ * {@link NormalizedNameBackfillMigrationTest} for that: it drives Flyway directly so it can seed
+ * pre-V19 rows and assert what the backfill actually wrote.
  */
 @SpringBootTest
 @Testcontainers
-class NormalizedNameBackfillTest extends AbstractPostgresIntegrationTest {
+class NormalizedNameColumnTest extends AbstractPostgresIntegrationTest {
 
     @Container
     @ServiceConnection
@@ -104,7 +113,7 @@ class NormalizedNameBackfillTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("the column is NOT NULL and indexed")
+    @DisplayName("the column is NOT NULL and indexed owner-first, by the exact index #176 depends on")
     void columnIsNotNullAndIndexed() {
         Integer nullable = jdbc.queryForObject(
                 "SELECT CASE WHEN is_nullable = 'YES' THEN 1 ELSE 0 END FROM information_schema.columns "
@@ -112,11 +121,18 @@ class NormalizedNameBackfillTest extends AbstractPostgresIntegrationTest {
                 Integer.class);
         assertThat(nullable).as("normalized_name must be NOT NULL").isZero();
 
-        Integer indexes = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'artist' "
-                        + "AND indexdef ILIKE '%normalized_name%'",
-                Integer.class);
-        assertThat(indexes).as("normalized_name must be indexed -- the whole point of #176")
-                .isGreaterThanOrEqualTo(1);
+        // Pinned by name AND column order -- a single-column index on normalized_name, or a
+        // composite index in the wrong column order, would each satisfy a looser "does some index
+        // mention this column" check while missing the whole point of #176: "Owner first: every
+        // lookup is owner-scoped" (see V19's javadoc). containsIgnoringCase tolerates Postgres's
+        // own casing of the definition; the parenthesized column list is what actually pins the order.
+        List<String> indexDefs = jdbc.queryForList(
+                "SELECT indexdef FROM pg_indexes WHERE tablename = 'artist' "
+                        + "AND indexname = 'idx_artist_owner_normalized_name'",
+                String.class);
+        assertThat(indexDefs).as("idx_artist_owner_normalized_name must exist").hasSize(1);
+        assertThat(indexDefs.get(0))
+                .as("owner first, then normalized_name -- every lookup is owner-scoped")
+                .containsIgnoringCase("(owner, normalized_name)");
     }
 }
