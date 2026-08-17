@@ -92,8 +92,8 @@ public class ArtistSeedService {
             return true;
         }
 
-        int inserted = artistRepository.insertIfAbsent(owner, name, ArtistSource.SEED_LIST.name(),
-                ArtistStatus.SEED.name(), null, null, Instant.now());
+        int inserted = artistRepository.insertIfAbsent(owner, name, ArtistNameNormalizer.normalize(name),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.SEED.name(), null, null, Instant.now());
         if (inserted == 0) {
             // Race loser (issue #133): between this call's matcher pre-check above and this
             // call's own insertIfAbsent, a concurrent call for this exact (owner, name) already

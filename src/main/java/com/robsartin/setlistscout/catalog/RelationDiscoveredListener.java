@@ -117,8 +117,8 @@ public class RelationDiscoveredListener {
         // fails too, leaving the event stuck for redelivery instead of a clean no-op. This remains
         // the backstop for a same-spelling race that slips past the matcher's read above (the
         // matcher is a best-effort pre-check, same as the existsBy pre-check it supersedes).
-        artistRepository.insertIfAbsent(owner, toArtistName, type.name(), ArtistStatus.PENDING_REVIEW.name(),
-                fromArtistName, note, Instant.now());
+        artistRepository.insertIfAbsent(owner, toArtistName, ArtistNameNormalizer.normalize(toArtistName),
+                type.name(), ArtistStatus.PENDING_REVIEW.name(), fromArtistName, note, Instant.now());
 
         return artistRepository.findByOwnerAndName(owner, toArtistName).map(Artist::getId).orElse(null);
     }

@@ -5,7 +5,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,8 +49,9 @@ class ArtistSeedServiceTest {
     @DisplayName("adds a trimmed new name as a seed when no existing artist matches")
     void addsATrimmedNewNameAsASeed() {
         when(artistNameMatcher.findExistingMatch(OWNER, "Wilco")).thenReturn(Optional.empty());
-        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
-                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistNameNormalizer.normalize("Wilco")),
+                eq(ArtistSource.SEED_LIST.name()), eq(ArtistStatus.SEED.name()), isNull(), isNull(),
+                any(Instant.class))).thenReturn(1);
         Artist resolved = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
         resolved.setOwner(OWNER);
         when(artistRepository.findByOwnerAndName(OWNER, "Wilco")).thenReturn(Optional.of(resolved));
@@ -70,8 +70,9 @@ class ArtistSeedServiceTest {
             + "fires onSeedCreated for what is, from its own perspective, someone else's insert")
     void raceLoserReportsFalseAndDoesNotFireOnSeedCreated() {
         when(artistNameMatcher.findExistingMatch(OWNER, "Nebraska")).thenReturn(Optional.empty());
-        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Nebraska"), eq(ArtistSource.SEED_LIST.name()),
-                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(0);
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Nebraska"), eq(ArtistNameNormalizer.normalize("Nebraska")),
+                eq(ArtistSource.SEED_LIST.name()), eq(ArtistStatus.SEED.name()), isNull(), isNull(),
+                any(Instant.class))).thenReturn(0);
 
         boolean added = service.addSeedIfNew(OWNER, "Nebraska");
 
@@ -157,9 +158,11 @@ class ArtistSeedServiceTest {
     void twoGenuinelyDifferentArtistsBothGetAdded() {
         when(artistNameMatcher.findExistingMatch(OWNER, "Radiohead")).thenReturn(Optional.empty());
         when(artistNameMatcher.findExistingMatch(OWNER, "Radioheads Tribute Band")).thenReturn(Optional.empty());
-        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Radiohead"), eq(ArtistSource.SEED_LIST.name()),
-                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
-        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Radioheads Tribute Band"), eq(ArtistSource.SEED_LIST.name()),
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Radiohead"), eq(ArtistNameNormalizer.normalize("Radiohead")),
+                eq(ArtistSource.SEED_LIST.name()), eq(ArtistStatus.SEED.name()), isNull(), isNull(),
+                any(Instant.class))).thenReturn(1);
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq("Radioheads Tribute Band"),
+                eq(ArtistNameNormalizer.normalize("Radioheads Tribute Band")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
         Artist radiohead = new Artist("Radiohead", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
         radiohead.setOwner(OWNER);
@@ -194,7 +197,9 @@ class ArtistSeedServiceTest {
         ArtistSeedService realWiredService =
                 new ArtistSeedService(artistRepository, activationService, new ArtistNameMatcher(artistRepository));
         ArtistNameStatusView existing = view(3L, "Only Murders In The Building - Cast", ArtistStatus.SEED);
-        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(existing));
+        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER,
+                ArtistNameNormalizer.normalize("Only Murders in the Building – Cast")))
+                .thenReturn(Optional.of(existing));
 
         boolean added = realWiredService.addSeedIfNew(OWNER, "Only Murders in the Building – Cast");
 
