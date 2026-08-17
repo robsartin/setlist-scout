@@ -60,15 +60,19 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
      * existed yet and this call created it, {@code 0} if the {@code ON CONFLICT} fired because a
      * row already existed (including one a concurrent racing call just committed -- issue #133,
      * the caller's way of telling whether IT won or lost that race).
+     * <p>
+     * {@code normalizedName} is passed by the caller rather than derived here because this is a
+     * native query -- {@code Artist}'s {@code @PrePersist} never runs for it (#176).
      */
     @Modifying
     @Query(value = """
-            INSERT INTO artist (owner, name, source, status, discovered_via, note, created_at)
-            VALUES (:owner, :name, :source, :status, :discoveredVia, :note, :createdAt)
+            INSERT INTO artist (owner, name, normalized_name, source, status, discovered_via, note, created_at)
+            VALUES (:owner, :name, :normalizedName, :source, :status, :discoveredVia, :note, :createdAt)
             ON CONFLICT (owner, name) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("owner") String owner,
                         @Param("name") String name,
+                        @Param("normalizedName") String normalizedName,
                         @Param("source") String source,
                         @Param("status") String status,
                         @Param("discoveredVia") String discoveredVia,

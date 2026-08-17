@@ -71,8 +71,9 @@ class ArtistControllerTest {
      * that only care that a brand-new SEED artist gets created, not the race-loser path.
      */
     private Artist stubNewSeedInsert(String name) {
-        when(artistRepository.insertIfAbsent(eq(OWNER), eq(name), eq(ArtistSource.SEED_LIST.name()),
-                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class))).thenReturn(1);
+        when(artistRepository.insertIfAbsent(eq(OWNER), eq(name), eq(ArtistNameNormalizer.normalize(name)),
+                eq(ArtistSource.SEED_LIST.name()), eq(ArtistStatus.SEED.name()), isNull(), isNull(),
+                any(Instant.class))).thenReturn(1);
         Artist resolved = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
         resolved.setOwner(OWNER);
         when(artistRepository.findByOwnerAndName(OWNER, name)).thenReturn(Optional.of(resolved));
@@ -110,7 +111,8 @@ class ArtistControllerTest {
 
         assertThat(view).isEqualTo("redirect:/artists");
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository, times(1)).insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+        verify(artistRepository, times(1)).insertIfAbsent(eq(OWNER), eq("Wilco"),
+                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
         assertThat(redirect.getFlashAttributes().get("uploadMessage")).asString().contains("1");
     }
@@ -136,7 +138,8 @@ class ArtistControllerTest {
 
         assertThat(view).isEqualTo("artists :: activeSection");
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"),
+                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
         assertThat(model.getAttribute("active")).isNotNull();
     }
@@ -158,7 +161,8 @@ class ArtistControllerTest {
         controller.addSeed("  Wilco  ", null, new ConcurrentModel());
 
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"), eq(ArtistSource.SEED_LIST.name()),
+        verify(artistRepository).insertIfAbsent(eq(OWNER), eq("Wilco"),
+                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
     }
 
