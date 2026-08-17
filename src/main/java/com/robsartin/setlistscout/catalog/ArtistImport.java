@@ -54,6 +54,21 @@ public class ArtistImport {
         // JPA
     }
 
+    /**
+     * Test-fixture constructor (#177 Task 2): {@code owner}/{@code name}/{@code normalizedName}
+     * have no setter -- a queued row's identity is fixed at creation, and production code creates
+     * rows exclusively through {@link ArtistImportRepository#insertIfAbsent}'s native {@code
+     * INSERT}, never {@code new ArtistImport(...)} + {@code save()}. Package-private: only
+     * same-package tests (e.g. {@code ArtistImportPollerTest}) need to hand-build a populated row
+     * without a real database. Mirrors {@code shared.AbstractJob}'s equivalent constructor, used
+     * the same way by {@code ScanJob}'s test fixtures.
+     */
+    ArtistImport(String owner, String name, String normalizedName) {
+        this.owner = owner;
+        this.name = name;
+        this.normalizedName = normalizedName;
+    }
+
     public Long getId() { return id; }
     public String getOwner() { return owner; }
     public String getName() { return name; }
