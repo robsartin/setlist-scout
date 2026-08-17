@@ -138,7 +138,15 @@ class ArtistNameMatcherTest extends AbstractPostgresIntegrationTest {
             + "which owner was actually passed through")
     void doesNotMatchAcrossOwners() {
         seed(OTHER_OWNER, "Wilco", ArtistStatus.APPROVED);
+        Artist ownersOwn = seed(OWNER, "Wilco", ArtistStatus.APPROVED);
 
-        assertThat(matcher.findExistingMatch(OWNER, "Wilco")).isEmpty();
+        // Both owners have an identically-named row, so a present-but-wrong-owner result (the
+        // owner filter silently dropped) and a genuinely-empty result (a broken query) would both
+        // look like a pass if this only asserted emptiness. Asserting the match is OWNER's own row
+        // rules out both failure modes at once.
+        Optional<ArtistNameStatusView> found = matcher.findExistingMatch(OWNER, "Wilco");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getId()).isEqualTo(ownersOwn.getId());
     }
 }
