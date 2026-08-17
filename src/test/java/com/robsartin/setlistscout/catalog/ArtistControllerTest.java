@@ -53,9 +53,10 @@ class ArtistControllerTest {
         return new Artist(name, source, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", "note");
     }
 
-    // ArtistNameMatcher scans every one of the owner's existing artists via ArtistRepository#findByOwner
-    // (issue #124/#118), so tests that need an existing name to match stub that instead of the retired
-    // existsByOwnerAndNameIgnoreCase pre-check. See ArtistNameMatcherTest's identical helper/ordering note.
+    // ArtistNameMatcher resolves a match via ArtistRepository#findFirstByOwnerAndNormalizedName
+    // (issue #124/#118/#176), so tests that need an existing name to match stub that instead of the
+    // retired existsByOwnerAndNameIgnoreCase pre-check. See ArtistNameMatcherTest's identical
+    // helper/ordering note.
     private static ArtistNameStatusView existingArtist(Long id, String name, ArtistStatus status) {
         ArtistNameStatusView v = mock(ArtistNameStatusView.class);
         when(v.getId()).thenReturn(id);
@@ -100,7 +101,10 @@ class ArtistControllerTest {
     @DisplayName("upload adds new distinct names as seeds, skipping blanks, comments and duplicates")
     void uploadAddsNewSeeds() {
         ArtistNameStatusView dawes = existingArtist(1L, "Dawes", ArtistStatus.SEED);
-        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(dawes));
+        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize("Dawes")))
+                .thenReturn(Optional.of(dawes));
+        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize("Wilco")))
+                .thenReturn(Optional.empty());
         stubNewSeedInsert("Wilco");
         String contents = "Wilco\n\n# a comment\nDawes\n"; // Wilco new; blank + comment skipped; Dawes exists
         MockMultipartFile file = new MockMultipartFile(

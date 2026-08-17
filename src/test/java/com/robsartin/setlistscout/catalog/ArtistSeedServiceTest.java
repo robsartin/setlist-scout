@@ -5,7 +5,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -198,7 +197,9 @@ class ArtistSeedServiceTest {
         ArtistSeedService realWiredService =
                 new ArtistSeedService(artistRepository, activationService, new ArtistNameMatcher(artistRepository));
         ArtistNameStatusView existing = view(3L, "Only Murders In The Building - Cast", ArtistStatus.SEED);
-        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(existing));
+        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER,
+                ArtistNameNormalizer.normalize("Only Murders in the Building – Cast")))
+                .thenReturn(Optional.of(existing));
 
         boolean added = realWiredService.addSeedIfNew(OWNER, "Only Murders in the Building – Cast");
 

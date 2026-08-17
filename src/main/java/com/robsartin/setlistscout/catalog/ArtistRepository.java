@@ -22,12 +22,17 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     List<Artist> findByOwnerAndIdIn(String owner, Collection<Long> ids);
 
     /**
-     * Every one of an owner's artists, in every status, as a lightweight (id, name, status)
-     * projection -- the source list for {@link ArtistNameMatcher}'s normalized-name scan (issue
-     * #118). Deliberately status-unfiltered: a normalized-name match against a REJECTED row is
-     * exactly the case that must be caught (a rejected artist reappearing under a new spelling).
+     * The indexed replacement for scanning every row and re-normalizing it in Java (#176). Backed by
+     * {@code idx_artist_owner_normalized_name}. Deliberately status-unfiltered, same as the scan it
+     * replaces: a normalized-name match against a REJECTED row is exactly the case {@link
+     * ArtistNameMatcher} must catch (a rejected artist reappearing under a new spelling).
+     * <p>
+     * {@code findFirst}, not a unique lookup: {@code (owner, normalized_name)} is deliberately NOT
+     * unique yet (see {@code V19__add_artist_normalized_name}), so a pre-existing duplicate variant
+     * would make a single-result query throw. This preserves the exact semantics of the
+     * {@code .findFirst()} it replaces.
      */
-    List<ArtistNameStatusView> findByOwner(String owner);
+    Optional<ArtistNameStatusView> findFirstByOwnerAndNormalizedName(String owner, String normalizedName);
 
     /**
      * Case-SENSITIVE exact-match lookup used by {@code RelationDiscoveredListener} to resolve the
