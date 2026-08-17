@@ -7,8 +7,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.ui.ConcurrentModel;
 import org.springframework.ui.Model;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
 
+import java.io.BufferedReader;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -32,6 +35,7 @@ class ArtistControllerTest {
     private ArtistRepository artistRepository;
     private CurrentUser currentUser;
     private ArtistActivationService activationService;
+    private ArtistImportService importService;
     private ArtistController controller;
 
     @BeforeEach
@@ -40,13 +44,19 @@ class ArtistControllerTest {
         currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
         activationService = mock(ArtistActivationService.class);
-        // Real seed service AND real name matcher over the mocked repo, so add/upload still assert
-        // on repository interactions and exercise the actual normalized-name duplicate check
+        // upload() (#177) delegates to ArtistImportService#queue, not seedService -- mocked here
+        // (rather than a real instance over a mocked ArtistImportRepository) since its own
+        // dedupe/skip/cap contract is exhaustively covered for real against Postgres by
+        // ArtistImportUploadTest; this class only needs to prove the CONTROLLER dispatches to it
+        // and flashes the count it returns.
+        importService = mock(ArtistImportService.class);
+        // Real seed service AND real name matcher over the mocked repo, so addSeed still asserts
+        // on repository interactions and exercises the actual normalized-name duplicate check
         // (issue #124) rather than a stubbed existsBy call.
         ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class),
                 new ArtistNameMatcher(artistRepository));
         controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService,
-                activationService, mock(ArtistConnectionsService.class));
+                activationService, mock(ArtistConnectionsService.class), importService, mock(ArtistImportRepository.class));
     }
 
     private static Artist pending(String name, ArtistSource source) {
@@ -98,15 +108,11 @@ class ArtistControllerTest {
     }
 
     @Test
-    @DisplayName("upload adds new distinct names as seeds, skipping blanks, comments and duplicates")
-    void uploadAddsNewSeeds() {
-        ArtistNameStatusView dawes = existingArtist(1L, "Dawes", ArtistStatus.SEED);
-        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize("Dawes")))
-                .thenReturn(Optional.of(dawes));
-        when(artistRepository.findFirstByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize("Wilco")))
-                .thenReturn(Optional.empty());
-        stubNewSeedInsert("Wilco");
-        String contents = "Wilco\n\n# a comment\nDawes\n"; // Wilco new; blank + comment skipped; Dawes exists
+    @DisplayName("upload (#177) delegates the file to ArtistImportService#queue and flashes the "
+            + "QUEUED count, not an \"added\" count -- the endpoint itself never touches seedService")
+    void uploadDelegatesToImportServiceAndFlashesQueuedCount() throws IOException {
+        when(importService.queue(eq(OWNER), any(BufferedReader.class))).thenReturn(3);
+        String contents = "Wilco\nDawes\nThe National\n";
         MockMultipartFile file = new MockMultipartFile(
                 "file", "artists.txt", "text/plain", contents.getBytes(StandardCharsets.UTF_8));
         RedirectAttributesModelMap redirect = new RedirectAttributesModelMap();
@@ -114,11 +120,39 @@ class ArtistControllerTest {
         String view = controller.upload(file, redirect);
 
         assertThat(view).isEqualTo("redirect:/artists");
+        verify(importService).queue(eq(OWNER), any(BufferedReader.class));
         verify(artistRepository, never()).save(any(Artist.class));
-        verify(artistRepository, times(1)).insertIfAbsent(eq(OWNER), eq("Wilco"),
-                eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
-                eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
-        assertThat(redirect.getFlashAttributes().get("uploadMessage")).asString().contains("1");
+        verify(artistRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any(), any(), any());
+        assertThat(redirect.getFlashAttributes().get("uploadMessage")).asString()
+                .contains("Queued").contains("3").doesNotContain("Added");
+    }
+
+    @Test
+    @DisplayName("upload reports \"Could not read that file.\" on IOException, without calling queue")
+    void uploadHandlesIOExceptionWithoutQueueing() throws IOException {
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.isEmpty()).thenReturn(false);
+        when(file.getInputStream()).thenThrow(new IOException("boom"));
+        RedirectAttributesModelMap redirect = new RedirectAttributesModelMap();
+
+        String view = controller.upload(file, redirect);
+
+        assertThat(view).isEqualTo("redirect:/artists");
+        assertThat(redirect.getFlashAttributes().get("uploadMessage")).isEqualTo("Could not read that file.");
+        verify(importService, never()).queue(any(), any());
+    }
+
+    @Test
+    @DisplayName("upload with an empty file queues nothing and flashes a zero count")
+    void uploadWithEmptyFileQueuesNothing() throws IOException {
+        MockMultipartFile file = new MockMultipartFile("file", "empty.txt", "text/plain", new byte[0]);
+        RedirectAttributesModelMap redirect = new RedirectAttributesModelMap();
+
+        String view = controller.upload(file, redirect);
+
+        assertThat(view).isEqualTo("redirect:/artists");
+        verify(importService, never()).queue(any(), any());
+        assertThat(redirect.getFlashAttributes().get("uploadMessage")).asString().contains("Queued 0");
     }
 
     @Test

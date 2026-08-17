@@ -60,6 +60,20 @@
     </form>
 
     <p th:if="${uploadMessage}" th:text="${uploadMessage}" role="status" class="upload-message"></p>
+    <!--/* #177: plain server-rendered import-progress text -- no JavaScript, no polling. Refreshes
+           whenever populateActive next builds the model (a full page load, or any htmx action that
+           swaps activeSection), same as everything else on this page. role="status" on the pending
+           notice only, matching how uploadMessage above is announced; the failed-names list is
+           visible text, not a live region -- it's a static list, not a one-line event to announce. */-->
+    <p th:if="${importPendingCount > 0}"
+       th:text="'Importing: ' + ${importPendingCount} + ' remaining.'"
+       role="status" class="upload-message"></p>
+    <div th:if="${not #lists.isEmpty(importFailed)}" class="upload-message">
+        <p th:text="${#lists.size(importFailed)} + ' name' + (${#lists.size(importFailed)} == 1 ? '' : 's') + ' could not be imported.'">0 names could not be imported.</p>
+        <ul>
+            <li th:each="f : ${importFailed}" th:text="${f.name}">Name</li>
+        </ul>
+    </div>
     <form th:action="@{/artists/upload}" method="post" enctype="multipart/form-data">
         <label for="artist-file">Or bulk-add from a text file (one band per line):</label>
         <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>

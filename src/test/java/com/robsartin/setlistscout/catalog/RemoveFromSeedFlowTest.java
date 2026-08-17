@@ -69,6 +69,12 @@ class RemoveFromSeedFlowTest extends AbstractPostgresIntegrationTest {
     private ArtistConnectionsService artistConnectionsService;
 
     @Autowired
+    private ArtistImportService artistImportService;
+
+    @Autowired
+    private ArtistImportRepository artistImportRepository;
+
+    @Autowired
     private ScanJobRepository scanJobRepository;
 
     @Autowired
@@ -93,7 +99,7 @@ class RemoveFromSeedFlowTest extends AbstractPostgresIntegrationTest {
 
     private ArtistController controller() {
         return new ArtistController(artistRepository, artistEdgeRepository, currentUser, artistSeedService,
-                artistActivationService, artistConnectionsService);
+                artistActivationService, artistConnectionsService, artistImportService, artistImportRepository);
     }
 
     private Long seedArtist(String owner, String name) {
