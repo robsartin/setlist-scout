@@ -13,16 +13,19 @@ import java.util.Optional;
  * brand-new PENDING_REVIEW row.
  * <p>
  * Performs one indexed {@link ArtistRepository#findFirstByOwnerAndNormalizedName} lookup rather
- * than scanning the owner's full artist list and re-normalizing every row in Java (#176): the
- * normalized form is now stored on {@link Artist#getNormalizedName()} at write time instead of
- * recomputed here, so there is still exactly one implementation of "what counts as the same name"
+ * than scanning the owner's full artist list and re-normalizing every row in Java. The normalized
+ * form is now stored on {@link Artist#getNormalizedName()} at write time instead of recomputed
+ * here, so there is still exactly one implementation of "what counts as the same name"
  * ({@link ArtistNameNormalizer}) -- it just runs once, at write time, instead of once per row on
- * every read. This retired an O(n) scan per discovered relation that the class doc used to accept
- * as fine "at this app's scale" -- see the migration this superseded, {@code
- * V19__add_artist_normalized_name}, for why: the same drift risk this class doc used to warn about
- * (a Java copy of the normalization logic vs. a SQL copy) doesn't apply to an indexed equality
- * lookup, since the comparison is still "does this stored, Java-normalized value equal that
- * Java-normalized value" -- no SQL ever reimplements the folding rules.
+ * every read.
+ * <p>
+ * This retires the O(n)-per-discovered-relation scan that this class's doc used to accept as fine
+ * "at this app's scale". {@code db.migration.V19__add_artist_normalized_name} (#176) is what makes
+ * that possible: it adds the stored column and backfills it for every pre-existing row, and this
+ * class is rewritten to query that column instead of scanning. The drift risk this doc used to
+ * warn about -- a Java copy of the normalization logic drifting from a hand-rolled SQL copy --
+ * still doesn't apply: an indexed equality lookup only ever compares one stored, Java-normalized
+ * value against another Java-normalized value, so no SQL ever reimplements the folding rules.
  * <p>
  * This is a best-effort pre-check, same as the {@code existsByOwnerAndNameIgnoreCase} pre-check
  * it supersedes for the expansion path: a genuine race between two concurrent discoveries of

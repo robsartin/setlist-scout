@@ -31,6 +31,14 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
      * unique yet (see {@code V19__add_artist_normalized_name}), so a pre-existing duplicate variant
      * would make a single-result query throw. This preserves the exact semantics of the
      * {@code .findFirst()} it replaces.
+     * <p>
+     * No {@code OrderBy}: if {@code (owner, normalized_name)} ever has more than one matching row,
+     * which one this returns is unspecified -- whatever order Postgres happens to return, not
+     * guaranteed stable across calls. Harmless today: the one such pair known to exist is both
+     * REJECTED, and every caller here branches only on {@code status}, never on row identity, so
+     * either row answers "is this a rejected reappearance" the same way. Would matter if a future
+     * caller needed a SPECIFIC row (e.g. its {@code createdAt}) rather than just "does a match
+     * exist and what's its status."
      */
     Optional<ArtistNameStatusView> findFirstByOwnerAndNormalizedName(String owner, String normalizedName);
 
