@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.AppProperties;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.settings.SearchSettings;
@@ -28,17 +29,20 @@ public class SharedScanService {
     private final ArtistRepository artistRepository;
     private final SettingsService settingsService;
     private final SharedScanReconciler reconciler;
+    private final AppProperties appProperties;
 
     public SharedScanService(SharedScanRepository sharedScanRepository,
                               ShowRepository showRepository,
                               ArtistRepository artistRepository,
                               SettingsService settingsService,
-                              SharedScanReconciler reconciler) {
+                              SharedScanReconciler reconciler,
+                              AppProperties appProperties) {
         this.sharedScanRepository = sharedScanRepository;
         this.showRepository = showRepository;
         this.artistRepository = artistRepository;
         this.settingsService = settingsService;
         this.reconciler = reconciler;
+        this.appProperties = appProperties;
     }
 
     /** Every shared scan {@code email} participates in. Empty for an unauthenticated caller. */
@@ -87,14 +91,55 @@ public class SharedScanService {
     /**
      * Provision a new shared scan: allocate its synthetic owner key, create its settings row, and
      * populate its artists from the participants' current intersection.
+     *
+     * @throws ResponseStatusException 400 -- see {@link #validateNewPairing}.
      */
     @Transactional
     public SharedScan create(String label, String ownerA, String ownerB) {
+        validateNewPairing(ownerA, ownerB);
         SharedScan scan = sharedScanRepository.save(
                 new SharedScan(SharedScanOwner.newKey(), ownerA, ownerB, label));
         settingsService.getOrCreateSettings(scan.getOwnerKey());
         reconciler.reconcile(scan);
         return scan;
+    }
+
+    /**
+     * Rejects a would-be pairing before any row exists for it. None of these are visible on any
+     * page today -- {@code SharedScanController#page} renders only {@code scans.get(0)} of an
+     * unordered query, and there is no delete endpoint -- so without this check, each is a mistake
+     * nobody could ever spot afterwards, not just one nobody should make in the first place:
+     * <ul>
+     *   <li><b>Duplicate pairing, either direction.</b> The app supports exactly one shared scan
+     *   per pair ({@link SharedScan}'s own class doc). A second one for the same two people is not
+     *   a visibly broken page -- it is an identical, silently doubled Ticketmaster/Bandsintown scan
+     *   cadence for as long as both rows exist, which with no delete endpoint is forever.</li>
+     *   <li><b>Self-pairing.</b> {@code ownerA} is always the creating admin ({@code
+     *   SharedScanController#create}), so pairing them with themselves intersects their own active
+     *   artists with themselves -- for the admin account in production, on the order of a thousand
+     *   artists -- and enqueues scan jobs for every one of them under a synthetic key, with no page
+     *   that would ever show this happened.</li>
+     *   <li><b>Non-allow-listed {@code ownerB}.</b> The create form's dropdown is populated from
+     *   {@code appProperties.auth().allowedEmails()} ({@code NavModelAdvice#otherOwnerEmails}), so
+     *   a value outside that list can only reach here via a stale or tampered request. A shared
+     *   scan pairs two real users; there is no meaningful pairing with an address that isn't one.</li>
+     * </ul>
+     */
+    private void validateNewPairing(String ownerA, String ownerB) {
+        if (ownerA.equalsIgnoreCase(ownerB)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot share a scan with yourself");
+        }
+        boolean ownerBAllowed = appProperties.auth().allowedEmails().stream()
+                .anyMatch(email -> email.equalsIgnoreCase(ownerB));
+        if (!ownerBAllowed) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ownerB is not an allowed user");
+        }
+        boolean duplicate = sharedScanRepository
+                .existsByOwnerAIgnoreCaseAndOwnerBIgnoreCaseOrOwnerAIgnoreCaseAndOwnerBIgnoreCase(
+                        ownerA, ownerB, ownerB, ownerA);
+        if (duplicate) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "a shared scan for these two already exists");
+        }
     }
 
     /** Update the shared scan's search location/window. Publishes SettingsChanged, which re-dues its scan jobs. */
