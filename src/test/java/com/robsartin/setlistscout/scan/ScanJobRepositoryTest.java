@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.JobStatusCount;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -20,6 +21,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -304,5 +306,84 @@ class ScanJobRepositoryTest extends AbstractPostgresIntegrationTest {
         job.setOwner(OWNER);
         job.setClaimedAt(claimedAt);
         return scanJobRepository.save(job);
+    }
+
+    private ScanJob persistForOwner(String owner, Long artistId, String source, JobStatus status, Instant nextDueAt) {
+        ScanJob job = new ScanJob(artistId, source, status, 0, nextDueAt);
+        job.setOwner(owner);
+        return scanJobRepository.save(job);
+    }
+
+    // #201: the admin queues page's aggregate queries. These must never load whole-table entity
+    // lists to compute a count (see JobRepository#countGroupedByStatus's Javadoc) -- proven here
+    // against real Postgres, not just against a mock.
+
+    @Test
+    @DisplayName("countGroupedByStatus aggregates across every owner, including a shared-scan owner")
+    void countGroupedByStatusAggregatesAcrossOwnersIncludingSharedOwner() {
+        Instant now = Instant.now();
+        persistForOwner("owner-a@example.com", 1L, "ticketmaster", JobStatus.SCHEDULED, now);
+        persistForOwner("owner-b@example.com", 2L, "ticketmaster", JobStatus.SCHEDULED, now);
+        persistForOwner("shared:11111111-1111-1111-1111-111111111111", 3L, "bandsintown",
+                JobStatus.SCHEDULED, now);
+        persistForOwner("owner-a@example.com", 4L, "lastfm", JobStatus.RUNNING, now);
+        persistForOwner("shared:11111111-1111-1111-1111-111111111111", 5L, "ticketmaster",
+                JobStatus.FAILED, now);
+
+        Map<JobStatus, Long> byStatus = scanJobRepository.countGroupedByStatus().stream()
+                .collect(Collectors.toMap(JobStatusCount::getStatus, JobStatusCount::getCount));
+
+        assertThat(byStatus.get(JobStatus.SCHEDULED)).isEqualTo(3L);
+        assertThat(byStatus.get(JobStatus.RUNNING)).isEqualTo(1L);
+        assertThat(byStatus.get(JobStatus.FAILED)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("countByNextDueAtLessThanEqual counts only rows due at or before the given instant")
+    void countByNextDueAtLessThanEqualCountsOnlyDueRows() {
+        Instant now = Instant.now();
+        persistForOwner(OWNER, 1L, "ticketmaster", JobStatus.SCHEDULED, now.minus(1, ChronoUnit.HOURS));
+        persistForOwner(OWNER, 2L, "ticketmaster", JobStatus.SCHEDULED, now);
+        persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, now.plus(1, ChronoUnit.HOURS));
+
+        assertThat(scanJobRepository.countByNextDueAtLessThanEqual(now)).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("findFirstByOrderByNextDueAtAsc returns the single oldest next_due_at, and empty when the table is empty")
+    void findFirstByOrderByNextDueAtAscReturnsTheOldestRow() {
+        assertThat(scanJobRepository.findFirstByOrderByNextDueAtAsc()).isEmpty();
+
+        Instant oldest = Instant.now().minus(3, ChronoUnit.DAYS);
+        persistForOwner(OWNER, 1L, "ticketmaster", JobStatus.SCHEDULED, Instant.now());
+        persistForOwner(OWNER, 2L, "ticketmaster", JobStatus.FAILED, oldest);
+        persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, Instant.now().plus(1, ChronoUnit.DAYS));
+
+        assertThat(scanJobRepository.findFirstByOrderByNextDueAtAsc()).isPresent()
+                .get().extracting(ScanJob::getNextDueAt).isEqualTo(oldest);
+    }
+
+    @Test
+    @DisplayName("findByStatusOrderByNextDueAtAsc returns FAILED rows across every owner, most-overdue first, with attempts/lastError intact")
+    void findByStatusOrderByNextDueAtAscReturnsFailedRowsAcrossOwners() {
+        Instant now = Instant.now();
+        ScanJob moreOverdue = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 5, now.minus(2, ChronoUnit.DAYS));
+        moreOverdue.setOwner("owner-a@example.com");
+        moreOverdue.setLastError("Ticketmaster 500");
+        scanJobRepository.save(moreOverdue);
+
+        ScanJob lessOverdue = new ScanJob(2L, "bandsintown", JobStatus.FAILED, 2, now.minus(1, ChronoUnit.HOURS));
+        lessOverdue.setOwner("shared:22222222-2222-2222-2222-222222222222");
+        lessOverdue.setLastError("timeout");
+        scanJobRepository.save(lessOverdue);
+
+        persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, now);
+
+        List<ScanJob> failed = scanJobRepository.findByStatusOrderByNextDueAtAsc(JobStatus.FAILED);
+
+        assertThat(failed).extracting(ScanJob::getOwner)
+                .containsExactly("owner-a@example.com", "shared:22222222-2222-2222-2222-222222222222");
+        assertThat(failed).extracting(ScanJob::getLastError).containsExactly("Ticketmaster 500", "timeout");
+        assertThat(failed).extracting(ScanJob::getAttempts).containsExactly(5, 2);
     }
 }

@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.JobStatusCount;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,7 +17,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -136,5 +139,36 @@ class ExpandJobRepositoryTest extends AbstractPostgresIntegrationTest {
         ExpandJob reloadedNotYetDue = expandJobRepository.findById(notYetDue.getId()).orElseThrow();
         assertThat(reloadedNotYetDue.getStatus()).isEqualTo(JobStatus.SCHEDULED);
         assertThat(reloadedNotYetDue.getClaimedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("the #201 admin-queue aggregates (countGroupedByStatus/countByNextDueAtLessThanEqual/"
+            + "findFirstByOrderByNextDueAtAsc/findByStatusOrderByNextDueAtAsc) resolve correctly for "
+            + "expand_job too -- smoke test, full behavioral coverage lives in "
+            + "ScanJobRepositoryTest#countGroupedByStatus*/countByNextDueAtLessThanEqual*/find*")
+    void adminQueueAggregatesResolveForExpandJobToo() {
+        Instant now = Instant.now();
+        ExpandJob overdue = new ExpandJob(1L, "lastfm", JobStatus.FAILED, 4, now.minus(2, ChronoUnit.DAYS));
+        overdue.setOwner("shared:33333333-3333-3333-3333-333333333333");
+        overdue.setLastError("MusicBrainz 503");
+        expandJobRepository.save(overdue);
+
+        ExpandJob dueSoon = new ExpandJob(2L, "musicbrainz", JobStatus.SCHEDULED, 0, now.plus(1, ChronoUnit.HOURS));
+        dueSoon.setOwner(OWNER);
+        expandJobRepository.save(dueSoon);
+
+        Map<JobStatus, Long> byStatus = expandJobRepository.countGroupedByStatus().stream()
+                .collect(Collectors.toMap(JobStatusCount::getStatus, JobStatusCount::getCount));
+        assertThat(byStatus.get(JobStatus.FAILED)).isEqualTo(1L);
+        assertThat(byStatus.get(JobStatus.SCHEDULED)).isEqualTo(1L);
+
+        assertThat(expandJobRepository.countByNextDueAtLessThanEqual(now)).isEqualTo(1L);
+        assertThat(expandJobRepository.findFirstByOrderByNextDueAtAsc()).isPresent()
+                .get().extracting(ExpandJob::getNextDueAt).isEqualTo(overdue.getNextDueAt());
+
+        List<ExpandJob> failed = expandJobRepository.findByStatusOrderByNextDueAtAsc(JobStatus.FAILED);
+        assertThat(failed).extracting(ExpandJob::getOwner)
+                .containsExactly("shared:33333333-3333-3333-3333-333333333333");
+        assertThat(failed).extracting(ExpandJob::getLastError).containsExactly("MusicBrainz 503");
     }
 }
