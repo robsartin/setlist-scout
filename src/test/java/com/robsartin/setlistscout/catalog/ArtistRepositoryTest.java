@@ -20,17 +20,21 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Testcontainers-backed proof of {@link ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT
- * (owner, name) DO NOTHING} semantics against real Postgres -- originally the D1 fix (#95) for
- * {@code CandidatePersistenceListener}'s tx-poisoning bug; that listener was replaced by
- * {@code RelationDiscoveredListener} in #109, which relies on this same guard and (unlike its
- * predecessor) no longer has an app-layer {@code existsByOwnerAndNameIgnoreCase} pre-check in
- * front of it -- every to-artist upsert, including a repeat one for an already-known artist,
- * reaches this method, so the DB-level guard tested here is now the ONLY thing absorbing a
- * duplicate (owner, name) insert, not just a race-only backstop. Testing the repository method
- * directly against a real, already-committed conflicting row proves the DB-level guard --
- * matching the {@code artist_owner_name_key} unique constraint from {@code V1__baseline.sql} --
- * absorbs a duplicate insert without throwing or double-writing, exactly like
+ * (owner, normalized_name) DO NOTHING} semantics against real Postgres -- originally the D1 fix
+ * (#95) for {@code CandidatePersistenceListener}'s tx-poisoning bug; that listener was replaced by
+ * {@code RelationDiscoveredListener} in #109, which relies on this same guard, so every to-artist
+ * upsert -- including a repeat one for an already-known artist -- reaches this method and the
+ * DB-level guard tested here is the ONLY thing absorbing a duplicate insert, not just a race-only
+ * backstop. Testing the repository method directly against a real, already-committed conflicting
+ * row proves that guard absorbs a duplicate without throwing or double-writing, exactly like
  * {@code scan.ScanJobRepository#insertIfAbsent}.
+ * <p>
+ * The conflict target moved from {@code (owner, name)} to {@code (owner, normalized_name)} in #179,
+ * once {@code V21__unique_artist_normalized_name} added that constraint. What that changes is
+ * which collisions get absorbed: a SPELLING variant of an existing row used to sail past the
+ * arbiter and become a second row (issue #118's whole complaint), and is now absorbed by the
+ * database itself. {@link #caseVariantIsAbsorbedByTheNormalizedNameConstraint()} and
+ * {@link #punctuationVariantIsAbsorbedByTheNormalizedNameConstraint()} pin exactly that.
  */
 @SpringBootTest
 @Testcontainers
@@ -104,18 +108,67 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("the (owner, name) unique constraint is case-sensitive at the DB level")
+    @DisplayName("issue #179: a case variant of an existing row is absorbed by the DB, not stored as "
+            + "a second row -- this replaces the pre-#179 behaviour, where case-variant names were "
+            + "distinct rows and only a best-effort application pre-check stood between them")
     @Transactional
-    void uniqueConstraintIsCaseSensitive() {
+    void caseVariantIsAbsorbedByTheNormalizedNameConstraint() {
         artistRepository.insertIfAbsent(OWNER, "Radiohead", ArtistNameNormalizer.normalize("Radiohead"),
                 ArtistSource.SEED_LIST.name(), ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
-        artistRepository.insertIfAbsent(OWNER, "radiohead", ArtistNameNormalizer.normalize("radiohead"),
+
+        int inserted = artistRepository.insertIfAbsent(OWNER, "radiohead",
+                ArtistNameNormalizer.normalize("radiohead"), ArtistSource.SEED_LIST.name(),
+                ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
+
+        assertThat(inserted).as("the case variant conflicted rather than inserting").isZero();
+        List<Artist> all = artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW);
+        assertThat(all).as("one row, under the original spelling -- UNIQUE (owner, normalized_name) "
+                + "makes the case-insensitive dedup a database guarantee, not a pre-check")
+                .hasSize(1);
+        assertThat(all.get(0).getName()).isEqualTo("Radiohead");
+    }
+
+    @Test
+    @DisplayName("issue #179: a punctuation/whitespace variant is absorbed too -- the exact shape "
+            + "(#157 hyphen spacing) that produced the last duplicate pair left in production, and "
+            + "the one the old ON CONFLICT (owner, name) target could never have caught")
+    @Transactional
+    void punctuationVariantIsAbsorbedByTheNormalizedNameConstraint() {
+        String original = "Paul Quinichette-John Coltrane Quintet";
+        String variant = "Paul Quinichette - John Coltrane Quintet";
+        artistRepository.insertIfAbsent(OWNER, original, ArtistNameNormalizer.normalize(original),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.REJECTED.name(), null, null, Instant.now());
+
+        int inserted = artistRepository.insertIfAbsent(OWNER, variant, ArtistNameNormalizer.normalize(variant),
+                ArtistSource.SIMILAR_EXPANSION.name(), ArtistStatus.PENDING_REVIEW.name(), null, null,
+                Instant.now());
+
+        assertThat(inserted).as("the spelling variant conflicted rather than inserting").isZero();
+        assertThat(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW))
+                .as("a rejected artist cannot reappear as a PENDING_REVIEW candidate under a new "
+                        + "spelling -- issue #118, now enforced by the database")
+                .isEmpty();
+        assertThat(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.REJECTED)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("issue #179: (owner, name) uniqueness is deliberately kept alongside the stronger "
+            + "constraint -- a different owner may still hold the same name, which is what makes it "
+            + "the composite constraint and not a single-column one")
+    @Transactional
+    void theSameNameUnderADifferentOwnerIsStillItsOwnRow() {
+        String name = "Radiohead";
+        artistRepository.insertIfAbsent(OWNER, name, ArtistNameNormalizer.normalize(name),
                 ArtistSource.SEED_LIST.name(), ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
 
-        List<Artist> all = artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW);
-        assertThat(all).as("case-variant names are distinct rows at the DB constraint level "
-                + "(the case-insensitive dedup is a best-effort application-layer pre-check only)")
-                .hasSize(2);
+        int inserted = artistRepository.insertIfAbsent("someone-else@example.com", name,
+                ArtistNameNormalizer.normalize(name), ArtistSource.SEED_LIST.name(),
+                ArtistStatus.PENDING_REVIEW.name(), null, null, Instant.now());
+
+        assertThat(inserted).as("owner-scoped: another owner's identical name is a new row").isEqualTo(1);
+        assertThat(artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.PENDING_REVIEW)).hasSize(1);
+        assertThat(artistRepository.findByOwnerAndStatus("someone-else@example.com",
+                ArtistStatus.PENDING_REVIEW)).hasSize(1);
     }
 
     @Test

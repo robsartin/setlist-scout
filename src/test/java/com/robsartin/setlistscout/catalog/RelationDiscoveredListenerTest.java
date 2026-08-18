@@ -44,10 +44,16 @@ class RelationDiscoveredListenerTest {
                 ArtistSource.MEMBER_EXPANSION.name(), "musicbrainz", "member/lineup relation of Dawes");
     }
 
-    private static Artist artistWithId(Long id) {
-        Artist artist = mock(Artist.class);
-        when(artist.getId()).thenReturn(id);
-        return artist;
+    /**
+     * Stubs the post-insert id resolve. Since #179 that goes through
+     * {@code findByOwnerAndNormalizedName}, matching {@code insertIfAbsent}'s
+     * {@code ON CONFLICT (owner, normalized_name)} target -- an exact-name lookup would come back
+     * empty in exactly the race the insert absorbs, silently dropping the edge write.
+     */
+    private void stubResolvedId(String name, Long id) {
+        ArtistNameStatusView view = matchedView(id, name, ArtistStatus.PENDING_REVIEW);
+        when(artistRepository.findByOwnerAndNormalizedName(OWNER, ArtistNameNormalizer.normalize(name)))
+                .thenReturn(Optional.of(view));
     }
 
     private void verifyNothingPersisted() {
@@ -121,11 +127,11 @@ class RelationDiscoveredListenerTest {
     void shouldUpsertPunctuatedArtistNames() {
         // The Artist mock must be built BEFORE the when(...).thenReturn(...) call, not inline as
         // its argument: mock(Artist.class) + when(artist.getId())...thenReturn(...) inside
-        // artistWithId() is itself a stubbing call, and Mockito can't have a second when() start
+        // matchedView() is itself a stubbing call, and Mockito can't have a second when() start
         // while the outer when(...).thenReturn(...) here hasn't completed yet (its argument is
         // still being evaluated) -- that ordering throws UnfinishedStubbingException.
-        Artist toArtist = artistWithId(1L);
-        when(artistRepository.findByOwnerAndName(any(), any())).thenReturn(Optional.of(toArtist));
+        ArtistNameStatusView toArtist = matchedView(1L, "any", ArtistStatus.PENDING_REVIEW);
+        when(artistRepository.findByOwnerAndNormalizedName(any(), any())).thenReturn(Optional.of(toArtist));
 
         listener.on(relation("Panic! at the Disco"));
         listener.on(relation("St. Vincent"));
@@ -141,9 +147,7 @@ class RelationDiscoveredListenerTest {
     @DisplayName("should upsert the to-artist node as PENDING_REVIEW with the mapped type, owner, "
             + "discoveredVia (from-artist name), and note")
     void shouldUpsertToArtistNode() {
-        Artist toArtist = artistWithId(42L);
-        when(artistRepository.findByOwnerAndName(OWNER, "Taylor Goldsmith"))
-                .thenReturn(Optional.of(toArtist));
+        stubResolvedId("Taylor Goldsmith", 42L);
         Instant before = Instant.now();
 
         listener.on(relation("Taylor Goldsmith"));
@@ -159,9 +163,7 @@ class RelationDiscoveredListenerTest {
     @Test
     @DisplayName("should resolve the to-artist id and upsert the edge from the base artist to it")
     void shouldUpsertEdge() {
-        Artist toArtist = artistWithId(42L);
-        when(artistRepository.findByOwnerAndName(OWNER, "Taylor Goldsmith"))
-                .thenReturn(Optional.of(toArtist));
+        stubResolvedId("Taylor Goldsmith", 42L);
         Instant before = Instant.now();
 
         listener.on(relation("Taylor Goldsmith"));
@@ -178,9 +180,7 @@ class RelationDiscoveredListenerTest {
             + "found, insertIfAbsent conflicts) -- this is the corroboration fix: a second source for "
             + "an already-known relationship must still get its own edge, not be silently dropped")
     void shouldNotShortCircuitEdgeWriteOnAlreadyKnownArtist() {
-        Artist toArtist = artistWithId(42L);
-        when(artistRepository.findByOwnerAndName(OWNER, "Taylor Goldsmith"))
-                .thenReturn(Optional.of(toArtist));
+        stubResolvedId("Taylor Goldsmith", 42L);
 
         listener.on(relation("Taylor Goldsmith"));
 
@@ -192,8 +192,8 @@ class RelationDiscoveredListenerTest {
     @DisplayName("should skip the edge write (but still attempt the node upsert) when the to-artist "
             + "id can't be resolved after insertIfAbsent")
     void shouldSkipEdgeWhenIdUnresolvable() {
-        when(artistRepository.findByOwnerAndName(OWNER, "Taylor Goldsmith"))
-                .thenReturn(Optional.empty());
+        when(artistRepository.findByOwnerAndNormalizedName(OWNER,
+                ArtistNameNormalizer.normalize("Taylor Goldsmith"))).thenReturn(Optional.empty());
 
         listener.on(relation("Taylor Goldsmith"));
 

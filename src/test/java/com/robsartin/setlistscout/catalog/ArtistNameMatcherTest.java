@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Testcontainers-backed proof that {@link ArtistNameMatcher#findExistingMatch} finds the same
  * matches it did back when it scanned the owner's whole catalog and re-normalized every row in
- * Java, now that it performs one indexed {@code findFirstByOwnerAndNormalizedName} lookup instead
+ * Java, now that it performs one indexed {@code findByOwnerAndNormalizedName} lookup instead
  * (#176). Seeds real rows through {@link ArtistRepository#saveAndFlush}, which populates {@code
  * normalized_name} via {@code Artist}'s {@code @PrePersist} (see that class's Javadoc) -- there is
  * no repository mock left to hand-feed a canned "existing artists" list, so every case here proves
