@@ -10,11 +10,17 @@ public interface SharedScanRepository extends JpaRepository<SharedScan, Long> {
     Optional<SharedScan> findByOwnerKey(String ownerKey);
 
     /**
-     * Every shared scan the given address participates in. Both parameters take the SAME address --
-     * the derived-query grammar has no single-parameter "a or b" form. Case-insensitive on both
-     * sides, because the address arrives from the OIDC token and its casing must not decide access.
+     * Every shared scan the given address participates in, oldest first ({@code created_at} then
+     * {@code id} as the tiebreaker -- #187). Both parameters take the SAME address -- the
+     * derived-query grammar has no single-parameter "a or b" form. Case-insensitive on both sides,
+     * because the address arrives from the OIDC token and its casing must not decide access.
+     * <p>
+     * The explicit order is load-bearing, not cosmetic: with no {@code ORDER BY} at all, which
+     * pairing a caller with more than one sees first is whatever incidental scan order Postgres
+     * happens to return -- unstable between requests, and the reason {@code SharedScanController}
+     * used to render an arbitrary pairing and leave any other unreachable.
      */
-    List<SharedScan> findByOwnerAIgnoreCaseOrOwnerBIgnoreCase(String ownerA, String ownerB);
+    List<SharedScan> findByOwnerAIgnoreCaseOrOwnerBIgnoreCaseOrderByCreatedAtAscIdAsc(String ownerA, String ownerB);
 
     /**
      * Whether a pairing between these two addresses already exists, checked in both directions --

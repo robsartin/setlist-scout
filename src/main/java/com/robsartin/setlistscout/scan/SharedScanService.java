@@ -50,12 +50,15 @@ public class SharedScanService {
         this.transactionTemplate = transactionTemplate;
     }
 
-    /** Every shared scan {@code email} participates in. Empty for an unauthenticated caller. */
+    /**
+     * Every shared scan {@code email} participates in, oldest first and stable across calls
+     * (#187). Empty for an unauthenticated caller.
+     */
     public List<SharedScan> visibleTo(String email) {
         if (email == null || email.isBlank()) {
             return List.of();
         }
-        return sharedScanRepository.findByOwnerAIgnoreCaseOrOwnerBIgnoreCase(email, email);
+        return sharedScanRepository.findByOwnerAIgnoreCaseOrOwnerBIgnoreCaseOrderByCreatedAtAscIdAsc(email, email);
     }
 
     /**

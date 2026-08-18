@@ -131,7 +131,8 @@ class SharedScanReconcilerTest extends AbstractPostgresIntegrationTest {
 
         // Creating the shared artist publishes ArtistActivated(sharedKey), which this same class
         // also listens for. Verified empirically (Task 4 fix round, #163): recursion cannot
-        // actually form today, guard or no guard -- findByOwnerAIgnoreCaseOrOwnerBIgnoreCase
+        // actually form today, guard or no guard --
+        // findByOwnerAIgnoreCaseOrOwnerBIgnoreCaseOrderByCreatedAtAscIdAsc
         // matches only the ownerA/ownerB participant columns, and a shared key is never stored
         // there, so onParticipantArtistChanged's lookup comes back empty regardless. This test
         // therefore observes that reconcile settles to a stable single artist, not that the guard

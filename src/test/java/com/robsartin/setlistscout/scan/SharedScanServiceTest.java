@@ -54,6 +54,21 @@ class SharedScanServiceTest extends AbstractPostgresIntegrationTest {
         assertThat(service.visibleTo(STRANGER)).isEmpty();
     }
 
+    /**
+     * #187: a user in two pairings must see BOTH, not just one -- {@code SharedScanController} used
+     * to render only {@code scans.get(0)}, making the second one unreachable. Also pins the default
+     * order (oldest first) the page's default selection relies on for stability across page loads.
+     */
+    @Test
+    @DisplayName("a user in two pairings sees both, oldest first")
+    void visibleToReturnsEveryPairingAParticipantIsIn() {
+        SharedScan first = service.create("Rob & David", ROB, DAVID);
+        SharedScan second = service.create("Rob & Stranger", ROB, STRANGER);
+
+        assertThat(service.visibleTo(ROB)).extracting(SharedScan::getId)
+                .containsExactly(first.getId(), second.getId());
+    }
+
     @Test
     @DisplayName("visibility ignores address case")
     void visibilityIgnoresCase() {
