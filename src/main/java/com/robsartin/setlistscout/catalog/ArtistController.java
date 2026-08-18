@@ -70,10 +70,6 @@ public class ArtistController {
         seedService.addSeedIfNew(owner, name);
         if (hxRequest != null) {
             populateActive(model, owner);
-            // justAdded drives #active-section's own autofocus (issue #175): the add form now
-            // lives above/outside this swap target, so nothing in the response would otherwise
-            // claim focus after the outerHTML swap. See artists.html's activeSection comment.
-            model.addAttribute("justAdded", true);
             return "artists :: activeSection";
         }
         return "redirect:/artists";

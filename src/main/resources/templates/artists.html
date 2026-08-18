@@ -48,15 +48,14 @@
 
     <h1>Active list (seed + approved)</h1>
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload.
-           tabindex="-1" + th:autofocus="justAdded" (issue #175): the add-artist form above now
-           lives OUTSIDE this swap target, so an outerHTML swap here no longer touches the form
-           itself -- but naming this fragment root as the focus anchor (same shape as shows.html's
-           showsRegion and shared.html's shared-content) keeps the "exactly one autofocus per htmx
-           response" contract explicit rather than relying on default browser focus handling.
-           justAdded is set only by ArtistController#addSeed's htmx branch; left unset (falsy) on
-           a plain page load and on the other two actions that also swap this fragment (site-url
-           set, remove-from-seed) -- out of scope for #175. */-->
-    <div th:fragment="activeSection" id="active-section" tabindex="-1" th:autofocus="${justAdded == true}">
+           Deliberately NO focus anchor here (no tabindex/autofocus), unlike shows.html's
+           showsRegion or shared.html's shared-content: the add-artist form (issue #175) lives
+           OUTSIDE this swap target, so an outerHTML swap here never touches the input or button
+           the user was just using -- nothing is removed, so there's nothing to restore. Adding
+           an autofocus anchor here would not fix a focus loss (there isn't one); it would CAUSE
+           one, by pulling focus away from the input the user is about to type the next artist
+           into. Don't re-add it -- see issue #175. */-->
+    <div th:fragment="activeSection" id="active-section">
         <div class="table-scroll">
             <table>
                 <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th><th>Actions</th></tr></thead>

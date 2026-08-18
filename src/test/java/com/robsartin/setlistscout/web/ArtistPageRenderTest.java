@@ -194,7 +194,7 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("issue #175: a plain page load claims no autofocus -- only an htmx add should")
+    @DisplayName("issue #175: a plain page load claims no autofocus")
     void plainPageLoadHasNoAutofocus() throws Exception {
         String owner = "render-no-autofocus-on-load@example.com";
         saveActive(owner, "Existing Artist", ArtistStatus.SEED);
@@ -207,9 +207,10 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("issue #175: an htmx add focuses exactly one element -- the active-section anchor "
-            + "-- not <body>, even though the add form itself sits outside the swapped fragment")
-    void htmxAddFocusesExactlyOneElement() throws Exception {
+    @DisplayName("issue #175: an htmx add claims no autofocus either -- the add-artist input sits "
+            + "outside #active-section (the only thing the response swaps), so htmx never touches "
+            + "it and focus stays on it by itself, with nothing left to claim")
+    void htmxAddHasNoAutofocus() throws Exception {
         String owner = "render-add-focus@example.com";
 
         String body = mockMvc.perform(post("/artists/seed").param("name", "Wilco")
@@ -219,7 +220,9 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(countAutofocusElements(body)).isEqualTo(1);
-        assertThat(body).containsPattern("id=\"active-section\"[^>]*autofocus");
+        assertThat(countAutofocusElements(body)).isZero();
+        // The response is only ever the table fragment -- the add form (and its input) isn't
+        // part of it, which is WHY there's nothing here to steal focus away from that input.
+        assertThat(body).doesNotContain("id=\"artist-name\"");
     }
 }
