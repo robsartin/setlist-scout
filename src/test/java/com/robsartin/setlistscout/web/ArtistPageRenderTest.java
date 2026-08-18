@@ -5,6 +5,7 @@ import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -153,5 +154,72 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("/remove\"");
         // Must NOT also render the SEED-only "Remove from seed list" button.
         assertThat(body).doesNotContain("Remove from seed list");
+    }
+
+    @Test
+    @DisplayName("issue #175: the add-artist form and the upload controls render ABOVE the active "
+            + "list -- the table can run to 1,500+ rows, so the most frequent action on the page "
+            + "must not sit below the whole thing")
+    void addAndUploadControlsRenderAboveTheActiveList() throws Exception {
+        String owner = "render-forms-above-list@example.com";
+        saveActive(owner, "Existing Artist", ArtistStatus.SEED);
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        int activeSectionIndex = body.indexOf("id=\"active-section\"");
+        int addFormIndex = body.indexOf("action=\"/artists/seed\"");
+        int uploadFormIndex = body.indexOf("action=\"/artists/upload\"");
+
+        assertThat(activeSectionIndex).isPositive();
+        assertThat(addFormIndex).as("add-artist form must render, and above the active list").isPositive();
+        assertThat(uploadFormIndex).as("upload form must render, and above the active list").isPositive();
+        assertThat(addFormIndex).isLessThan(activeSectionIndex);
+        assertThat(uploadFormIndex).isLessThan(activeSectionIndex);
+    }
+
+    @Test
+    @DisplayName("issue #175: the add-artist text input keeps a proper label after the move -- "
+            + "this app treats labelled controls as an acceptance criterion, not a nicety")
+    void addArtistInputHasAProperLabel() throws Exception {
+        String owner = "render-add-artist-label@example.com";
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("<label for=\"artist-name\">Add a band to the seed list</label>");
+        assertThat(body).contains("id=\"artist-name\"");
+    }
+
+    @Test
+    @DisplayName("issue #175: a plain page load claims no autofocus -- only an htmx add should")
+    void plainPageLoadHasNoAutofocus() throws Exception {
+        String owner = "render-no-autofocus-on-load@example.com";
+        saveActive(owner, "Existing Artist", ArtistStatus.SEED);
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(countAutofocusElements(body)).isZero();
+    }
+
+    @Test
+    @DisplayName("issue #175: an htmx add focuses exactly one element -- the active-section anchor "
+            + "-- not <body>, even though the add form itself sits outside the swapped fragment")
+    void htmxAddFocusesExactlyOneElement() throws Exception {
+        String owner = "render-add-focus@example.com";
+
+        String body = mockMvc.perform(post("/artists/seed").param("name", "Wilco")
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("id=\"active-section\"[^>]*autofocus");
     }
 }

@@ -183,6 +183,19 @@ class ArtistControllerTest {
     }
 
     @Test
+    @DisplayName("issue #175: addSeed sets justAdded on an htmx request so the swapped-in "
+            + "active-section fragment can focus itself -- the add form now lives outside that "
+            + "swap target, so nothing in the response would otherwise claim focus")
+    void addSeedSetsJustAddedForHtmxRequest() {
+        stubNewSeedInsert("Wilco");
+        Model model = new ConcurrentModel();
+
+        controller.addSeed("Wilco", "true", model);
+
+        assertThat(model.getAttribute("justAdded")).isEqualTo(true);
+    }
+
+    @Test
     @DisplayName("addSeed ignores a blank/whitespace name (a blank seed would trigger a keyword-less search)")
     void addSeedIgnoresBlankName() {
         String view = controller.addSeed("   ", null, new ConcurrentModel());
