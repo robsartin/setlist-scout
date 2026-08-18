@@ -13,6 +13,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -185,5 +187,125 @@ class ArtistRepositoryTest extends AbstractPostgresIntegrationTest {
         List<Artist> found = artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.REMOVED);
         assertThat(found).hasSize(1);
         assertThat(found.get(0).getName()).isEqualTo("Formerly Seeded Band");
+    }
+
+    // --- Issue #174: keyset (seek) pagination on normalizedName ----------------------------------
+
+    private static final List<ArtistStatus> KEYSET_ACTIVE = List.of(ArtistStatus.SEED, ArtistStatus.APPROVED);
+
+    private Artist saveActive(String owner, String name) {
+        Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        artist.setOwner(owner);
+        return artistRepository.save(artist);
+    }
+
+    @Test
+    @DisplayName("issue #174: a page returns exactly the page size, and the next cursor's page picks "
+            + "up immediately after it -- concatenating pages covers every row exactly once, no "
+            + "overlap and no gap")
+    void keysetFirstAndNextPagesCoverEveryRowExactlyOnceNoOverlapNoGap() {
+        List<String> names = List.of("Aardvark", "Bobcat", "Cheetah", "Dingo", "Eagle", "Falcon",
+                "Gecko", "Heron", "Ibis", "Jackal");
+        names.forEach(n -> saveActive(OWNER, n));
+
+        List<Artist> page1 = artistRepository.findActiveFirstPage(OWNER, KEYSET_ACTIVE, 4);
+        assertThat(page1).as("exact page size").hasSize(4);
+        assertThat(page1).extracting(Artist::getName).containsExactly("Aardvark", "Bobcat", "Cheetah", "Dingo");
+
+        List<Artist> page2 = artistRepository.findActiveAfter(OWNER, KEYSET_ACTIVE,
+                page1.get(page1.size() - 1).getNormalizedName(), 4);
+        assertThat(page2).extracting(Artist::getName).containsExactly("Eagle", "Falcon", "Gecko", "Heron");
+
+        List<Artist> page3 = artistRepository.findActiveAfter(OWNER, KEYSET_ACTIVE,
+                page2.get(page2.size() - 1).getNormalizedName(), 4);
+        assertThat(page3).as("final, partial page").extracting(Artist::getName).containsExactly("Ibis", "Jackal");
+
+        List<String> allPaged = new ArrayList<>();
+        List.of(page1, page2, page3).forEach(page -> page.forEach(a -> allPaged.add(a.getName())));
+        assertThat(allPaged).as("no overlap and no gap: every seeded name appears exactly once, in order")
+                .containsExactlyElementsOf(names);
+    }
+
+    @Test
+    @DisplayName("issue #174: mixed-case names page correctly across a cursor boundary -- "
+            + "normalizedName is both the ORDER BY expression and the cursor comparison, so a raw "
+            + "case-sensitive byte order (every capitalized name before any lowercase one) can never "
+            + "disagree with the normalized order this test expects")
+    void keysetPagesMixedCaseNamesCorrectlyAcrossACursorBoundary() {
+        // Case-SENSITIVE ASCII order would be APPLE, Cherry, Date Palm, banana, zebra -- every
+        // capital-letter name sorts before every lowercase one. That is NOT the order this test
+        // asserts, so a regression to comparing raw `name` while sorting by normalizedName (or vice
+        // versa) fails this loudly rather than silently.
+        saveActive(OWNER, "zebra");
+        saveActive(OWNER, "Cherry");
+        saveActive(OWNER, "APPLE");
+        saveActive(OWNER, "banana");
+        saveActive(OWNER, "Date Palm");
+
+        List<Artist> page1 = artistRepository.findActiveFirstPage(OWNER, KEYSET_ACTIVE, 2);
+        assertThat(page1).extracting(Artist::getName).containsExactly("APPLE", "banana");
+
+        List<Artist> page2 = artistRepository.findActiveAfter(OWNER, KEYSET_ACTIVE,
+                page1.get(1).getNormalizedName(), 2);
+        assertThat(page2).extracting(Artist::getName).containsExactly("Cherry", "Date Palm");
+
+        List<Artist> page3 = artistRepository.findActiveAfter(OWNER, KEYSET_ACTIVE,
+                page2.get(1).getNormalizedName(), 2);
+        assertThat(page3).extracting(Artist::getName).containsExactly("zebra");
+    }
+
+    @Test
+    @DisplayName("issue #174: a row inserted BEFORE the current cursor -- even one that sorts inside "
+            + "the range already shown -- does not duplicate or skip rows on the next page. This is "
+            + "exactly the failure mode OFFSET pagination has: the boundary here is a VALUE "
+            + "(normalizedName), not a row count, so an insert elsewhere can't shift it")
+    void insertingARowBeforeTheCursorDoesNotDuplicateOrSkipTheNextPage() {
+        List.of("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot").forEach(n -> saveActive(OWNER, n));
+
+        List<Artist> page1 = artistRepository.findActiveFirstPage(OWNER, KEYSET_ACTIVE, 3);
+        assertThat(page1).extracting(Artist::getName).containsExactly("Alpha", "Bravo", "Charlie");
+        String cursor = page1.get(2).getNormalizedName();
+
+        // Sorts between Bravo and Charlie -- squarely inside the range page1 already rendered, and
+        // strictly before "cursor". An OFFSET-based `LIMIT 3 OFFSET 3` would now return this row
+        // again on "page 2" (everything after it shifts down one slot); keyset must not.
+        saveActive(OWNER, "Beta");
+
+        List<Artist> page2 = artistRepository.findActiveAfter(OWNER, KEYSET_ACTIVE, cursor, 3);
+        assertThat(page2).extracting(Artist::getName)
+                .as("unaffected by the insert before the cursor -- no duplicate, no skip")
+                .containsExactly("Delta", "Echo", "Foxtrot");
+    }
+
+    @Test
+    @DisplayName("issue #174: findActiveBefore, reversed for display, returns exactly the prior page")
+    void previousPageReturnsExactlyThePriorPage() {
+        List.of("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot").forEach(n -> saveActive(OWNER, n));
+
+        List<Artist> page1 = artistRepository.findActiveFirstPage(OWNER, KEYSET_ACTIVE, 3);
+        List<Artist> page2 = artistRepository.findActiveAfter(OWNER, KEYSET_ACTIVE,
+                page1.get(2).getNormalizedName(), 3);
+        assertThat(page2).extracting(Artist::getName).containsExactly("Delta", "Echo", "Foxtrot");
+
+        List<Artist> previousDescending = artistRepository.findActiveBefore(OWNER, KEYSET_ACTIVE,
+                page2.get(0).getNormalizedName(), 3);
+        assertThat(previousDescending).as("DESC order, nearest the cursor first")
+                .extracting(Artist::getName).containsExactly("Charlie", "Bravo", "Alpha");
+
+        List<Artist> previousAscending = new ArrayList<>(previousDescending);
+        Collections.reverse(previousAscending);
+        assertThat(previousAscending).as("reversed for display: exactly page1")
+                .extracting(Artist::getName).containsExactly("Alpha", "Bravo", "Charlie");
+    }
+
+    @Test
+    @DisplayName("issue #174: keyset pagination stays owner-scoped -- a second owner's artists never appear")
+    void keysetPaginationIsOwnerScoped() {
+        saveActive(OWNER, "Owner One Band");
+        saveActive("someone-else@example.com", "Owner Two Band");
+
+        List<Artist> page1 = artistRepository.findActiveFirstPage(OWNER, KEYSET_ACTIVE, 10);
+
+        assertThat(page1).extracting(Artist::getName).containsExactly("Owner One Band");
     }
 }

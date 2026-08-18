@@ -50,6 +50,67 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
     Optional<Artist> findByOwnerAndName(String owner, String name);
 
     /**
+     * Keyset (seek) pagination, page 1 (issue #174): the first {@code limit} active rows ordered by
+     * {@code normalizedName} ascending, no lower bound. Callers ask for one more row than they mean
+     * to display ({@code limit = pageSize + 1}) so {@link ArtistPager} can tell whether a next page
+     * exists without a separate COUNT query -- see its class doc.
+     * <p>
+     * {@code normalizedName} is deliberately the ORDER BY column here AND the cursor comparison
+     * column in {@link #findActiveAfter}/{@link #findActiveBefore} below -- the identical-expression
+     * requirement the issue calls out. Before V21 (#179) that would have needed a separate
+     * case-folding step to hold; since normalizedName is already lowercased and, per that migration,
+     * {@code UNIQUE (owner, normalized_name)}, it is simultaneously a total order (no id tiebreaker
+     * needed) and immune to the case-boundary skip/dup bug by construction, not by convention.
+     * <p>
+     * Uses HQL's {@code LIMIT} clause (Hibernate 6+), never {@code OFFSET} -- see the class-level
+     * issue #174 note on why OFFSET paging is unsafe against a list that mutates while someone is
+     * paging through it (expansion/import inserts, removal deletes).
+     */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses
+             ORDER BY a.normalizedName ASC
+             LIMIT :limit
+            """)
+    List<Artist> findActiveFirstPage(@Param("owner") String owner, @Param("statuses") List<ArtistStatus> statuses,
+                                      @Param("limit") int limit);
+
+    /**
+     * Keyset "next" page (issue #174): strictly after {@code cursor} (a {@code normalizedName}
+     * value), ascending. NOT OFFSET-based: the boundary is a VALUE a row either is or isn't past,
+     * so an insert or delete anywhere else in the list cannot shift this window the way {@code
+     * LIMIT n OFFSET m} would -- a row inserted before {@code cursor} does not appear here (it
+     * sorts before the boundary, same as it would have before the insert), and a row deleted
+     * before {@code cursor} does not cause this page to skip one (nothing about this WHERE clause
+     * depended on a row count). See {@link #findActiveFirstPage} for why {@code normalizedName}
+     * alone is both a safe cursor and a total order.
+     */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses AND a.normalizedName > :cursor
+             ORDER BY a.normalizedName ASC
+             LIMIT :limit
+            """)
+    List<Artist> findActiveAfter(@Param("owner") String owner, @Param("statuses") List<ArtistStatus> statuses,
+                                  @Param("cursor") String cursor, @Param("limit") int limit);
+
+    /**
+     * Keyset "previous" page (issue #174): strictly before {@code cursor}, ordered DESCENDING so
+     * {@code LIMIT} keeps the rows nearest the cursor -- the ones actually on the prior page --
+     * rather than the {@code limit} rows furthest from it at the start of the whole list. {@code
+     * ArtistPager} reverses the result back to ascending order before display; the caller must not
+     * skip that step or rows render bottom-to-top.
+     */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses AND a.normalizedName < :cursor
+             ORDER BY a.normalizedName DESC
+             LIMIT :limit
+            """)
+    List<Artist> findActiveBefore(@Param("owner") String owner, @Param("statuses") List<ArtistStatus> statuses,
+                                   @Param("cursor") String cursor, @Param("limit") int limit);
+
+    /**
      * DB-level idempotent enqueue: relies on the {@code artist_owner_normalized_name_key} unique
      * constraint via {@code ON CONFLICT ... DO NOTHING} so a racing duplicate candidate for the
      * same artist is a silent no-op instead of a {@code DataIntegrityViolationException}. That

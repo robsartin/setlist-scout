@@ -72,6 +72,9 @@ setlistscout:
   import-batch-size: ${IMPORT_BATCH_SIZE:25}
   import-max-attempts: ${IMPORT_MAX_ATTEMPTS:3}
 
+  # #174: keyset pagination page size for the /artists active list.
+  artists-page-size: ${ARTISTS_PAGE_SIZE:20}
+
   auth:
     allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
     seed-owner: ${SEED_OWNER:rob.sartin@gmail.com}

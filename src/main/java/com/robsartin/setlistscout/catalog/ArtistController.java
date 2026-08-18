@@ -26,6 +26,16 @@ public class ArtistController {
 
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
+    /**
+     * Issue #174: the Next/Previous pagination links use {@code hx-push-url="true"} (so the cursor
+     * is bookmark/back-button friendly, same as candidates.html's {@code via} sidebar links), which
+     * means a Back navigation that misses htmx's local history cache re-fetches this URL with BOTH
+     * headers set. That response gets swapped into {@code <body>} client-side, so it needs the FULL
+     * page, not the bare fragment -- see {@code ReviewController#candidates}'s identical handling.
+     */
+    private static final String HX_HISTORY_RESTORE_REQUEST = "HX-History-Restore-Request";
+    /** Fragment view name shared by every bare-fragment htmx response this controller returns. */
+    private static final String ACTIVE_SECTION_FRAGMENT = "artists :: activeSection";
 
     /** Hop count for the graph-validation page's reachable-set query (issue #111). */
     private static final int GRAPH_MAX_DEPTH = 2;
@@ -38,11 +48,13 @@ public class ArtistController {
     private final ArtistConnectionsService connectionsService;
     private final ArtistImportService importService;
     private final ArtistImportRepository artistImportRepository;
+    private final ArtistPager artistPager;
 
     public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
                            CurrentUser currentUser, ArtistSeedService seedService,
                            ArtistActivationService activationService, ArtistConnectionsService connectionsService,
-                           ArtistImportService importService, ArtistImportRepository artistImportRepository) {
+                           ArtistImportService importService, ArtistImportRepository artistImportRepository,
+                           ArtistPager artistPager) {
         this.artistRepository = artistRepository;
         this.artistEdgeRepository = artistEdgeRepository;
         this.currentUser = currentUser;
@@ -51,13 +63,27 @@ public class ArtistController {
         this.connectionsService = connectionsService;
         this.importService = importService;
         this.artistImportRepository = artistImportRepository;
+        this.artistPager = artistPager;
     }
 
+    /**
+     * Issue #174: {@code after}/{@code before} are the keyset cursors a Next/Previous link sends
+     * back (see {@code artists.html}'s {@code activeSection} fragment); neither present is page 1.
+     * {@code fragment} decides both whether the response is the bare {@code activeSection} (a
+     * genuine htmx swap) and whether {@link #populateActive} emits the out-of-band {@code
+     * #sr-status} announcement -- a history-restore re-fetch must render neither, or the layout's
+     * real {@code #sr-status} node would collide with a duplicate id.
+     */
     @GetMapping
-    public String list(Model model) {
+    public String list(@RequestParam(required = false) String after,
+                       @RequestParam(required = false) String before,
+                       @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                       @RequestHeader(value = HX_HISTORY_RESTORE_REQUEST, required = false) String historyRestore,
+                       Model model) {
         String owner = currentUser.email();
-        populateActive(model, owner);
-        return "artists";
+        boolean fragment = hxRequest != null && historyRestore == null;
+        populateActive(model, owner, after, before, fragment);
+        return fragment ? ACTIVE_SECTION_FRAGMENT : "artists";
     }
 
     @PostMapping("/seed")
@@ -69,8 +95,18 @@ public class ArtistController {
         // event (issue #49); ArtistSeedService trims and skips blanks/duplicates.
         seedService.addSeedIfNew(owner, name);
         if (hxRequest != null) {
-            populateActive(model, owner);
-            return "artists :: activeSection";
+            // Issue #174: lands on the FIRST page, not wherever the (now stale, one row longer)
+            // list's cursor used to point. Chosen over the alternatives the issue calls out --
+            // computing which page the new row landed on (an extra query, and a boundary that the
+            // very next insert could shift anyway) or preserving the incoming cursor position
+            // (nothing on THIS request even carries one; the add form sits outside #active-section,
+            // issue #175) -- because it's the simplest option that's still correct, and the add
+            // form plus the import-progress display both live at the top of the page already, so
+            // returning there keeps the confirmation in view next to what the user just did. The
+            // same reasoning is applied uniformly to setSiteUrl/removeFromSeed below rather than
+            // inventing a third, untested behaviour for those.
+            populateActive(model, owner, null, null, true);
+            return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
     }
@@ -116,8 +152,9 @@ public class ArtistController {
             artistRepository.save(a);
         });
         if (hxRequest != null) {
-            populateActive(model, owner);
-            return "artists :: activeSection";
+            // Issue #174: first page, same reasoning as addSeed's comment above.
+            populateActive(model, owner, null, null, true);
+            return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
     }
@@ -139,8 +176,9 @@ public class ArtistController {
         String owner = currentUser.email();
         activationService.changeStatus(id, owner, ArtistStatus.REMOVED);
         if (hxRequest != null) {
-            populateActive(model, owner);
-            return "artists :: activeSection";
+            // Issue #174: first page, same reasoning as addSeed's comment above.
+            populateActive(model, owner, null, null, true);
+            return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
     }
@@ -207,9 +245,28 @@ public class ArtistController {
         return "artist-connections";
     }
 
-    private void populateActive(Model model, String owner) {
-        model.addAttribute("active", artistRepository.findByOwnerAndStatusIn(
-                owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
+    /**
+     * Builds the {@code activeSection} model: the current keyset page (issue #174, via {@link
+     * ArtistPager}) plus the upload-progress attributes, for whichever of this controller's four
+     * action handlers got here (list, addSeed, setSiteUrl, removeFromSeed).
+     * <p>
+     * {@code after}/{@code before} are the REQUEST's own cursors -- non-null only when {@link
+     * #list} is answering a Next/Previous click; every mutating action calls this with both {@code
+     * null} (see {@link #addSeed}'s comment for why landing on the first page, uniformly, is the
+     * chosen behaviour there and not just the path of least resistance).
+     * <p>
+     * {@code announce} gates the out-of-band {@code #sr-status} paragraph {@code artists.html}
+     * renders inside {@code activeSection} (issue #174's "announce page changes" requirement,
+     * mirroring candidates.html's identical {@code #sr-status} convention): {@code true} for every
+     * genuine fragment swap, {@code false} for a full-page render, where the layout already carries
+     * the one real {@code #sr-status} node and a second copy under the same id would be a
+     * duplicate-id bug -- see {@link #list}'s {@code fragment} computation.
+     */
+    private void populateActive(Model model, String owner, String after, String before, boolean announce) {
+        ActivePage page = artistPager.page(owner, after, before);
+        model.addAttribute("active", page.artists());
+        model.addAttribute("activePage", page);
+        model.addAttribute("announceActivePage", announce);
         // #177 upload-progress display: plain server-rendered counts, refreshed whenever this
         // model gets built (a full page load, or any htmx action that swaps activeSection) --
         // no polling, no JavaScript, matching the rest of this app.
