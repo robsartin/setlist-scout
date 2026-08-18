@@ -22,14 +22,15 @@ import java.util.Optional;
  * artist_edge} row instead of being silently dropped -- the corroboration-loss defect the graph
  * model was built to fix.
  * <p>
- * DOES short-circuit the NODE write via {@link ArtistNameMatcher} (issue #118): {@link
- * ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT (owner, name)} only catches an
- * exact-string repeat, and the DB constraint behind it is case- and punctuation-SENSITIVE (see
- * {@code ArtistRepositoryTest#uniqueConstraintIsCaseSensitive}) -- left alone, a rejected
- * "Charlie Parker's Re-Boppers" does nothing to stop "Charlie Parker's Re-boppers" from a
- * different source insertIfAbsent-ing its way in as a brand-new PENDING_REVIEW row. The matcher
- * catches that case regardless of the existing row's status (including REJECTED), and this
- * listener resolves the edge against whichever row already exists instead of creating a second one.
+ * DOES short-circuit the NODE write via {@link ArtistNameMatcher} (issue #118) -- and still needs
+ * to, even though {@link ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT} now targets
+ * {@code (owner, normalized_name)} and so absorbs a spelling variant on its own (#179). The
+ * constraint stops a duplicate ROW from being created; the matcher is what lets this listener see
+ * WHICH existing row a variant belongs to, and its status, so a re-suggestion of a previously
+ * rejected "Charlie Parker's Re-Boppers" as "Charlie Parker's Re-boppers" can be logged and
+ * attached to the existing node instead of silently resolving to nothing. The matcher catches that
+ * case regardless of the existing row's status (including REJECTED), and this listener resolves the
+ * edge against whichever row already exists instead of creating a second one.
  */
 @Component
 public class RelationDiscoveredListener {
@@ -112,15 +113,21 @@ public class RelationDiscoveredListener {
 
         // DB-level idempotent insert (ON CONFLICT DO NOTHING) rather than save()+catch: this
         // listener's whole body runs in one @ApplicationModuleListener transaction, and on an
-        // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real (owner,
-        // name) race poisons that transaction -- Modulith's own AFTER_COMMIT completion write then
-        // fails too, leaving the event stuck for redelivery instead of a clean no-op. This remains
-        // the backstop for a same-spelling race that slips past the matcher's read above (the
-        // matcher is a best-effort pre-check, same as the existsBy pre-check it supersedes).
-        artistRepository.insertIfAbsent(owner, toArtistName, ArtistNameNormalizer.normalize(toArtistName),
+        // IDENTITY-keyed table an uncaught DataIntegrityViolationException from a real race poisons
+        // that transaction -- Modulith's own AFTER_COMMIT completion write then fails too, leaving
+        // the event stuck for redelivery instead of a clean no-op. This remains the backstop for a
+        // race that slips past the matcher's read above (the matcher is a best-effort pre-check),
+        // and since #179 it covers a DIFFERENT-spelling race too, not just a same-spelling one.
+        String normalizedName = ArtistNameNormalizer.normalize(toArtistName);
+        artistRepository.insertIfAbsent(owner, toArtistName, normalizedName,
                 type.name(), ArtistStatus.PENDING_REVIEW.name(), fromArtistName, note, Instant.now());
 
-        return artistRepository.findByOwnerAndName(owner, toArtistName).map(Artist::getId).orElse(null);
+        // Resolved by NORMALIZED name, matching the conflict target above (#179). An exact-name
+        // lookup would come back empty in exactly the race this insert absorbs -- when the row that
+        // won is a different spelling -- and the edge write would then be skipped, silently losing
+        // the corroboration this listener exists to preserve.
+        return artistRepository.findByOwnerAndNormalizedName(owner, normalizedName)
+                .map(ArtistNameStatusView::getId).orElse(null);
     }
 
     /**

@@ -29,51 +29,72 @@ public class ArtistSeedService {
 
     /**
      * Add {@code rawName} as a SEED artist for {@code owner}, unless it is blank or a {@code #}
-     * comment. The name is trimmed before use, then checked against the owner's existing artists
-     * via {@link ArtistNameMatcher} (issue #124) -- the same normalized-name equality {@code
-     * RelationDiscoveredListener} uses for expansion-discovered names, so this path stops creating
-     * duplicates for case/whitespace variants and the specific unicode dash/quote variants {@link
-     * ArtistNameNormalizer} folds (e.g. "Foo-Bar" vs "Foo–Bar"). It is deliberately NOT a fix
-     * for every punctuation difference -- "and" vs "&" is a word substitution, not a folded
-     * codepoint, so "Tom Petty and The Heartbreakers" vs "Tom Petty & The Heartbreakers" still
-     * creates two rows; that would need a fuzzier match than the normalizer intentionally provides
-     * (see its class doc on why it stays conservative).
-     * <p>
+     * comment. The name is trimmed before use.
+     *
+     * <h2>Write first, then read -- issue #179</h2>
+     * This method does NOT check whether the name already exists before inserting. It attempts
+     * {@link ArtistRepository#insertIfAbsent} straight away and lets the database's
+     * {@code UNIQUE (owner, normalized_name)} constraint (added by
+     * {@code V21__unique_artist_normalized_name}) decide, reading only afterwards and only when the
+     * insert was absorbed. That inverts what used to be a check-then-insert:
+     * <ul>
+     *   <li>The #133 race is <em>impossible</em> rather than compensated for. Two near-simultaneous
+     *       calls for the same brand-new name used to be able to both pass an
+     *       {@link ArtistNameMatcher} pre-check and then race for real at the constraint (hit in
+     *       production on "Nebraska"). With no pre-check there is no window: both calls reach the
+     *       insert, and Postgres serializes them.</li>
+     *   <li>The #118 duplicate-variant guard moves out of application code and into the database.
+     *       The pre-check could only ever be best-effort -- it caught a spelling variant that had
+     *       already committed, never one committing concurrently. The constraint catches both.</li>
+     * </ul>
+     * The matcher is still used, just after the write instead of before it: when the insert is
+     * absorbed, it resolves WHICH existing row this name collided with, so the status branch below
+     * can run. Reading a row the database has already told us exists is not a check-then-act.
+     *
+     * <h2>What happens on each outcome</h2>
+     * <ul>
+     *   <li>Inserted (returned 1): a brand-new SEED artist, resolved by exact {@code name} -- the
+     *       row this call itself just created carries exactly that string -- and announced via
+     *       {@link ArtistActivationService#onSeedCreated} so its scan/expand jobs enqueue. Returns
+     *       {@code true}.</li>
+     *   <li>Absorbed (returned 0) and the existing row is ACTIVE (SEED or APPROVED,
+     *       {@link ArtistActivationService#isActive}): a true duplicate, no-op, returns
+     *       {@code false}. This also covers the race loser -- the winner's row is a fresh SEED, so
+     *       the loser correctly reports "I did not cause a new seed" and does not double-publish
+     *       {@code ArtistActivated} for someone else's insert.</li>
+     *   <li>Absorbed and the existing row is INACTIVE (REJECTED, PENDING_REVIEW or REMOVED): the
+     *       caller is deliberately un-rejecting / fast-tracking / re-adding that artist by name, so
+     *       it is reactivated to SEED through {@link ArtistActivationService#changeStatus} -- never
+     *       a direct repository save -- and the activation event fires exactly as it would for a
+     *       brand-new seed. Returns {@code true}.</li>
+     * </ul>
      * This path's semantics differ from {@code RelationDiscoveredListener}'s deliberately: that
-     * listener silently reuses a match of ANY status, including REJECTED, because it's resolving
-     * an automated discovery. Here the user (or an uploaded file, or startup seeding) is
-     * explicitly asking to add this exact name -- silently swallowing that against a REJECTED or
-     * still-PENDING_REVIEW row would look like the add did nothing, with no feedback. So: a match
-     * against an already-ACTIVE row (SEED or APPROVED, {@link ArtistActivationService#isActive})
-     * is treated as a true duplicate and no-ops. A match against an INACTIVE row (REJECTED or
-     * PENDING_REVIEW) is treated as the caller deliberately un-rejecting/fast-tracking that artist
-     * by name, and is reactivated to SEED through {@link ArtistActivationService#changeStatus} --
-     * never a direct repository save -- so the activation event fires and the artist's scan/expand
-     * jobs get enqueued exactly as they would for a brand-new seed.
+     * listener silently reuses a match of ANY status, including REJECTED, because it is resolving
+     * an automated discovery. Here the user (or an uploaded file, or startup seeding) is explicitly
+     * asking to add this exact name -- silently swallowing that against a REJECTED or still-PENDING
+     * row would look like the add did nothing, with no feedback.
      * <p>
-     * The "not found" branch is a check-then-insert against the matcher above, so two
-     * near-simultaneous calls for the same brand-new name can both pass that pre-check and then
-     * race for real at the DB's {@code artist (owner, name)} unique constraint (issue #133; hit in
-     * production on "Nebraska"). That race is resolved the same way {@code
-     * RelationDiscoveredListener#resolveOrCreateToArtist} resolves the equivalent
-     * expansion-discovery race: {@link ArtistRepository#insertIfAbsent} (a DB-level {@code INSERT
-     * ... ON CONFLICT (owner, name) DO NOTHING}, never a raw {@code save()}) followed by {@link
-     * ArtistRepository#findByOwnerAndName} to resolve the row. {@code insertIfAbsent}'s int return
-     * (rows actually inserted) is how this call tells whether IT won the race: only the winner
-     * calls {@link ArtistActivationService#onSeedCreated}; see that branch below for why the loser
-     * must not. This method is {@code @Transactional} because {@code insertIfAbsent}, like every
-     * other {@code insertIfAbsent} in this codebase, needs an ambient transaction supplied by its
-     * caller -- and because that also satisfies the event-publish invariant (ADR-0024): {@code
-     * onSeedCreated}'s publish only reaches the AFTER_COMMIT listeners if it happens inside a
-     * transaction that goes on to commit.
+     * One behaviour genuinely improves as a side effect: if this call loses a race to a
+     * {@code RelationDiscoveredListener} insert of the same artist, it now finds that
+     * PENDING_REVIEW row and promotes it to SEED, instead of returning {@code false} and leaving
+     * the artist the user explicitly asked for sitting in the review queue.
+     * <p>
+     * Matching stays as conservative as {@link ArtistNameNormalizer} is: case, whitespace, and the
+     * unicode dash/quote variants it folds (e.g. "Foo-Bar" vs "Foo-Bar" with an en dash) are the
+     * same name; a word substitution like "and" vs "&amp;" is not, so "Tom Petty and The
+     * Heartbreakers" and "Tom Petty &amp; The Heartbreakers" remain two rows.
+     * <p>
+     * {@code @Transactional} because {@code insertIfAbsent}, like every other
+     * {@code insertIfAbsent} in this codebase, needs an ambient transaction supplied by its
+     * caller -- and because that also satisfies the event-publish invariant (ADR-0024):
+     * {@code onSeedCreated}'s publish only reaches the AFTER_COMMIT listeners if it happens inside
+     * a transaction that goes on to commit.
      *
      * @return {@code true} if the call resulted in a newly-active SEED artist for the owner (a
      * fresh row this call itself inserted, or an existing inactive row this call reactivated);
-     * {@code false} if it was skipped (blank/comment), the name already matched an artist that was
-     * already active, or -- the race case -- a concurrent call won the insert for this exact
-     * (owner, name) first. In that last case the name IS now a seed, just not because of this
-     * call; from this call's point of view "did I cause a new seed" is correctly "no", the same
-     * answer as every other case where it didn't.
+     * {@code false} if it was skipped (blank/comment), or the name already belonged to an artist
+     * that was already active -- including the race case, where the name IS now a seed, just not
+     * because of this call.
      */
     @Transactional
     public boolean addSeedIfNew(String owner, String rawName) {
@@ -82,36 +103,38 @@ public class ArtistSeedService {
             return false;
         }
 
-        Optional<ArtistNameStatusView> existing = artistNameMatcher.findExistingMatch(owner, name);
-        if (existing.isPresent()) {
-            ArtistNameStatusView match = existing.get();
-            if (ArtistActivationService.isActive(match.getStatus())) {
-                return false;
-            }
-            activationService.changeStatus(match.getId(), owner, ArtistStatus.SEED);
+        int inserted = artistRepository.insertIfAbsent(owner, name, ArtistNameNormalizer.normalize(name),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.SEED.name(), null, null, Instant.now());
+        if (inserted > 0) {
+            Artist artist = artistRepository.findByOwnerAndName(owner, name)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "artist row missing immediately after this call's own insertIfAbsent for owner="
+                                    + owner + " name=\"" + name + "\""));
+            activationService.onSeedCreated(artist);
             return true;
         }
 
-        int inserted = artistRepository.insertIfAbsent(owner, name, ArtistNameNormalizer.normalize(name),
-                ArtistSource.SEED_LIST.name(), ArtistStatus.SEED.name(), null, null, Instant.now());
-        if (inserted == 0) {
-            // Race loser (issue #133): between this call's matcher pre-check above and this
-            // call's own insertIfAbsent, a concurrent call for this exact (owner, name) already
-            // committed its row -- insertIfAbsent's ON CONFLICT made this call's insert a silent
-            // no-op instead of throwing. That other call already has (or will have) its own
-            // resolved Artist and calls onSeedCreated for it; doing so again here would
-            // double-publish ArtistActivated for the SAME artist and double-enqueue its scan/expand
-            // jobs for no reason (the enqueue side is itself idempotent, but there is no reason to
-            // fire the event twice for one artist). So this call is done: it did not create
-            // anything, and reports that honestly.
+        // The insert was absorbed, so the database has already established that a row for this
+        // owner and normalized name exists -- under this spelling or another. Resolve which.
+        ArtistNameStatusView existing = existingMatch(owner, name);
+        if (ArtistActivationService.isActive(existing.getStatus())) {
             return false;
         }
-
-        Artist artist = artistRepository.findByOwnerAndName(owner, name)
-                .orElseThrow(() -> new IllegalStateException(
-                        "artist row missing immediately after this call's own insertIfAbsent for owner="
-                                + owner + " name=\"" + name + "\""));
-        activationService.onSeedCreated(artist);
+        activationService.changeStatus(existing.getId(), owner, ArtistStatus.SEED);
         return true;
+    }
+
+    /**
+     * The row {@code insertIfAbsent} just conflicted against. Not an {@code Optional}: the insert
+     * having been absorbed by {@code ON CONFLICT (owner, normalized_name)} is proof the row exists,
+     * and this call reads it in the same transaction. Empty here would mean the constraint and the
+     * matcher disagree about what "the same name" is -- unresolvable at runtime and worth failing
+     * on loudly rather than silently reporting "nothing was added".
+     */
+    private ArtistNameStatusView existingMatch(String owner, String name) {
+        Optional<ArtistNameStatusView> match = artistNameMatcher.findExistingMatch(owner, name);
+        return match.orElseThrow(() -> new IllegalStateException(
+                "insertIfAbsent reported a conflict but no artist matches it, for owner=" + owner
+                        + " name=\"" + name + "\" normalizedName=\"" + ArtistNameNormalizer.normalize(name) + "\""));
     }
 }

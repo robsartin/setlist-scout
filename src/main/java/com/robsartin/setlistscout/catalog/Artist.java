@@ -4,7 +4,14 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
-@Table(name = "artist", uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "name"}))
+// Both constraints are real and both are deliberate -- see ArtistRepository#insertIfAbsent for
+// why (owner, normalized_name) is the stronger one and the ON CONFLICT target, and why the
+// narrower (owner, name) is kept anyway. ddl-auto=validate does not check unique constraints, so
+// these are documentation of the schema V1/V21 actually create, not their source of truth.
+@Table(name = "artist", uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"owner", "name"}),
+        @UniqueConstraint(columnNames = {"owner", "normalized_name"})
+})
 public class Artist {
 
     @Id
