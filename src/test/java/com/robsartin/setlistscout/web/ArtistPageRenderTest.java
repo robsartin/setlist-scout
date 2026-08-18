@@ -336,6 +336,47 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @DisplayName("issue #174: an htmx page change (Next/Previous) announces the new position via "
+            + "the shared #sr-status region with the load-bearing hx-swap-oob=\"innerHTML\" swap "
+            + "style (CLAUDE.md: the default hx-swap-oob=\"true\" would strip role/aria-live and "
+            + "silently kill every announcement after the first); a plain page load carries no such "
+            + "OOB duplicate of the layout's one real #sr-status node")
+    void htmxPageChangeAnnouncesViaSrStatusOutOfBandButPlainLoadDoesNot() throws Exception {
+        String owner = "render-pagination-announce@example.com";
+        saveSequence(owner, "Band", 25);
+        String cursor = ArtistNameNormalizer.normalize("Band 20");
+
+        String htmxBody = mockMvc.perform(get("/artists").param("after", cursor)
+                        .header("HX-Request", "true")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(htmxBody).containsPattern(
+                "id=\"sr-status\"[^>]*hx-swap-oob=\"innerHTML\"|hx-swap-oob=\"innerHTML\"[^>]*id=\"sr-status\"");
+        assertThat(htmxBody).contains("Showing 5 artists, Band 21 to Band 25.");
+
+        String plainBody = mockMvc.perform(get("/artists").param("after", cursor)
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(plainBody).as("no OOB duplicate of the layout's one real #sr-status node")
+                .doesNotContain("hx-swap-oob=\"innerHTML\"");
+        assertThat(countOccurrences(plainBody, "id=\"sr-status\"")).as("exactly one #sr-status node").isEqualTo(1);
+    }
+
+    private static int countOccurrences(String body, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = body.indexOf(needle, index)) != -1) {
+            count++;
+            index += needle.length();
+        }
+        return count;
+    }
+
+    @Test
     @DisplayName("issue #174: after adding an artist, the response lands on the FIRST page -- the "
             + "newly-added artist (sorted first here) appears, and the row it pushed onto page 2 "
             + "does not. This is the after-add landing decision the issue asks to be tested.")
