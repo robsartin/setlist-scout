@@ -96,6 +96,9 @@ form.inline { display:inline; }
 .table-scroll { overflow-x:auto; }
 .group-tribute h2 { color:var(--tribute-ink); }
 .notice { color:var(--good); font-weight:600; margin-top:1rem; }
+/* Issue #174: keyset pagination controls under the active-artists table. */
+#active-position { margin:.9rem 0 0; }
+.pagination { display:flex; align-items:center; gap:.6rem; margin-top:.5rem; }
 
 /* Candidates page: global bar + grouped artist cards */
 .globalbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }

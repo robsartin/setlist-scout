@@ -56,6 +56,19 @@
            one, by pulling focus away from the input the user is about to type the next artist
            into. Don't re-add it -- see issue #175. */-->
     <div th:fragment="activeSection" id="active-section">
+        <!--/* Issue #174: out-of-band update for the layout's permanent #sr-status region -- same
+               convention candidates.html uses (CLAUDE.md: hx-swap-oob="innerHTML" is load-bearing;
+               the default hx-swap-oob="true" replaces the node and strips role/aria-live, killing
+               every announcement after the first). Nesting it inside this fragment is fine: htmx
+               extracts every [hx-swap-oob] element from the response before the primary swap, so it
+               never actually lands inside #active-section. Gated on announceActivePage, which
+               ArtistController sets true only for a genuine htmx fragment response (Next/Previous,
+               or any of the three mutating actions) and false for a full page load or a
+               history-restore re-fetch -- the layout already renders the one real #sr-status node
+               on those, and a second copy under the same id would be a duplicate-id bug. */-->
+        <p id="sr-status" hx-swap-oob="innerHTML" class="visually-hidden" th:if="${announceActivePage}">
+            <span th:text="${activePage.positionSummary()}">Showing 20 artists, Alpha Band to Zulu Band.</span>
+        </p>
         <div class="table-scroll">
             <table>
                 <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th><th>Actions</th></tr></thead>
@@ -94,6 +107,32 @@
                 </tbody>
             </table>
         </div>
+        <!--/* Issue #174: keyset pagination controls. Real th:href links (work with the non-JS
+               fallback -- a full navigation to GET /artists?after=... or ?before=... renders the
+               same page server-side) enhanced with th:hx-get (Thymeleaf only resolves expressions
+               inside th:* attributes -- CLAUDE.md), targeting this same #active-section fragment.
+               hx-push-url="true" so the cursor is bookmark/back-button friendly, same as
+               candidates.html's `via` sidebar links -- ArtistController#list's
+               HX-History-Restore-Request handling exists for exactly that case.
+
+               No autofocus here, and none wanted: per the issue, stable ids across the swap (below)
+               let htmx's own id-based focus restore keep focus on whichever control triggered the
+               request, without the ActionOutcome-style machinery the Candidates page needs -- see
+               CLAUDE.md's htmx-focus gotcha for the id-restore-then-autofocus order this relies on.
+               Landing on a page where that same id isn't rendered (e.g. Next from the second-to-last
+               page) is the one gap that leaves: focus falls back to <body>, same as any other
+               destination this fragment doesn't name -- accepted deliberately, see issue #174. */-->
+        <p class="note" id="active-position" th:text="${activePage.positionSummary()}">Showing 20 artists, Alpha Band to Zulu Band.</p>
+        <nav class="pagination" aria-label="Active list pages" th:if="${activePage.hasPrevious or activePage.hasNext}">
+            <a th:if="${activePage.hasPrevious}" id="active-prev" class="btn btn-sm"
+               th:href="@{/artists(before=${activePage.previousCursor})}"
+               th:hx-get="@{/artists(before=${activePage.previousCursor})}"
+               hx-target="#active-section" hx-swap="outerHTML" hx-push-url="true">Previous page</a>
+            <a th:if="${activePage.hasNext}" id="active-next" class="btn btn-sm"
+               th:href="@{/artists(after=${activePage.nextCursor})}"
+               th:hx-get="@{/artists(after=${activePage.nextCursor})}"
+               hx-target="#active-section" hx-swap="outerHTML" hx-push-url="true">Next page</a>
+        </nav>
     </div>
 </div>
 </body>
