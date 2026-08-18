@@ -218,4 +218,29 @@ class ArtistImportUploadTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("1 name could not be imported.");
         assertThat(body).contains("Broken Name");
     }
+
+    @Test
+    @DisplayName("issue #175: the upload form and its \"Importing: N remaining.\" notice both "
+            + "render ABOVE the active list -- a status message stranded away from the form it "
+            + "describes would be worse than not moving either")
+    void uploadFormAndProgressNoticeRenderAboveActiveListTogether() throws Exception {
+        String owner = "upload-forms-above-list@example.com";
+        upload(owner, "Wilco\n");
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        int progressIndex = body.indexOf("Importing: 1 remaining.");
+        int uploadFormIndex = body.indexOf("action=\"/artists/upload\"");
+        int activeSectionIndex = body.indexOf("id=\"active-section\"");
+
+        assertThat(progressIndex).as("progress notice must render").isPositive();
+        assertThat(uploadFormIndex).as("upload form must render").isPositive();
+        assertThat(activeSectionIndex).as("active list must render").isPositive();
+        assertThat(progressIndex).as("import progress notice renders above the active list")
+                .isLessThan(activeSectionIndex);
+        assertThat(uploadFormIndex).as("upload form renders above the active list")
+                .isLessThan(activeSectionIndex);
+    }
 }

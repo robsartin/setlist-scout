@@ -9,8 +9,52 @@
         <button type="submit" name="level" value="DEBUG">DEBUG</button>
     </form>
 
+    <!--/* Issue #175: the add-artist form and the upload controls used to sit BELOW the active
+           list, which can run to 1,500+ rows -- making the single most frequent action on this
+           page (adding an artist) the hardest one to reach. Moved above the list instead.
+           Moving a form above its own swap target is fine, and follows shows.html's settings/
+           "Scan now" forms, which already sit above #shows-region the same way. */-->
+    <form hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
+          hx-on::after-request="this.reset()"
+          th:action="@{/artists/seed}" method="post">
+        <label for="artist-name">Add a band to the seed list</label>
+        <input type="text" id="artist-name" name="name" placeholder="Add a band to the seed list"/>
+        <button type="submit">Add</button>
+    </form>
+
+    <!--/* uploadMessage and the import-progress display both describe the upload form directly
+           below, so they travel with it (issue #175) rather than being stranded elsewhere on the
+           page. */-->
+    <p th:if="${uploadMessage}" th:text="${uploadMessage}" role="status" class="upload-message"></p>
+    <!--/* #177: plain server-rendered import-progress text -- no JavaScript, no polling. Refreshes
+           whenever populateActive next builds the model (a full page load, or any htmx action that
+           swaps activeSection), same as everything else on this page. role="status" on the pending
+           notice only, matching how uploadMessage above is announced; the failed-names list is
+           visible text, not a live region -- it's a static list, not a one-line event to announce. */-->
+    <p th:if="${importPendingCount > 0}"
+       th:text="'Importing: ' + ${importPendingCount} + ' remaining.'"
+       role="status" class="upload-message"></p>
+    <div th:if="${not #lists.isEmpty(importFailed)}" class="upload-message">
+        <p th:text="${#lists.size(importFailed)} + ' name' + (${#lists.size(importFailed)} == 1 ? '' : 's') + ' could not be imported.'">0 names could not be imported.</p>
+        <ul>
+            <li th:each="f : ${importFailed}" th:text="${f.name}">Name</li>
+        </ul>
+    </div>
+    <form th:action="@{/artists/upload}" method="post" enctype="multipart/form-data">
+        <label for="artist-file">Or bulk-add from a text file (one band per line):</label>
+        <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>
+        <button type="submit">Upload</button>
+    </form>
+
     <h1>Active list (seed + approved)</h1>
-    <!--/* activeSection is a swap target so a manual add can refresh it without a reload. */-->
+    <!--/* activeSection is a swap target so a manual add can refresh it without a reload.
+           Deliberately NO focus anchor here (no tabindex/autofocus), unlike shows.html's
+           showsRegion or shared.html's shared-content: the add-artist form (issue #175) lives
+           OUTSIDE this swap target, so an outerHTML swap here never touches the input or button
+           the user was just using -- nothing is removed, so there's nothing to restore. Adding
+           an autofocus anchor here would not fix a focus loss (there isn't one); it would CAUSE
+           one, by pulling focus away from the input the user is about to type the next artist
+           into. Don't re-add it -- see issue #175. */-->
     <div th:fragment="activeSection" id="active-section">
         <div class="table-scroll">
             <table>
@@ -51,34 +95,6 @@
             </table>
         </div>
     </div>
-
-    <form hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
-          hx-on::after-request="this.reset()"
-          th:action="@{/artists/seed}" method="post">
-        <input type="text" name="name" placeholder="Add a band to the seed list"/>
-        <button type="submit">Add</button>
-    </form>
-
-    <p th:if="${uploadMessage}" th:text="${uploadMessage}" role="status" class="upload-message"></p>
-    <!--/* #177: plain server-rendered import-progress text -- no JavaScript, no polling. Refreshes
-           whenever populateActive next builds the model (a full page load, or any htmx action that
-           swaps activeSection), same as everything else on this page. role="status" on the pending
-           notice only, matching how uploadMessage above is announced; the failed-names list is
-           visible text, not a live region -- it's a static list, not a one-line event to announce. */-->
-    <p th:if="${importPendingCount > 0}"
-       th:text="'Importing: ' + ${importPendingCount} + ' remaining.'"
-       role="status" class="upload-message"></p>
-    <div th:if="${not #lists.isEmpty(importFailed)}" class="upload-message">
-        <p th:text="${#lists.size(importFailed)} + ' name' + (${#lists.size(importFailed)} == 1 ? '' : 's') + ' could not be imported.'">0 names could not be imported.</p>
-        <ul>
-            <li th:each="f : ${importFailed}" th:text="${f.name}">Name</li>
-        </ul>
-    </div>
-    <form th:action="@{/artists/upload}" method="post" enctype="multipart/form-data">
-        <label for="artist-file">Or bulk-add from a text file (one band per line):</label>
-        <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>
-        <button type="submit">Upload</button>
-    </form>
 </div>
 </body>
 </html>
