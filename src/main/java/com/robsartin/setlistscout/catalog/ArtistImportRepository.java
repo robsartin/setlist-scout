@@ -58,4 +58,24 @@ public interface ArtistImportRepository extends JpaRepository<ArtistImport, Long
     List<ArtistImport> claimDue(@Param("now") Instant now,
                                  @Param("leaseCutoff") Instant leaseCutoff,
                                  @Param("batch") int batch);
+
+    /**
+     * Every FAILED import row across every owner, alphabetical by owner then name (#201) -- the
+     * admin queues page's failed-work section. Mirrors {@code shared.JobRepository
+     * #findByStatusOrderByNextDueAtAsc}'s "load only the small FAILED set" shape, not the whole
+     * table.
+     */
+    List<ArtistImport> findByStatusOrderByOwnerAscNameAsc(ArtistImportStatus status);
+
+    /**
+     * Aggregate pending/done/failed counts per owner (#201): {@code COUNT(*) ... GROUP BY}, never
+     * {@code findAll().size()} -- the same #176-shaped mistake {@code shared.JobRepository
+     * #countGroupedByStatus}'s Javadoc guards against, applied to {@code artist_import}.
+     */
+    @Query("""
+            SELECT a.owner AS owner, a.status AS status, COUNT(a) AS count
+              FROM ArtistImport a
+             GROUP BY a.owner, a.status
+            """)
+    List<ImportOwnerStatusCount> countGroupedByOwnerAndStatus();
 }

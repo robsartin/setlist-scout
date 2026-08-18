@@ -135,4 +135,64 @@ class ArtistImportRepositoryTest extends AbstractPostgresIntegrationTest {
         assertThat(failed).extracting(ArtistImport::getName).containsExactly("Bad Name");
         assertThat(failed.get(0).getLastError()).isEqualTo("boom");
     }
+
+    // #201: the admin queues page's aggregate queries -- COUNT(*) ... GROUP BY, never
+    // findAll().size(), proven against real Postgres.
+
+    @Test
+    @Transactional
+    @DisplayName("countGroupedByOwnerAndStatus aggregates pending/done/failed per owner")
+    void countGroupedByOwnerAndStatusAggregatesPerOwner() {
+        queue(OWNER, "Wilco", Instant.now());
+        queue(OWNER, "Spoon", Instant.now());
+        ArtistImport done = repository.findByOwnerAndStatusOrderByNameAsc(OWNER, ArtistImportStatus.PENDING).get(0);
+        done.setStatus(ArtistImportStatus.DONE);
+        repository.save(done);
+        queue(OTHER, "Bad Name", Instant.now());
+        ArtistImport failed = repository.findByOwnerAndStatusOrderByNameAsc(OTHER, ArtistImportStatus.PENDING).get(0);
+        failed.setStatus(ArtistImportStatus.FAILED);
+        failed.setLastError("boom");
+        repository.save(failed);
+
+        List<ImportOwnerStatusCount> counts = repository.countGroupedByOwnerAndStatus();
+
+        assertThat(counts)
+                .filteredOn(c -> c.getOwner().equals(OWNER) && c.getStatus() == ArtistImportStatus.PENDING)
+                .extracting(ImportOwnerStatusCount::getCount).containsExactly(1L);
+        assertThat(counts)
+                .filteredOn(c -> c.getOwner().equals(OWNER) && c.getStatus() == ArtistImportStatus.DONE)
+                .extracting(ImportOwnerStatusCount::getCount).containsExactly(1L);
+        assertThat(counts)
+                .filteredOn(c -> c.getOwner().equals(OTHER) && c.getStatus() == ArtistImportStatus.FAILED)
+                .extracting(ImportOwnerStatusCount::getCount).containsExactly(1L);
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("findByStatusOrderByOwnerAscNameAsc returns FAILED rows across every owner, with their error")
+    void findByStatusOrderByOwnerAscNameAscReturnsFailedRowsAcrossOwners() {
+        queue(OTHER, "Zeta Band", Instant.now());
+        ArtistImport zeta = repository.findByOwnerAndStatusOrderByNameAsc(OTHER, ArtistImportStatus.PENDING).get(0);
+        zeta.setStatus(ArtistImportStatus.FAILED);
+        zeta.setLastError("network error");
+        repository.save(zeta);
+
+        queue(OWNER, "Alpha Band", Instant.now());
+        ArtistImport alpha = repository.findByOwnerAndStatusOrderByNameAsc(OWNER, ArtistImportStatus.PENDING).get(0);
+        alpha.setStatus(ArtistImportStatus.FAILED);
+        alpha.setLastError("musicbrainz timeout");
+        repository.save(alpha);
+
+        queue(OWNER, "Still Pending", Instant.now());
+
+        List<ArtistImport> failed = repository.findByStatusOrderByOwnerAscNameAsc(ArtistImportStatus.FAILED);
+
+        // OTHER ("david@...") sorts before OWNER ("rob@...") -- owner is the primary sort key, so
+        // this is NOT alphabetical-by-name order (Zeta before Alpha looks backwards until you
+        // remember it's grouped by owner first).
+        assertThat(failed).extracting(ArtistImport::getOwner).containsExactly(OTHER, OWNER);
+        assertThat(failed).extracting(ArtistImport::getName).containsExactly("Zeta Band", "Alpha Band");
+        assertThat(failed).extracting(ArtistImport::getLastError)
+                .containsExactly("network error", "musicbrainz timeout");
+    }
 }
