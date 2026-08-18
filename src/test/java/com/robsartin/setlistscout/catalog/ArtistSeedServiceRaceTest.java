@@ -121,30 +121,55 @@ class ArtistSeedServiceRaceTest extends AbstractPostgresIntegrationTest {
         // Both threads block here until the other arrives, so they enter addSeedIfNew -- and
         // therefore their two transactions and their two INSERTs -- as close to simultaneously as
         // two threads can be made to.
+        //
+        // Every bound below reuses AWAIT_TIMEOUT (AbstractPostgresIntegrationTest) instead of a
+        // bespoke short number. This is a positive wait -- the barrier releases, and both futures
+        // complete, the moment the race resolves -- so a generous bound costs nothing on the happy
+        // path and only ever bounds the FAILURE path (see that constant's Javadoc). #199: this
+        // test's own hardcoded 10s bounds flaked on a loaded shared CI runner (11m44s build vs
+        // ~8min locally) -- exactly the contention AWAIT_TIMEOUT was raised 30s -> 90s to survive
+        // elsewhere, and that reasoning was never carried over here.
         CyclicBarrier startTogether = new CyclicBarrier(2);
         Callable<Boolean> addSeed = () -> {
-            startTogether.await(10, TimeUnit.SECONDS);
+            startTogether.await(AWAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             return artistSeedService.addSeedIfNew(OWNER, NAME);
         };
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
+        boolean[] outcomes = new boolean[2];
         try {
             Future<Boolean> call1 = executor.submit(addSeed);
             Future<Boolean> call2 = executor.submit(addSeed);
 
+            // Split from the "exactly one true" check below on purpose (#199). This block's only
+            // job is proving neither call THROWS -- in particular that no
+            // DataIntegrityViolationException escapes addSeedIfNew's ON CONFLICT guard, the
+            // #133/#179 regression this test exists to catch. Previously the "exactly one true"
+            // assertion lived inside this same assertThatCode, so an ordinary assertion failure,
+            // a plain TimeoutException, and that real bug all surfaced at this one line under this
+            // one label, indistinguishable from each other. Now the only way to land here is a
+            // genuine throw from the barrier rendezvous or the racing call itself, so whatever
+            // AssertJ reports below IS the actual exception -- its type and message name the
+            // failure directly, nothing to dig through.
             assertThatCode(() -> {
-                boolean r1 = call1.get(10, TimeUnit.SECONDS);
-                boolean r2 = call2.get(10, TimeUnit.SECONDS);
-                // Exactly one call caused the fresh SEED artist; the other lost the DB race and
-                // must report false (ArtistSeedService#addSeedIfNew's javadoc on the race-loser
-                // case). Which physical thread wins is nondeterministic -- exactly one must, though.
-                assertThat(List.of(r1, r2)).as("exactly one of the two racing calls reports true")
-                        .containsExactlyInAnyOrder(true, false);
-            }).as("neither racing call lets a DataIntegrityViolationException propagate")
+                outcomes[0] = call1.get(AWAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                outcomes[1] = call2.get(AWAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            }).as("neither racing call lets an exception escape addSeedIfNew (in particular, no "
+                    + "DataIntegrityViolationException from the ON CONFLICT race)")
                     .doesNotThrowAnyException();
         } finally {
             executor.shutdownNow();
         }
+
+        // A separate claim from the block above (#199): this is about the two return VALUES, not
+        // about whether either call threw, so it only runs once both calls are already known to
+        // have completed without throwing. Exactly one call caused the fresh SEED artist; the
+        // other lost the DB race and must report false (ArtistSeedService#addSeedIfNew's javadoc
+        // on the race-loser case). Which physical thread wins is nondeterministic -- exactly one
+        // must, though.
+        assertThat(List.of(outcomes[0], outcomes[1]))
+                .as("exactly one of the two racing calls reports true")
+                .containsExactlyInAnyOrder(true, false);
 
         List<Artist> rows = artistRepository.findByOwnerAndStatus(OWNER, ArtistStatus.SEED);
         assertThat(rows).as("exactly one Artist row exists after the race, not zero and not two").hasSize(1);
