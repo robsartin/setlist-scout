@@ -3,6 +3,7 @@ package com.robsartin.setlistscout.settings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -33,13 +34,17 @@ public class GeocodingService {
     private final RestClient restClient;
     private final Map<String, Optional<GeoResult>> cityCache = new ConcurrentHashMap<>();
 
+    /**
+     * The base URL is injectable (#184) rather than hardcoded so the test suite can point it at an
+     * unroutable address (see {@code src/test/resources/application.properties}) instead of making
+     * live calls to Zippopotam.us on every {@code @SpringBootTest} that touches an owner's settings
+     * -- {@link #fetch} degrades to empty on any error, so an unreachable URL is safe by
+     * construction. Also doubles as the test seam a plain unit test (e.g. {@code
+     * GeocodingServiceTest}) uses to point at a local {@code MockWebServer} directly, bypassing
+     * Spring entirely.
+     */
     @Autowired
-    public GeocodingService() {
-        this("https://api.zippopotam.us");
-    }
-
-    /** Test seam: points at a local stub server instead of the real Zippopotam.us API. */
-    GeocodingService(String baseUrl) {
+    public GeocodingService(@Value("${setlistscout.geocoding.base-url:https://api.zippopotam.us}") String baseUrl) {
         this.restClient = RestClient.builder().baseUrl(baseUrl).build();
     }
 

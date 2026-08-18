@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -25,13 +26,14 @@ public class TourPageLlmService {
     private final RestClient restClient;
     private final String apiKey;
 
+    /**
+     * Base URL is injectable (#184) rather than hardcoded, so tests can point it at an unroutable
+     * address instead of making live calls to Anthropic. Also the test seam a plain unit test uses
+     * to point at a local stub server directly, bypassing Spring entirely.
+     */
     @Autowired
-    public TourPageLlmService(AppProperties props) {
-        this(props, "https://api.anthropic.com/v1");
-    }
-
-    /** Test seam: points at a local stub server instead of the real Anthropic API. */
-    TourPageLlmService(AppProperties props, String baseUrl) {
+    public TourPageLlmService(AppProperties props,
+            @Value("${setlistscout.tour-page-llm.base-url:https://api.anthropic.com/v1}") String baseUrl) {
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader("anthropic-version", "2023-06-01")
