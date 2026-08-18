@@ -19,6 +19,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -31,6 +32,9 @@ import static org.mockito.Mockito.when;
 class ArtistControllerTest {
 
     private static final String OWNER = "rob@example.com";
+    private static final int PAGE_SIZE = 20;
+    private static final int PAGE_SIZE_PLUS_ONE = PAGE_SIZE + 1;
+    private static final List<ArtistStatus> ACTIVE_STATUSES = List.of(ArtistStatus.SEED, ArtistStatus.APPROVED);
 
     private ArtistRepository artistRepository;
     private CurrentUser currentUser;
@@ -55,8 +59,14 @@ class ArtistControllerTest {
         // (issue #124) rather than a stubbed existsBy call.
         ArtistSeedService seedService = new ArtistSeedService(artistRepository, mock(ArtistActivationService.class),
                 new ArtistNameMatcher(artistRepository));
+        // Real ArtistPager over the mocked repo (issue #174) -- same idiom as seedService above --
+        // so pagination assembly (the n+1 fetch, hasNext/hasPrevious, cursor selection) is exercised
+        // for real by stubbing ArtistRepository's keyset methods, without hitting Postgres. Page
+        // size 20 matches application.yml's default, so PAGE_SIZE_PLUS_ONE below lines up with it.
+        ArtistPager artistPager = new ArtistPager(artistRepository, PAGE_SIZE);
         controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService,
-                activationService, mock(ArtistConnectionsService.class), importService, mock(ArtistImportRepository.class));
+                activationService, mock(ArtistConnectionsService.class), importService, mock(ArtistImportRepository.class),
+                artistPager);
     }
 
     private static Artist pending(String name, ArtistSource source) {
@@ -95,16 +105,106 @@ class ArtistControllerTest {
     @DisplayName("list() populates only the active (seed + approved) list -- pending review moved to Candidates")
     void listPopulatesActiveOnly() {
         Artist active = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
-        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE))
                 .thenReturn(List.of(active));
 
         Model model = new ConcurrentModel();
-        controller.list(model);
+        controller.list(null, null, null, null, model);
 
         assertThat((List<Artist>) model.getAttribute("active"))
                 .extracting(Artist::getName).containsExactly("Wilco");
         assertThat(model.getAttribute("pendingTributes")).isNull();
         assertThat(model.getAttribute("pendingOthers")).isNull();
+    }
+
+    @Test
+    @DisplayName("issue #174: a plain page load (no HX-Request) renders the full \"artists\" view and "
+            + "does not announce -- the layout already carries the one real #sr-status node")
+    void listPlainLoadRendersFullPageAndDoesNotAnnounce() {
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
+
+        Model model = new ConcurrentModel();
+        String view = controller.list(null, null, null, null, model);
+
+        assertThat(view).isEqualTo("artists");
+        assertThat(model.getAttribute("announceActivePage")).isEqualTo(false);
+    }
+
+    @Test
+    @DisplayName("issue #174: an htmx GET (Next/Previous click) renders the bare activeSection "
+            + "fragment and announces")
+    void listHtmxGetRendersFragmentAndAnnounces() {
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
+
+        Model model = new ConcurrentModel();
+        String view = controller.list(null, null, "true", null, model);
+
+        assertThat(view).isEqualTo("artists :: activeSection");
+        assertThat(model.getAttribute("announceActivePage")).isEqualTo(true);
+    }
+
+    @Test
+    @DisplayName("issue #174: a history-restore re-fetch (HX-Request + HX-History-Restore-Request "
+            + "both set -- a Back navigation missing htmx's local history cache) renders the FULL "
+            + "page, not the fragment, and does not announce, matching ReviewController#candidates")
+    void listHistoryRestoreRendersFullPageAndDoesNotAnnounce() {
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
+
+        Model model = new ConcurrentModel();
+        String view = controller.list(null, null, "true", "true", model);
+
+        assertThat(view).isEqualTo("artists");
+        assertThat(model.getAttribute("announceActivePage")).isEqualTo(false);
+    }
+
+    @Test
+    @DisplayName("issue #174: list() forwards the after cursor to ArtistRepository#findActiveAfter, "
+            + "and the resulting page reports hasPrevious=true -- reaching here at all means a page "
+            + "before this one exists")
+    void listForwardsAfterCursorToNextPageQuery() {
+        Artist beta = new Artist("Beta", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        when(artistRepository.findActiveAfter(OWNER, ACTIVE_STATUSES, "alpha", PAGE_SIZE_PLUS_ONE))
+                .thenReturn(List.of(beta));
+
+        Model model = new ConcurrentModel();
+        controller.list("alpha", null, "true", null, model);
+
+        ActivePage page = (ActivePage) model.getAttribute("activePage");
+        assertThat(page.artists()).extracting(Artist::getName).containsExactly("Beta");
+        assertThat(page.hasPrevious()).isTrue();
+    }
+
+    @Test
+    @DisplayName("issue #174: list() forwards the before cursor to ArtistRepository#findActiveBefore "
+            + "and reverses the DESCENDING result back to ascending order for display")
+    void listForwardsBeforeCursorToPreviousPageQueryAndReverses() {
+        Artist bravo = new Artist("Bravo", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        Artist alpha = new Artist("Alpha", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        when(artistRepository.findActiveBefore(OWNER, ACTIVE_STATUSES, "charlie", PAGE_SIZE_PLUS_ONE))
+                .thenReturn(List.of(bravo, alpha)); // DESCENDING, as findActiveBefore returns it
+
+        Model model = new ConcurrentModel();
+        controller.list(null, "charlie", "true", null, model);
+
+        ActivePage page = (ActivePage) model.getAttribute("activePage");
+        assertThat(page.artists()).extracting(Artist::getName).containsExactly("Alpha", "Bravo");
+    }
+
+    @Test
+    @DisplayName("issue #174: a page shorter than the page size has no next, and no cursor was "
+            + "requested so it has no previous either -- first-and-last-page control rendering")
+    void listSinglePageHasNeitherNextNorPrevious() {
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE))
+                .thenReturn(List.of(new Artist("Only One", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null)));
+
+        Model model = new ConcurrentModel();
+        controller.list(null, null, null, null, model);
+
+        ActivePage page = (ActivePage) model.getAttribute("activePage");
+        assertThat(page.hasNext()).isFalse();
+        assertThat(page.hasPrevious()).isFalse();
+        assertThat(page.nextCursor()).isNull();
+        assertThat(page.previousCursor()).isNull();
     }
 
     @Test
@@ -171,6 +271,7 @@ class ArtistControllerTest {
     @DisplayName("addSeed returns the active-section fragment for an htmx request")
     void addSeedReturnsFragmentForHtmx() {
         stubNewSeedInsert("Wilco");
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
         Model model = new ConcurrentModel();
         String view = controller.addSeed("Wilco", "true", model);
 
@@ -180,6 +281,21 @@ class ArtistControllerTest {
                 eq(ArtistNameNormalizer.normalize("Wilco")), eq(ArtistSource.SEED_LIST.name()),
                 eq(ArtistStatus.SEED.name()), isNull(), isNull(), any(Instant.class));
         assertThat(model.getAttribute("active")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("issue #174: after adding, the response lands on the FIRST page -- proved at the "
+            + "unit level by asserting findActiveFirstPage was called and findActiveAfter/"
+            + "findActiveBefore never were, not just that SOME page rendered")
+    void addSeedLandsOnFirstPageNotACursorQuery() {
+        stubNewSeedInsert("Wilco");
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
+
+        controller.addSeed("Wilco", "true", new ConcurrentModel());
+
+        verify(artistRepository).findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE);
+        verify(artistRepository, never()).findActiveAfter(any(), any(), any(), anyInt());
+        verify(artistRepository, never()).findActiveBefore(any(), any(), any(), anyInt());
     }
 
     @Test
@@ -218,8 +334,7 @@ class ArtistControllerTest {
     @DisplayName("removeFromSeed returns the active-section fragment for an htmx request")
     void removeFromSeedReturnsFragmentForHtmx() {
         Model model = new ConcurrentModel();
-        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
-                .thenReturn(List.of());
+        when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
 
         String view = controller.removeFromSeed(7L, "true", model);
 
