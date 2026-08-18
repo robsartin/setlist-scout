@@ -21,6 +21,7 @@ the output.
 export JAVA_HOME=~/.sdkman/candidates/java/21.0.12-tem
 ./gradlew --no-daemon clean build --console=plain   # ~11 min
 python3 scripts/check_adrs.py                       # ADR numbering contiguous + linked in the index
+python3 scripts/check_migrations.py                 # Flyway versions unique + contiguous, both trees
 ```
 
 - **Gradle cannot *launch* on JDK 25** — launch it on **21**; the toolchain forks **25** for
