@@ -29,6 +29,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * JPA lifecycle callback would silently miss -- and the column itself must carry the NOT NULL and
  * owner-first index constraints the migration's performance claim depends on.
  *
+ * <p>Since #179 the column is also UNIQUE per owner, so this class pins that too: the constraint
+ * is what {@code ArtistRepository#insertIfAbsent}'s {@code ON CONFLICT (owner, normalized_name)}
+ * infers its arbiter index from, and without it every artist insert in the app fails outright.
+ *
  * <p>This does NOT cover the migration's one-time backfill of rows that already existed before
  * V19 ran -- {@code @SpringBootTest} auto-migrates a fresh container straight to latest, so there
  * is no way to seed a row before V19 from within this class. See
@@ -113,8 +117,9 @@ class NormalizedNameColumnTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("the column is NOT NULL and indexed owner-first, by the exact index #176 depends on")
-    void columnIsNotNullAndIndexed() {
+    @DisplayName("the column is NOT NULL and UNIQUE owner-first, by the exact constraint #176's "
+            + "index became in #179")
+    void columnIsNotNullAndUniqueOwnerFirst() {
         Integer nullable = jdbc.queryForObject(
                 "SELECT CASE WHEN is_nullable = 'YES' THEN 1 ELSE 0 END FROM information_schema.columns "
                         + "WHERE table_name = 'artist' AND column_name = 'normalized_name'",
@@ -126,13 +131,42 @@ class NormalizedNameColumnTest extends AbstractPostgresIntegrationTest {
         // mention this column" check while missing the whole point of #176: "Owner first: every
         // lookup is owner-scoped" (see V19's javadoc). containsIgnoringCase tolerates Postgres's
         // own casing of the definition; the parenthesized column list is what actually pins the order.
+        // UNIQUE is pinned too (#179): without it, ArtistRepository#insertIfAbsent's
+        // ON CONFLICT (owner, normalized_name) has no arbiter index to infer and every insert fails.
         List<String> indexDefs = jdbc.queryForList(
                 "SELECT indexdef FROM pg_indexes WHERE tablename = 'artist' "
-                        + "AND indexname = 'idx_artist_owner_normalized_name'",
+                        + "AND indexname = 'artist_owner_normalized_name_key'",
                 String.class);
-        assertThat(indexDefs).as("idx_artist_owner_normalized_name must exist").hasSize(1);
+        assertThat(indexDefs).as("artist_owner_normalized_name_key must exist").hasSize(1);
         assertThat(indexDefs.get(0))
-                .as("owner first, then normalized_name -- every lookup is owner-scoped")
+                .as("UNIQUE, owner first, then normalized_name -- every lookup is owner-scoped")
+                .containsIgnoringCase("unique")
                 .containsIgnoringCase("(owner, normalized_name)");
+
+        // V19's non-unique index covered the same columns in the same order, so leaving it behind
+        // would mean two indexes doing one job -- extra write cost on every artist insert for no
+        // read benefit. V21 drops it; this proves the drop actually happened.
+        assertThat(jdbc.queryForList(
+                "SELECT indexdef FROM pg_indexes WHERE tablename = 'artist' "
+                        + "AND indexname = 'idx_artist_owner_normalized_name'", String.class))
+                .as("V19's superseded non-unique index must be gone").isEmpty();
+    }
+
+    @Test
+    @DisplayName("issue #179: the constraint is live against the real app wiring -- a spelling "
+            + "variant of an existing artist cannot become a second row")
+    @Transactional
+    void spellingVariantCannotBecomeASecondRow() {
+        String original = "Paul Quinichette-John Coltrane Quintet";
+        String variant = "Paul Quinichette - John Coltrane Quintet";
+        artistRepository.insertIfAbsent(OWNER, original, ArtistNameNormalizer.normalize(original),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.SEED.name(), null, null, Instant.now());
+
+        int inserted = artistRepository.insertIfAbsent(OWNER, variant, ArtistNameNormalizer.normalize(variant),
+                ArtistSource.SEED_LIST.name(), ArtistStatus.SEED.name(), null, null, Instant.now());
+
+        assertThat(inserted).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM artist WHERE owner = ?", Integer.class, OWNER))
+                .isEqualTo(1);
     }
 }

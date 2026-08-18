@@ -19,15 +19,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.event.EventListener;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -35,8 +34,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
 
 /**
  * Real-path Testcontainers proof of issue #133: {@link ArtistSeedService#addSeedIfNew}'s
@@ -46,14 +43,22 @@ import static org.mockito.Mockito.doAnswer;
  * on flush. This actually happened in production: {@code ERROR: duplicate key value violates
  * unique constraint "ukr03a96lqhsb7djq2tn4rq60vn" Detail: Key (name)=(Nebraska) already exists.}
  * <p>
- * A {@link MockitoSpyBean} on the real {@link ArtistNameMatcher} forces the exact interleave the
- * bug needs -- both threads' pre-check must return "no match" before either thread's insert runs --
- * the same technique {@code PollerFlowTest}'s {@code concurrentRedueDuringPollWinsOverStaleReschedule}
- * (#95 T1) uses to force a real two-connection race deterministically, rather than hoping two
- * threads happen to interleave badly. Everything downstream of the matcher -- the repository, the
- * transaction, the real {@link ArtistActivationService}, and the real {@code ArtistActivated}
- * publish -- is production wiring against a real Postgres, not a mock (a Modulith {@code Scenario}
- * test would be a false green here: see CLAUDE.md's invariant on that).
+ * That pre-check is gone as of #179: {@code addSeedIfNew} inserts first and lets
+ * {@code UNIQUE (owner, normalized_name)} decide. Which is why this test no longer forces an
+ * interleave with a spy, and no longer needs to. The old version had to: without forcing, the
+ * second thread's pre-check would simply find the first thread's committed row and take the
+ * "already exists" branch, never reaching the race at all. Now there is no branch before the
+ * write -- both calls reach {@code insertIfAbsent} unconditionally, whatever the timing -- so the
+ * same production path runs whether or not the two INSERTs physically overlap inside Postgres: one
+ * returns 1, the other is absorbed by {@code ON CONFLICT} and returns 0. A {@link CyclicBarrier}
+ * releases both threads together so they DO contend for real on two connections, but every
+ * assertion below holds either way. That is precisely what moving the guard into the database
+ * buys, and a test that passes regardless of interleaving is the honest way to state it.
+ * <p>
+ * Everything here is production wiring against a real Postgres, not a mock -- the real repository,
+ * the real transaction, the real {@link ArtistActivationService}, and the real
+ * {@code ArtistActivated} publish (a Modulith {@code Scenario} test would be a false green here:
+ * see CLAUDE.md's invariant on that).
  */
 @SpringBootTest
 @Testcontainers
@@ -90,9 +95,6 @@ class ArtistSeedServiceRaceTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private List<RelationSource> relationSources;
 
-    @MockitoSpyBean
-    private ArtistNameMatcher artistNameMatcher;
-
     @Autowired
     private CapturingListener artistActivatedListener;
 
@@ -100,39 +102,35 @@ class ArtistSeedServiceRaceTest extends AbstractPostgresIntegrationTest {
     void setUp() {
         // Shared container/context across this class's test methods (see
         // AbstractPostgresIntegrationTest) -- clear first so a prior method's committed rows don't
-        // collide on (owner, name).
+        // collide on (owner, normalized_name).
         artistRepository.deleteAll();
         artistActivatedListener.received.clear();
     }
 
     @Test
-    @DisplayName("issue #133: two concurrent addSeedIfNew calls for the same brand-new (owner, name) "
-            + "race at the DB's (owner, name) unique constraint -- neither call lets an exception "
-            + "propagate, exactly one Artist row is created, and ArtistActivated fires exactly once "
-            + "(so jobs are enqueued exactly once, not zero or twice)")
+    @DisplayName("issue #133/#179: two concurrent addSeedIfNew calls for the same brand-new name race "
+            + "at the DB's (owner, normalized_name) unique constraint -- neither call lets an "
+            + "exception propagate, exactly one Artist row is created, and ArtistActivated fires "
+            + "exactly once (so jobs are enqueued exactly once, not zero or twice)")
     void concurrentAddSeedIfNewForTheSameNewNameRacesSafely() throws Exception {
-        // Forces the real interleave the production bug needs: both threads' matcher pre-check
-        // must return "no match" BEFORE either thread's own insert runs, so both fall into the
-        // "not found" branch and race for real at the (owner, name) unique constraint -- not a
-        // mocked repository, a real Postgres constraint, across two real concurrent transactions.
-        CountDownLatch bothCheckedNoMatch = new CountDownLatch(2);
-        CountDownLatch releaseInserts = new CountDownLatch(1);
-        doAnswer(invocation -> {
-            Optional<?> result = (Optional<?>) invocation.callRealMethod();
-            bothCheckedNoMatch.countDown();
-            releaseInserts.await(10, TimeUnit.SECONDS);
-            return result;
-        }).when(artistNameMatcher).findExistingMatch(eq(OWNER), eq(NAME));
+        // Forces the real interleave: both threads must be inside insertIfAbsent, in their own
+        // open transactions, BEFORE either one's INSERT actually runs -- so they race for real at
+        // the (owner, normalized_name) unique constraint. Not a mocked repository (the real query
+        // runs, via callRealMethod) and not a mocked constraint: a real Postgres constraint across
+        // two real concurrent transactions.
+        // Both threads block here until the other arrives, so they enter addSeedIfNew -- and
+        // therefore their two transactions and their two INSERTs -- as close to simultaneously as
+        // two threads can be made to.
+        CyclicBarrier startTogether = new CyclicBarrier(2);
+        Callable<Boolean> addSeed = () -> {
+            startTogether.await(10, TimeUnit.SECONDS);
+            return artistSeedService.addSeedIfNew(OWNER, NAME);
+        };
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<Boolean> call1 = executor.submit(() -> artistSeedService.addSeedIfNew(OWNER, NAME));
-            Future<Boolean> call2 = executor.submit(() -> artistSeedService.addSeedIfNew(OWNER, NAME));
-
-            assertThat(bothCheckedNoMatch.await(10, TimeUnit.SECONDS))
-                    .as("both calls read 'no existing match' and are blocked right before their own insert")
-                    .isTrue();
-            releaseInserts.countDown();
+            Future<Boolean> call1 = executor.submit(addSeed);
+            Future<Boolean> call2 = executor.submit(addSeed);
 
             assertThatCode(() -> {
                 boolean r1 = call1.get(10, TimeUnit.SECONDS);

@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -27,9 +28,12 @@ public class MusicBrainzService {
     private final RestClient restClient;
     private final long rateLimitMillis;
 
+    /** Base URL is injectable (#184) so tests can point it at an unroutable address instead of
+     * making live calls to MusicBrainz. */
     @Autowired
-    public MusicBrainzService(AppProperties props) {
-        this(props, "https://musicbrainz.org/ws/2", 1100);
+    public MusicBrainzService(AppProperties props,
+            @Value("${setlistscout.musicbrainz.base-url:https://musicbrainz.org/ws/2}") String baseUrl) {
+        this(props, baseUrl, 1100);
     }
 
     /** Test seam: local stub server and a near-zero rate-limit delay. */

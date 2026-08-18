@@ -117,7 +117,24 @@ class DropOrphanedArtistNameConstraintMigrationTest {
                     "INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
                             + "VALUES ('rob@example.com', 'Traveling Wilburys', '" + wilburysNormalizedName
                             + "', 'SEED_LIST', 'SEED', now())"))
-                    .as("same owner + same name is still rejected (composite constraint enforced)")
+                    .as("same owner + same name is still rejected")
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("duplicate key value violates unique constraint");
+
+            // Deliberately NOT asserting WHICH constraint rejected that one: since #179 the row
+            // above violates both artist_owner_name_key and the stronger
+            // artist_owner_normalized_name_key, and which one Postgres reports first is an index
+            // ordering detail, not a promise. This next row is the case only the composite
+            // (owner, name) constraint can catch -- same owner and name, but a normalized_name that
+            // is NOT the normalizer's output for it, so the stronger constraint sees no conflict.
+            // It is exactly why #179 kept the narrower constraint rather than dropping it as
+            // redundant (see ArtistRepository#insertIfAbsent), and it pins that this migration left
+            // it enforcing something real.
+            assertThatThrownBy(() -> s.execute(
+                    "INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
+                            + "VALUES ('rob@example.com', 'Traveling Wilburys', 'not-the-normalized-form'"
+                            + ", 'SEED_LIST', 'SEED', now())"))
+                    .as("composite (owner, name) constraint still enforced on its own")
                     .isInstanceOf(SQLException.class)
                     .hasMessageContaining("artist_owner_name_key");
         }

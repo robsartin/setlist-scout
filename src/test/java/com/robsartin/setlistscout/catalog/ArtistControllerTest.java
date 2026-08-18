@@ -63,7 +63,7 @@ class ArtistControllerTest {
         return new Artist(name, source, ArtistStatus.PENDING_REVIEW, "Tom Petty and the Heartbreakers", "note");
     }
 
-    // ArtistNameMatcher resolves a match via ArtistRepository#findFirstByOwnerAndNormalizedName
+    // ArtistNameMatcher resolves a match via ArtistRepository#findByOwnerAndNormalizedName
     // (issue #124/#118/#176), so tests that need an existing name to match stub that instead of the
     // retired existsByOwnerAndNameIgnoreCase pre-check. See ArtistNameMatcherTest's identical
     // helper/ordering note.

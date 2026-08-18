@@ -12,7 +12,7 @@ import java.util.Optional;
  * nothing to stop a later "Charlie Parker's Re-boppers" from insertIfAbsent-ing its way in as a
  * brand-new PENDING_REVIEW row.
  * <p>
- * Performs one indexed {@link ArtistRepository#findFirstByOwnerAndNormalizedName} lookup rather
+ * Performs one indexed {@link ArtistRepository#findByOwnerAndNormalizedName} lookup rather
  * than scanning the owner's full artist list and re-normalizing every row in Java. The normalized
  * form is now stored on {@link Artist#getNormalizedName()} at write time instead of recomputed
  * here, so there is still exactly one implementation of "what counts as the same name"
@@ -27,11 +27,16 @@ import java.util.Optional;
  * still doesn't apply: an indexed equality lookup only ever compares one stored, Java-normalized
  * value against another Java-normalized value, so no SQL ever reimplements the folding rules.
  * <p>
- * This is a best-effort pre-check, same as the {@code existsByOwnerAndNameIgnoreCase} pre-check
- * it supersedes for the expansion path: a genuine race between two concurrent discoveries of
- * different-case/-punctuation spellings of the same new name could still both pass this check
- * before either commits. The DB's exact-match {@code (owner, name)} constraint remains the
- * backstop for a same-spelling race; a near-duplicate-spelling race is not DB-enforced.
+ * Still a best-effort pre-check, and since #179 it is ONLY that: a genuine race between two
+ * concurrent discoveries of different-case/-punctuation spellings of the same new name can still
+ * have both calls read "no match" before either commits. What changed is the backstop --
+ * {@code V21__unique_artist_normalized_name} added {@code UNIQUE (owner, normalized_name)}, so the
+ * near-duplicate-spelling race that used to slip past the DB entirely is now caught by it too,
+ * absorbed as a no-op by {@link ArtistRepository#insertIfAbsent}'s
+ * {@code ON CONFLICT (owner, normalized_name) DO NOTHING}. Callers that need to know whether a
+ * duplicate exists must therefore treat this method's answer as advisory and let the insert decide
+ * (see {@code ArtistSeedService#addSeedIfNew}); callers that only need an id for an already-known
+ * artist, like {@code RelationDiscoveredListener}, can still use it directly.
  * <p>
  * Signature deliberately unchanged from the pre-#176 scan-based version: both production callers
  * ({@code ArtistSeedService}, {@code RelationDiscoveredListener}) and their tests depend only on
@@ -51,7 +56,7 @@ public class ArtistNameMatcher {
      * {@code candidateName}, if one exists.
      */
     public Optional<ArtistNameStatusView> findExistingMatch(String owner, String candidateName) {
-        return artistRepository.findFirstByOwnerAndNormalizedName(
+        return artistRepository.findByOwnerAndNormalizedName(
                 owner, ArtistNameNormalizer.normalize(candidateName));
     }
 }

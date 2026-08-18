@@ -4,10 +4,13 @@ import java.util.Locale;
 
 /**
  * Single source of truth for "do these two spellings refer to the same artist" -- the match form
- * used by {@link ArtistNameMatcher} to catch case/punctuation variants that the DB's {@code
- * (owner, name)} unique constraint (case- and punctuation-SENSITIVE, see {@code
- * ArtistRepositoryTest#uniqueConstraintIsCaseSensitive}) lets through as distinct rows (issue
- * #118: a rejected artist reappearing under a slightly different spelling).
+ * used by {@link ArtistNameMatcher}, and, since #179, the form the database itself is unique on:
+ * every artist row stores this method's output in {@code normalized_name} under
+ * {@code UNIQUE (owner, normalized_name)}. That is what makes case/punctuation variants a
+ * constraint violation rather than a second row, which the DB's original {@code (owner, name)}
+ * uniqueness (case- and punctuation-SENSITIVE, see
+ * {@code ArtistRepositoryTest#caseVariantIsAbsorbedByTheNormalizedNameConstraint}) let through
+ * (issue #118: a rejected artist reappearing under a slightly different spelling).
  * <p>
  * Deliberately conservative: only folds case, collapses whitespace (including whitespace touching
  * a hyphen/dash, issue #157 -- {@code "X - Y"} and {@code "X-Y"} match), and maps the specific
@@ -19,11 +22,12 @@ import java.util.Locale;
  * inflating a true count of 3 pairs to a false 13 -- this normalizer must preserve non-ASCII text
  * so two different non-Latin names never collide.
  * <p>
- * Public (not package-private): also reused by the {@code db.migration.V13__merge_duplicate_variant_artists}
- * Flyway Java migration (issue #123), which merges the ~57 duplicate-variant artist groups already
- * live in prod. That migration deliberately calls this same method rather than re-implementing the
- * folding rules in SQL, so there is exactly one definition of "same name" for both the live guard
- * and the historical cleanup.
+ * Public (not package-private): also reused by the Flyway Java migrations -- {@code
+ * db.migration.V13__merge_duplicate_variant_artists} (issue #123), which merged the duplicate-variant
+ * artist groups already live in prod, and {@code db.migration.V19__add_artist_normalized_name}
+ * (#176), which backfills the stored column. Those deliberately call this same method rather than
+ * re-implementing the folding rules in SQL, so there is exactly one definition of "same name" for
+ * the live guard, the stored column, and the historical cleanup alike.
  */
 public final class ArtistNameNormalizer {
 
