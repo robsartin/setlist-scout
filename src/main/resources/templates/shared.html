@@ -43,6 +43,23 @@
             <span th:text="${otherParticipant}">someone</span> both follow.
         </p>
 
+        <!--/* #187: a user can be in more than one pairing, and every one of them must stay
+               reachable -- the bug this fixes was rendering an arbitrary scans.get(0) and leaving
+               any other pairing with no path to it at all. A labelled nav of plain links (no htmx):
+               each is a real, bookmarkable /shared/{id} URL that works with JS disabled, and
+               GET /shared/{id} resolves through SharedScanService#requireVisible exactly like the
+               settings/scan-now actions already do, so switching pairings can never be trusted off
+               an id that wasn't already proven visible to this caller. */-->
+        <nav th:if="${not #lists.isEmpty(otherScans)}" class="settings group-sidebar"
+             aria-label="Other shared scans">
+            <span>Also shared:</span>
+            <ul>
+                <li th:each="other : ${otherScans}">
+                    <a th:href="@{/shared/{id}(id=${other.id})}" th:text="${other.label}">Other pairing</a>
+                </li>
+            </ul>
+        </nav>
+
         <div class="settings">
             <form th:action="@{'/shared/' + ${scan.id} + '/settings'}" method="post">
                 Near ZIP
