@@ -27,9 +27,6 @@ public class ArtistController {
     /** htmx sets this header on its requests; when present we return just the changed fragment. */
     private static final String HX_REQUEST = "HX-Request";
 
-    /** Cap lines read from an uploaded artist file -- a guardrail against a runaway upload. */
-    private static final int MAX_UPLOAD_LINES = 2000;
-
     /** Hop count for the graph-validation page's reachable-set query (issue #111). */
     private static final int GRAPH_MAX_DEPTH = 2;
 
@@ -39,16 +36,21 @@ public class ArtistController {
     private final ArtistSeedService seedService;
     private final ArtistActivationService activationService;
     private final ArtistConnectionsService connectionsService;
+    private final ArtistImportService importService;
+    private final ArtistImportRepository artistImportRepository;
 
     public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
                            CurrentUser currentUser, ArtistSeedService seedService,
-                           ArtistActivationService activationService, ArtistConnectionsService connectionsService) {
+                           ArtistActivationService activationService, ArtistConnectionsService connectionsService,
+                           ArtistImportService importService, ArtistImportRepository artistImportRepository) {
         this.artistRepository = artistRepository;
         this.artistEdgeRepository = artistEdgeRepository;
         this.currentUser = currentUser;
         this.seedService = seedService;
         this.activationService = activationService;
         this.connectionsService = connectionsService;
+        this.importService = importService;
+        this.artistImportRepository = artistImportRepository;
     }
 
     @GetMapping
@@ -74,30 +76,31 @@ public class ArtistController {
     }
 
     /**
-     * Bulk-add seeds from an uploaded plain-text file (one artist per line). Blank lines, {@code #}
-     * comments, and names that already exist are skipped ({@link ArtistSeedService}); reads at most
-     * {@link #MAX_UPLOAD_LINES} lines. Owner-scoped. Redirects with a summary flash message.
+     * Bulk-QUEUE names from an uploaded plain-text file (one artist per line) via {@link
+     * ArtistImportService#queue} -- issue #177. The request returns as soon as the names are
+     * queued; {@code ArtistImportPoller} seeds them in the background, off this request thread.
+     * That fixes a real 1,138-name upload that 502'd: the old version of this handler called
+     * {@code ArtistSeedService#addSeedIfNew} synchronously per line inside the HTTP request, which
+     * took long enough that Render's free-tier idle spin-down killed the request part-way through,
+     * having imported only 79 names. Owner-scoped. Redirects with a flash message reporting how
+     * many names were QUEUED, not how many were added -- most of the work hasn't happened yet when
+     * this method returns.
      */
     @PostMapping("/upload")
     public String upload(@RequestParam("file") MultipartFile file, RedirectAttributes redirect) {
         String owner = currentUser.email();
-        int added = 0;
+        int queued = 0;
         if (file != null && !file.isEmpty()) {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                int seen = 0;
-                while ((line = reader.readLine()) != null && seen < MAX_UPLOAD_LINES) {
-                    seen++;
-                    if (seedService.addSeedIfNew(owner, line)) added++;
-                }
+                queued = importService.queue(owner, reader);
             } catch (IOException e) {
                 redirect.addFlashAttribute("uploadMessage", "Could not read that file.");
                 return "redirect:/artists";
             }
         }
         redirect.addFlashAttribute("uploadMessage",
-                "Added " + added + " new artist" + (added == 1 ? "" : "s") + " from the file.");
+                "Queued " + queued + " name" + (queued == 1 ? "" : "s") + ". They'll be added in the background.");
         return "redirect:/artists";
     }
 
@@ -207,5 +210,12 @@ public class ArtistController {
     private void populateActive(Model model, String owner) {
         model.addAttribute("active", artistRepository.findByOwnerAndStatusIn(
                 owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)));
+        // #177 upload-progress display: plain server-rendered counts, refreshed whenever this
+        // model gets built (a full page load, or any htmx action that swaps activeSection) --
+        // no polling, no JavaScript, matching the rest of this app.
+        model.addAttribute("importPendingCount",
+                artistImportRepository.countByOwnerAndStatus(owner, ArtistImportStatus.PENDING));
+        model.addAttribute("importFailed",
+                artistImportRepository.findByOwnerAndStatusOrderByNameAsc(owner, ArtistImportStatus.FAILED));
     }
 }

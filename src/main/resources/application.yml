@@ -65,6 +65,13 @@ setlistscout:
   job-backfill-enabled: ${JOB_BACKFILL_ENABLED:true} # startup reconciler: enqueue jobs for active artists that predate the job tables; idempotent (insertIfAbsent)
   backfill-spread: ${BACKFILL_SPREAD:2h} # jitter window for backfilled next_due_at, so enabling the poller doesn't fire every job on the first tick
 
+  # #177: bulk-import queue. Faster tick than the scan poller because this work is database-only
+  # -- no external API to pace against -- so a large import drains in minutes rather than hours.
+  import-poller-enabled: ${IMPORT_POLLER_ENABLED:true}
+  import-tick-ms: ${IMPORT_TICK_MS:5000}
+  import-batch-size: ${IMPORT_BATCH_SIZE:25}
+  import-max-attempts: ${IMPORT_MAX_ATTEMPTS:3}
+
   auth:
     allowed-emails: ${ALLOWED_EMAILS:rob.sartin@gmail.com}
     seed-owner: ${SEED_OWNER:rob.sartin@gmail.com}

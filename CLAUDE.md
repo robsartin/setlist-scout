@@ -77,7 +77,10 @@ mapping, or the app won't boot.
 
 ## Gotchas that have wasted real time
 
-- **Flyway versions string-sort wrong**: `ls | sort` puts V10 before V9. Use `sort -V`.
+- **Flyway versions string-sort wrong**: `ls | sort` puts V10 before V9. Use `sort -V`. And
+  **migrations live in two directories** — SQL in `src/main/resources/db/migration/`, Java in
+  `src/main/java/db/migration/` (V13, V19). Listing only the first reports a stale "latest" and
+  invites a version collision; check both.
 - **Migrations against live data**: profile prod read-only first (the Render MCP can query), state
   the expected row counts as acceptance criteria, and test every skip/safety case. A DELETE
   migration must prove nothing loses its last referencing row.
