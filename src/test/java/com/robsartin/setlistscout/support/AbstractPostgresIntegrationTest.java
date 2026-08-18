@@ -50,8 +50,12 @@ public abstract class AbstractPostgresIntegrationTest {
      * listener to fire and commit. That is slow, not broken -- so wait longer rather than fail a
      * green build. Raised again 30s -> 90s after `maxParallelForks=4` (#129) multiplied that same
      * contention across concurrently running test JVMs, reflaking the same test on CI.
+     * <p>
+     * {@code protected}, not {@code private}: subclasses with their own positive-wait bounds
+     * outside {@link #awaitUntil} (e.g. a race test's barrier rendezvous and {@code Future#get},
+     * #199) should reuse this constant and its reasoning rather than inventing a shorter one.
      */
-    private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(90);
+    protected static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(90);
 
     /**
      * Deadline for proving a NEGATIVE -- "this must never be enqueued", "this must never appear".
