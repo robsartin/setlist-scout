@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -22,13 +23,14 @@ public class LastFmService {
 
     private final RestClient restClient;
 
+    /**
+     * Base URL is injectable (#184) rather than hardcoded, so tests can point it at an unroutable
+     * address instead of making live calls to Last.fm. Also the test seam a plain unit test uses to
+     * point at a local stub server directly, bypassing Spring entirely.
+     */
     @Autowired
-    public LastFmService(AppProperties props) {
-        this(props, "https://ws.audioscrobbler.com/2.0");
-    }
-
-    /** Test seam: points at a local stub server instead of the real Last.fm API. */
-    LastFmService(AppProperties props, String baseUrl) {
+    public LastFmService(AppProperties props,
+            @Value("${setlistscout.lastfm.base-url:https://ws.audioscrobbler.com/2.0}") String baseUrl) {
         this.restClient = RestClient.builder().baseUrl(baseUrl).build();
         this.apiKey = props.apis().lastFmApiKey();
     }

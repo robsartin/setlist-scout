@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -24,13 +25,14 @@ public class DiscogsService {
 
     private final RestClient restClient;
 
+    /**
+     * Base URL is injectable (#184) rather than hardcoded, so tests can point it at an unroutable
+     * address instead of making live calls to Discogs. Also the test seam a plain unit test uses to
+     * point at a local stub server directly, bypassing Spring entirely.
+     */
     @Autowired
-    public DiscogsService(AppProperties props) {
-        this(props, "https://api.discogs.com");
-    }
-
-    /** Test seam: points at a local stub server instead of the real Discogs API. */
-    DiscogsService(AppProperties props, String baseUrl) {
+    public DiscogsService(AppProperties props,
+            @Value("${setlistscout.discogs.base-url:https://api.discogs.com}") String baseUrl) {
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.USER_AGENT, "SetlistScout/0.1 (+personal use)")
