@@ -28,6 +28,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -42,11 +43,15 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     private static final String ADMIN = "rob@example.com";
     private static final String OTHER = "david@example.com";
     private static final String STRANGER = "stranger@example.com";
+    /** #187: a second pairing's other participant -- kept distinct from OTHER/STRANGER so the
+     * "two pairings" tests read clearly and STRANGER can stay a true outsider to both. */
+    private static final String SECOND_PARTNER = "spencer@example.com";
 
     @DynamicPropertySource
     static void authProperties(DynamicPropertyRegistry registry) {
         registry.add("setlistscout.auth.admin-email", () -> ADMIN);
-        registry.add("setlistscout.auth.allowed-emails", () -> ADMIN + "," + OTHER + "," + STRANGER);
+        registry.add("setlistscout.auth.allowed-emails",
+                () -> ADMIN + "," + OTHER + "," + STRANGER + "," + SECOND_PARTNER);
     }
 
     @Autowired private MockMvc mockMvc;
@@ -75,6 +80,13 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
 
     private String pageAs(String email) throws Exception {
         return mockMvc.perform(get("/shared").with(oidcLogin().idToken(t -> t.claim("email", email))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    /** Same as {@link #pageAs}, but for a specific pairing (#187's {@code GET /shared/{id}}). */
+    private String pageForId(Long id, String email) throws Exception {
+        return mockMvc.perform(get("/shared/" + id).with(oidcLogin().idToken(t -> t.claim("email", email))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
     }
@@ -210,5 +222,85 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         String body = pageAs(ADMIN);
         assertThat(body).contains("don't follow any of the same artists");
         assertThat(body).doesNotContain("but none of them are");
+    }
+
+    // ---- #187: two pairings. Every test above uses exactly one, so none of them can catch
+    // scans.get(0) picking an arbitrary, unstable pairing and leaving the other unreachable.
+
+    @Test
+    @DisplayName("both pairings are reachable, each at its own URL")
+    void bothPairingsAreReachable() throws Exception {
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        assertThat(pageForId(scan.getId(), ADMIN)).contains("Rob &amp; David");
+        assertThat(pageForId(second.getId(), ADMIN)).contains("Rob &amp; Spencer");
+    }
+
+    @Test
+    @DisplayName("the default page load is stable across repeated requests")
+    void defaultPageIsStableAcrossRepeatedLoads() throws Exception {
+        service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        assertThat(pageAs(ADMIN)).contains("Rob &amp; David");
+        assertThat(pageAs(ADMIN)).contains("Rob &amp; David");
+        assertThat(pageAs(ADMIN)).contains("Rob &amp; David");
+    }
+
+    @Test
+    @DisplayName("a non-participant gets 404 for a specific pairing they are not in")
+    void nonParticipantGets404ForASpecificPairing() throws Exception {
+        service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        mockMvc.perform(get("/shared/" + scan.getId())
+                        .with(oidcLogin().idToken(t -> t.claim("email", STRANGER))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("the picker to the other pairing is a labelled control")
+    void pickerToOtherPairingIsALabelledControl() throws Exception {
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        String body = pageAs(ADMIN);
+
+        assertThat(body).contains("aria-label=\"Other shared scans\"");
+        assertThat(body).contains("/shared/" + second.getId());
+        assertThat(body).contains("Rob &amp; Spencer");
+    }
+
+    @Test
+    @DisplayName("two pairings keep their own distinct empty state -- one does not bleed into the other")
+    void emptyStatesStayDistinctAcrossPairings() throws Exception {
+        // `scan` (Rob & David) stays in its default "no location set" state -- geocode is
+        // stubbed empty in setUp().
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+        when(geocodingService.geocode(any()))
+                .thenReturn(Optional.of(new GeocodingService.GeoResult(41.8781, -87.6298, "Chicago", "IL")));
+        mockMvc.perform(post("/shared/" + second.getId() + "/settings")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("postalCode", "60601").param("radiusMiles", "25").param("monthsAhead", "3"))
+                .andExpect(status().is3xxRedirection());
+
+        String firstBody = pageForId(scan.getId(), ADMIN);
+        assertThat(firstBody).contains("Set a location above");
+        assertThat(firstBody).doesNotContain("don't follow any of the same artists");
+
+        String secondBody = pageForId(second.getId(), ADMIN);
+        assertThat(secondBody).contains("don't follow any of the same artists");
+        assertThat(secondBody).doesNotContain("Set a location above");
+    }
+
+    @Test
+    @DisplayName("acting on a non-default pairing keeps that same pairing in view after the redirect")
+    void actingOnANonDefaultPairingStaysThere() throws Exception {
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        mockMvc.perform(post("/shared/" + second.getId() + "/settings")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("postalCode", "60601").param("radiusMiles", "25").param("monthsAhead", "3"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/shared/" + second.getId()));
     }
 }

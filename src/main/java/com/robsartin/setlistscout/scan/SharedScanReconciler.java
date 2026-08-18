@@ -102,8 +102,9 @@ public class SharedScanReconciler {
      * so there is nothing to reconcile for one in any case. That happens to also mean {@link
      * #reconcile} creating artists under a shared key, which publishes {@code ArtistActivated} for
      * that key and arrives back here, cannot form a loop today: {@link SharedScanRepository
-     * #findByOwnerAIgnoreCaseOrOwnerBIgnoreCase} matches only the participant columns, so it comes
-     * back empty for a shared key regardless of this guard (confirmed empirically -- Task 4 fix
+     * #findByOwnerAIgnoreCaseOrOwnerBIgnoreCaseOrderByCreatedAtAscIdAsc} matches only the
+     * participant columns, so it comes back empty for a shared key regardless of this guard
+     * (confirmed empirically -- Task 4 fix
      * round, #163: removing this early return did not reproduce a loop, hang, or any test
      * failure). This guard is what would still hold if that incidental fact ever stopped being
      * true -- the lookup broadening, or some other publisher emitting {@code ArtistActivated} for
@@ -117,7 +118,7 @@ public class SharedScanReconciler {
         if (SharedScanOwner.isSharedScanKey(owner)) {
             return;
         }
-        for (SharedScan scan : sharedScanRepository.findByOwnerAIgnoreCaseOrOwnerBIgnoreCase(owner, owner)) {
+        for (SharedScan scan : sharedScanRepository.findByOwnerAIgnoreCaseOrOwnerBIgnoreCaseOrderByCreatedAtAscIdAsc(owner, owner)) {
             reconcile(scan);
         }
     }
