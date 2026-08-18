@@ -105,6 +105,15 @@ management:
         # prometheus is deliberately not added -- there's no scraper today, and metrics' plain
         # hand-inspectable JSON is enough (also avoids a new micrometer-registry-prometheus dep).
         include: health, metrics
+  # #195: without this, readinessState never becomes a health contributor at all (it defaults to
+  # false, full stop -- not "false unless Kubernetes", there is no platform auto-detection here),
+  # so /actuator/health's aggregate would only ever reflect db/diskSpace/ping and could never
+  # report anything but UP -- render.yaml's healthCheckPath would have nothing to actually gate
+  # deploys on. Explicit rather than relying on whatever undocumented behavior made Render's own
+  # probe observe 503 OUT_OF_SERVICE during the #195 incident.
+  health:
+    readinessstate:
+      enabled: true
 
 logging:
   structured:
