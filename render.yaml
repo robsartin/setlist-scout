@@ -23,7 +23,11 @@ services:
   - type: web
     name: setlist-scout
     runtime: docker
-    plan: free
+    # Starter, not free (#41): the free tier suspends after ~15 min idle, which cost a measured
+    # 92.5s cold start on every visit after a quiet spell, killed a 1,138-name bulk import
+    # part-way by suspending mid-run, and left the paced pollers only running while someone
+    # happened to be using the app. Measured after upgrading: 0.53s.
+    plan: starter
     region: oregon
     healthCheckPath: /actuator/health
     autoDeployTrigger: checksPass # matches the live service's "After CI Checks Pass" setting
@@ -79,7 +83,9 @@ services:
 
 databases:
   - name: setlist-scout-db
-    plan: free
+    # Paid tier, matching the live instance (Render API reports basic_256mb). Declared here so a
+    # Blueprint sync cannot silently downgrade a database that is being paid for.
+    plan: basic-256mb
     region: oregon
     # databaseName/user below are ONLY applied if Render ends up CREATING a brand-new
     # database (no existing resource named `setlist-scout-db` found). For the live,
