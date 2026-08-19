@@ -465,4 +465,263 @@ class TicketmasterServiceTest {
         assertThat(shows).hasSize(1);
         assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.MUSIC);
     }
+
+    // ---- #207: rescue attraction-less events whose title names the artist -----------------
+    //
+    // hasMatchingAttraction's exact match only fires when Ticketmaster actually linked an
+    // attraction; a null OR empty array used to drop the event unconditionally, even when the
+    // artist's name is right there in the event title (measured: 19 of 137 returned events
+    // across 60 random tracked artists, 13.9%, had empty attractions). The fallback below runs
+    // ONLY in that null/empty case -- a populated-but-non-matching array still returns false
+    // without ever trying the title fallback (see the "critical regression guard" test below) --
+    // and only keeps the event when the artist's name (>= 2 tokens) appears as a consecutive
+    // token run in the title AND the title carries no tribute/homage marker. See the Javadoc on
+    // TicketmasterService#hasMatchingAttraction for the full rationale, including why
+    // featuring/ft is deliberately NOT a marker.
+
+    @Test
+    @DisplayName("#207: should rescue an attraction-less event when the artist's name is a consecutive token run in the title")
+    void shouldRescueEventWithNoAttractionsWhenArtistNameIsAConsecutiveRunInTheTitle() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "A Very Merry Symphony ft. Austin Symphony Orchestra",
+                            "dates": {"start": {"dateTime": "2026-12-20T19:00:00Z"}},
+                            "_embedded": {"venues": [{"name": "H-E-B Center at Cedar Park", "city": {"name": "Cedar Park"}}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony Orchestra", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("A Very Merry Symphony ft. Austin Symphony Orchestra");
+    }
+
+    @Test
+    @DisplayName("#207: should rescue an event with an empty attractions array the same way as a missing one")
+    void shouldRescueEventWithEmptyAttractionsArrayTheSameAsAMissingOne() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "A Very Merry Symphony ft. Austin Symphony Orchestra",
+                            "dates": {"start": {"dateTime": "2026-12-20T19:00:00Z"}},
+                            "_embedded": {"attractions": []}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony Orchestra", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207: should rescue an attraction-less event when the artist's tokens match despite adjacent punctuation")
+    void shouldRescueEventWhenArtistTokensMatchDespiteAdjacentPunctuation() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tommy Emmanuel, CGP - Living In The Light Tour",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Tommy Emmanuel", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'tribute'")
+    void shouldDropAttractionlessEventWhoseTitleContainsTribute() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tribute to JIMI HENDRIX by THE HENDRIX EXPERIMENT",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Jimi Hendrix", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'celebration', proving 'featuring' alone is not a marker")
+    void shouldDropAttractionlessEventWhoseTitleContainsCelebration() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Jimi Hendrix Celebration featuring Jeff Moore",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Jimi Hendrix", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'the gospel of'")
+    void shouldDropAttractionlessEventWhoseTitleContainsGospelOf() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Revelations: The Gospel of Chris Cornell",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Chris Cornell", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event for a single-token artist name, even when it appears in the title")
+    void shouldDropAttractionlessEventForSingleTokenArtistName() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "New Year's Eve in Austin",
+                            "dates": {"start": {"dateTime": "2026-12-31T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'the music of'")
+    void shouldDropAttractionlessEventWhoseTitleContainsTheMusicOf() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "The Rob Dylan Band - Performing The Music of Bob Dylan",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Bob Dylan", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title has no consecutive run of the artist's tokens")
+    void shouldDropAttractionlessEventWhoseTitleHasNoTokenRunMatch() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Some Unrelated Show",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony Orchestra", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: a populated but non-matching attractions array is still dropped, even where the title fallback would not have applied anyway")
+    void shouldDropWhenAttractionsArrayIsPopulatedButNonMatching() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "UNDERTALE Symphony",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "UNDERTALE Symphony"}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should keep an event via exact match when the populated attractions array matches")
+    void shouldKeepWhenAttractionsArrayIsPopulatedAndMatches() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tommy Emmanuel Live",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Tommy Emmanuel"}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Tommy Emmanuel", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207: critical regression guard -- a populated but non-matching attractions array must not fall through to the title fallback")
+    void shouldNotFallBackToTitleWhenAttractionsArrayIsPopulatedButNonMatching() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tommy Emmanuel Live",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Some Other Act"}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Tommy Emmanuel", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
 }
