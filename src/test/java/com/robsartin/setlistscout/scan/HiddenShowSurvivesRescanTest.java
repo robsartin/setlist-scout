@@ -50,7 +50,7 @@ class HiddenShowSurvivesRescanTest extends AbstractPostgresIntegrationTest {
     void aHiddenShowIsSkippedNotRefreshedByARescanThatRediscoversIt() {
         LocalDateTime eventDateTime = LocalDateTime.now().plusDays(30).truncatedTo(ChronoUnit.SECONDS);
         Show original = new Show("Wilco", eventDateTime, "The Moody Center", "Austin",
-                BigDecimal.valueOf(45), "ticketmaster", "https://tickets.example/original");
+                BigDecimal.valueOf(45), "ticketmaster", "https://tickets.example/original", Show.Kind.MUSIC);
         original.setOwner(OWNER);
         Long id = showRepository.save(original).getId();
 
@@ -63,7 +63,7 @@ class HiddenShowSurvivesRescanTest extends AbstractPostgresIntegrationTest {
         // instance (as a fresh scrape would produce), even with different incidental details (price,
         // ticket URL) -- proving the skip is keyed on identity, not object/reference equality.
         Show rediscovered = new Show("Wilco", eventDateTime, "The Moody Center", "Austin",
-                BigDecimal.valueOf(50), "ticketmaster", "https://tickets.example/rediscovered");
+                BigDecimal.valueOf(50), "ticketmaster", "https://tickets.example/rediscovered", Show.Kind.MUSIC);
 
         int saved = scanUnitRunner.persistNew(OWNER, List.of(rediscovered));
 

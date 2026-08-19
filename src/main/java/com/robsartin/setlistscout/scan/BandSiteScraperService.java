@@ -80,7 +80,10 @@ public class BandSiteScraperService {
             for (TourPageLlmService.ExtractedShow es : tourPageLlm.extractShows(artistName, doc.text())) {
                 LocalDateTime dt = es.date().atStartOfDay();
                 if (!dt.isBefore(start) && !dt.isAfter(end)) {
-                    shows.add(new Show(artistName, dt, es.venue(), es.city(), null, source, pageUrl));
+                    // #202: the LLM extractor has no classification signal either -- MUSIC here
+                    // is the same "true by what this source is" label BandsintownService uses,
+                    // not an inferred one. See the class javadoc: "music-oriented".
+                    shows.add(new Show(artistName, dt, es.venue(), es.city(), null, source, pageUrl, Show.Kind.MUSIC));
                 }
             }
         }
@@ -139,7 +142,8 @@ public class BandSiteScraperService {
         String venue = (loc != null && loc.hasNonNull("name")) ? loc.get("name").asText() : "Unknown venue";
         String city = cityOf(loc);
         String url = event.hasNonNull("url") ? event.get("url").asText() : pageUrl;
-        return new Show(artistName, dt, venue, city, null, source, url);
+        // #202: same "music-oriented, no classification signal" reasoning as extractShows above.
+        return new Show(artistName, dt, venue, city, null, source, url, Show.Kind.MUSIC);
     }
 
     private String cityOf(JsonNode loc) {

@@ -77,7 +77,7 @@ class ScanUnitRunnerTest {
         when(musicBrainz.findOfficialHomepage("ZZ Top")).thenReturn(Optional.of("https://zztop.com"));
 
         Show show = new Show("ZZ Top", LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
-                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1");
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(show));
         when(showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
                 eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(false);
@@ -103,7 +103,7 @@ class ScanUnitRunnerTest {
         when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(zz));
 
         Show show = new Show("ZZ Top", LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
-                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1");
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(show));
         when(showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
                 eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(true);

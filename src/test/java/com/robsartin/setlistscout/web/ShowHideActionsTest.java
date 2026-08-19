@@ -47,7 +47,12 @@ class ShowHideActionsTest extends AbstractPostgresIntegrationTest {
 
     private static Long saveShow(ShowRepository repo, String owner, String artistName,
                                   LocalDateTime eventDateTime, String venueName) {
-        Show show = new Show(artistName, eventDateTime, venueName, "Austin", null, "ticketmaster", null);
+        return saveShow(repo, owner, artistName, eventDateTime, venueName, Show.Kind.MUSIC);
+    }
+
+    private static Long saveShow(ShowRepository repo, String owner, String artistName,
+                                  LocalDateTime eventDateTime, String venueName, Show.Kind kind) {
+        Show show = new Show(artistName, eventDateTime, venueName, "Austin", null, "ticketmaster", null, kind);
         show.setOwner(owner);
         return repo.save(show).getId();
     }
@@ -206,5 +211,39 @@ class ShowHideActionsTest extends AbstractPostgresIntegrationTest {
 
         assertThat(countAutofocusElements(body)).isEqualTo(1);
         assertThat(body).containsPattern("aria-label=\"Hide Wilco[^\"]*\"[^>]*autofocus");
+    }
+
+    // ---- #202: comedy shows are distinguishable from a gig at a glance --------------------
+
+    @Test
+    void aComedyShowGetsAComedyChipOnTheShowsPage() throws Exception {
+        String owner = "kind-comedy@example.com";
+        LocalDateTime when = LocalDateTime.now().plusDays(10).truncatedTo(ChronoUnit.SECONDS);
+        saveShow(showRepository, owner, "Aziz Ansari", when, "Moody Center", Show.Kind.COMEDY);
+
+        String body = mockMvc.perform(get("/")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Aziz Ansari");
+        assertThat(body).containsPattern("class=\"chip comedy\"[^>]*>Comedy");
+    }
+
+    @Test
+    void aMusicShowGetsNoComedyChipOnTheShowsPage() throws Exception {
+        String owner = "kind-music@example.com";
+        LocalDateTime when = LocalDateTime.now().plusDays(10).truncatedTo(ChronoUnit.SECONDS);
+        saveShow(showRepository, owner, "Wilco", when, "ACL Live", Show.Kind.MUSIC);
+
+        String body = mockMvc.perform(get("/")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Wilco");
+        assertThat(body)
+                .as("a music show -- the common case -- doesn't get a redundant label")
+                .doesNotContain("chip comedy");
     }
 }

@@ -176,7 +176,7 @@ class PollerFlowTest extends AbstractPostgresIntegrationTest {
 
         LocalDateTime when = LocalDateTime.now().plusDays(30).withNano(0);
         Show found = new Show("Scan Happy Artist", when, "Moody Center", "Austin",
-                new BigDecimal("42.00"), "ticketmaster", "https://tix.example/1");
+                new BigDecimal("42.00"), "ticketmaster", "https://tix.example/1", Show.Kind.MUSIC);
         when(ticketmasterShowSource.id()).thenReturn("ticketmaster");
         when(ticketmasterShowSource.search(any())).thenReturn(List.of(found));
 

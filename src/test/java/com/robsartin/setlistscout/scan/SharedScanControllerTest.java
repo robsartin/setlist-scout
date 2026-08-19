@@ -141,7 +141,7 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     @DisplayName("shows render in a semantic table with column headers")
     void showsRenderInASemanticTable() throws Exception {
         Show show = new Show("Tom Petty", LocalDateTime.now().plusDays(10), "Metro", "Chicago",
-                new BigDecimal("42.50"), "ticketmaster", "https://example.test/tix");
+                new BigDecimal("42.50"), "ticketmaster", "https://example.test/tix", Show.Kind.MUSIC);
         show.setOwner(scan.getOwnerKey());
         showRepository.save(show);
 

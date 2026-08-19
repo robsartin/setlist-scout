@@ -81,7 +81,12 @@ class AddShowHiddenAtMigrationTest {
             assertThat(rs.getString("venue_name")).isEqualTo("The Moody Center");
 
             // 6. A freshly inserted row that doesn't mention hidden_at also defaults to NULL.
-            long fresh = insertShow(s, "Radiohead", "ACL Live", discoveredAt);
+            // Post-latest-migration, not insertShow(): #202/V23 made show_event.kind NOT NULL
+            // after this test's own migration point (V17), so an insert running after "migrate to
+            // latest" must supply it -- insertShow's column list stays exactly what V17 expected,
+            // since its OTHER call (line ~53, pre-V17) still needs to omit a column that doesn't
+            // exist yet at that point in the migration timeline.
+            long fresh = insertShowWithKind(s, "Radiohead", "ACL Live", discoveredAt, "MUSIC");
             assertThat(hiddenAt(s, fresh)).as("fresh row's default is also NULL (not hidden)").isNull();
 
             // 7. The column can actually be set (round-trips a real timestamp) -- proves it's not
@@ -108,6 +113,28 @@ class AddShowHiddenAtMigrationTest {
             ps.setString(4, venueName);
             ps.setString(5, "ticketmaster");
             ps.setTimestamp(6, Timestamp.from(discoveredAt));
+            ps.executeUpdate();
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                keys.next();
+                return keys.getLong(1);
+            }
+        }
+    }
+
+    /** Like {@link #insertShow}, but also sets {@code kind} -- needed for an insert running after V23 made it NOT NULL. */
+    private static long insertShowWithKind(Statement s, String artistName, String venueName,
+                                            Instant discoveredAt, String kind) throws Exception {
+        try (PreparedStatement ps = s.getConnection().prepareStatement(
+                "INSERT INTO show_event (owner, artist_name, event_date_time, venue_name, source, discovered_at, kind) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, OWNER);
+            ps.setString(2, artistName);
+            ps.setTimestamp(3, Timestamp.valueOf("2026-09-01 20:00:00"));
+            ps.setString(4, venueName);
+            ps.setString(5, "ticketmaster");
+            ps.setTimestamp(6, Timestamp.from(discoveredAt));
+            ps.setString(7, kind);
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 keys.next();

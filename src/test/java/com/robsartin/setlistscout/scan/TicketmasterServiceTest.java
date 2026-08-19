@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 class TicketmasterServiceTest {
 
@@ -310,5 +311,154 @@ class TicketmasterServiceTest {
         assertThat(request.getPath()).contains("postalCode=78701");
         assertThat(request.getPath()).contains("radius=50");
         assertThat(request.getPath()).doesNotContain("geoPoint");
+    }
+
+    // ---- #202: comedy alongside music -----------------------------------------------------
+    //
+    // One broader query, not one call per classification: see the "one broader query, not one
+    // call per classification" comment in TicketmasterService#searchShows for the full reasoning
+    // (doubling ~6,400 scan jobs' worth of calls against a rate-limited free-tier key). This
+    // test proves that choice at the request level -- the old classificationName=music
+    // restriction that excluded comedy results is gone, and nothing has replaced it with a
+    // second restriction -- while the tests below prove labeling is read from each event's own
+    // response data, never assumed from the query.
+
+    @Test
+    @DisplayName("#202: should not restrict the search by classificationName, so comedy events aren't excluded at the query level")
+    void queryIsNotRestrictedByClassificationName() throws InterruptedException {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
+
+        service.searchShows("Aziz Ansari", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getPath()).doesNotContain("classificationName");
+    }
+
+    @Test
+    @DisplayName("#202: should label a Music-segment event as music")
+    void labelsMusicSegmentEventAsMusic() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Dawes"}]},
+                            "classifications": [{"primary": true,
+                              "segment": {"name": "Music"}, "genre": {"name": "Rock"}}]
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.MUSIC);
+    }
+
+    @Test
+    @DisplayName("#202: should label an Arts & Theatre/Comedy-genre event as comedy")
+    void labelsComedyGenreEventAsComedy() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Aziz Ansari"}]},
+                            "classifications": [{"primary": true,
+                              "segment": {"name": "Arts & Theatre"}, "genre": {"name": "Comedy"}}]
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Aziz Ansari", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.COMEDY);
+    }
+
+    @Test
+    @DisplayName("#202: label comes from each event's own classification, not the query -- a crossover artist can appear under either in the same response")
+    void labelsEachEventFromItsOwnClassificationIndependently() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {
+                              "venues": [{"name": "Moody Center", "city": {"name": "Austin"}}],
+                              "attractions": [{"name": "Bo Burnham"}]
+                            },
+                            "classifications": [{"primary": true,
+                              "segment": {"name": "Arts & Theatre"}, "genre": {"name": "Comedy"}}]
+                          },
+                          {
+                            "dates": {"start": {"dateTime": "2026-09-02T19:00:00Z"}},
+                            "_embedded": {
+                              "venues": [{"name": "ACL Live", "city": {"name": "Austin"}}],
+                              "attractions": [{"name": "Bo Burnham"}]
+                            },
+                            "classifications": [{"primary": true,
+                              "segment": {"name": "Music"}, "genre": {"name": "Rock"}}]
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Bo Burnham", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(2);
+        assertThat(shows).extracting(Show::getVenueName, Show::getKind)
+                .containsExactlyInAnyOrder(
+                        tuple("Moody Center", Show.Kind.COMEDY),
+                        tuple("ACL Live", Show.Kind.MUSIC));
+    }
+
+    @Test
+    @DisplayName("#202: should drop events classified outside music/comedy that the broader query can return, e.g. Film")
+    void dropsEventsClassifiedOutsideMusicOrComedy() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Weird Al"}]},
+                            "classifications": [{"primary": true,
+                              "segment": {"name": "Film"}, "genre": {"name": "Documentary"}}]
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Weird Al", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows)
+                .as("Film is split out to #204 and is explicitly out of scope for #202")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("#202: should default to music when the response has no classifications array")
+    void defaultsToMusicWhenClassificationsMissing() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {"dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                          "_embedded": {"attractions": [{"name": "Dawes"}]}}
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.MUSIC);
     }
 }
