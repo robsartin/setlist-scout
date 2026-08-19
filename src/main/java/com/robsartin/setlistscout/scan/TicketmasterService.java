@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,8 +37,23 @@ public class TicketmasterService {
     private static final String SEGMENT_ARTS_THEATRE = "Arts & Theatre";
     private static final String GENRE_COMEDY = "Comedy";
 
-    /** #207: tokens = maximal runs of {@code [a-z0-9]} after lowercasing; everything else is a separator. */
-    private static final Pattern TOKEN_PATTERN = Pattern.compile("[a-z0-9]+");
+    /**
+     * #207 fix round 1: tokens = maximal runs of Unicode letters/digits ({@code \p{L}\p{N}}) after
+     * lowercasing; everything else is a separator. Originally shipped as ASCII-only ({@code
+     * [a-z0-9]}), which silently made the title fallback un-rescuable for every accented or
+     * non-Latin artist name -- measured against 76 non-ASCII SEED/APPROVED artists in production,
+     * 32 had a corrupted token count under the ASCII pattern (e.g. "Antonio Sánchez" split into 3
+     * tokens instead of 2; the pure-Katakana "アコースフィア" tokenized to an empty list). A
+     * corrupted token list either wrongly defeats guard 1 (a single accented word can fragment into
+     * 2+ pieces, e.g. "Sinéad" -> ["sin","ad"], wrongly satisfying the >= 2 tokens check) or
+     * silently drops a genuine artist name from consideration entirely -- this is the exact
+     * "ASCII-stripping regex collapses every non-Latin name" failure mode CLAUDE.md already warns
+     * about for {@code catalog.ArtistNameNormalizer}. This tokenizer stays local and private to
+     * {@code TicketmasterService} rather than sharing that class (#207 scope: fuzzy title
+     * containment is a different concern from catalog name-equality), so the same class of bug had
+     * to be independently avoided here too.
+     */
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("[\\p{L}\\p{N}]+");
 
     /**
      * #207: tribute/homage markers that block the title fallback in {@link #hasMatchingAttraction},
@@ -271,10 +287,20 @@ public class TicketmasterService {
         return false;
     }
 
-    /** #207: tokens = maximal runs of {@code [a-z0-9]} after lowercasing, so e.g. "Emmanuel," and "ft." tokenize clean. */
+    /**
+     * Tokens = maximal runs of Unicode letters/digits after lowercasing, so e.g. "Emmanuel," and
+     * "ft." tokenize clean. #207 fix round 1: lowercases with {@code Locale.ROOT}, not the
+     * platform default -- now that the token class is Unicode-aware (not ASCII-only), the classic
+     * Turkish-I hazard becomes real for this method specifically: under a Turkish default locale,
+     * {@code "I".toLowerCase()} yields {@code "ı"} (dotless i, a different code point than plain
+     * {@code "i"}), which would silently break a token equality check for any name containing a
+     * capital I. This is deliberately scoped to the tokenizer alone: {@link #hasMatchingAttraction}'s
+     * pre-#207 exact-match {@code trim().toLowerCase()} above is untouched (still the platform
+     * default) -- it predates this fallback and changing it is out of scope here.
+     */
     private static List<String> tokenize(String text) {
         List<String> tokens = new ArrayList<>();
-        Matcher matcher = TOKEN_PATTERN.matcher(text.toLowerCase());
+        Matcher matcher = TOKEN_PATTERN.matcher(text.toLowerCase(Locale.ROOT));
         while (matcher.find()) {
             tokens.add(matcher.group());
         }
