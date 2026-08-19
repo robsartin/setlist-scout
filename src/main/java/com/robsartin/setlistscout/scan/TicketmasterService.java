@@ -13,6 +13,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/
@@ -33,6 +35,25 @@ public class TicketmasterService {
     private static final String SEGMENT_MUSIC = "Music";
     private static final String SEGMENT_ARTS_THEATRE = "Arts & Theatre";
     private static final String GENRE_COMEDY = "Comedy";
+
+    /** #207: tokens = maximal runs of {@code [a-z0-9]} after lowercasing; everything else is a separator. */
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("[a-z0-9]+");
+
+    /**
+     * #207: tribute/homage markers that block the title fallback in {@link #hasMatchingAttraction},
+     * pre-tokenized so punctuation in the title can't evade them (e.g. "Salute-To:" still matches
+     * {@code salute to}). Deliberately excludes {@code featuring}/{@code ft} -- see the Javadoc on
+     * {@link #hasMatchingAttraction} for why.
+     */
+    private static final List<List<String>> TRIBUTE_MARKER_TOKENS = List.of(
+            List.of("tribute"),
+            List.of("celebration"),
+            List.of("celebrating"),
+            List.of("salute", "to"),
+            List.of("homage"),
+            List.of("the", "music", "of"),
+            List.of("songs", "of"),
+            List.of("gospel", "of"));
 
     private final RestClient restClient;
     private final String apiKey;
@@ -163,27 +184,101 @@ public class TicketmasterService {
     }
 
     /**
-     * Ticketmaster's {@code keyword} query is a fuzzy relevance search, so it
-     * can return events that only loosely resemble the searched artist. Only
-     * trust an event if the searched artist is actually one of the billed
-     * attractions; events with no attractions at all can't be confirmed either
-     * way, so they're dropped too.
+     * Ticketmaster's {@code keyword} query is a fuzzy relevance search, so it can return events
+     * that only loosely resemble the searched artist. Only trust an event if the searched artist
+     * is actually one of the billed attractions -- exact {@code trim().toLowerCase()} equality
+     * against each attraction name, unchanged since before #207.
+     * <p>
+     * #207: that exact match only runs when {@code attractions} is non-empty; a populated-but-
+     * non-matching array returns {@code false} right there and never reaches the fallback below --
+     * pinned by {@code TicketmasterServiceTest}'s "critical regression guard" case. The fallback
+     * runs ONLY when Ticketmaster linked NO attraction at all (the array is null or empty), which
+     * measured 19 of 137 returned events (13.9%) across 60 random tracked artists -- including the
+     * motivating case, "A Very Merry Symphony ft. Austin Symphony Orchestra", genuinely
+     * attraction-less on both the search AND event-detail endpoints, and dropped before #207 even
+     * though "Austin Symphony Orchestra" is right there in the title.
+     * <p>
+     * The fallback keeps the event only when ALL of:
+     * <ol>
+     *   <li>the artist name tokenizes to two or more tokens -- this catalog tracks single-word
+     *       artist names that double as place/common-word names (Chicago, Boston, Phoenix,
+     *       Kansas, Europe, Alabama, Austin), so without this guard an attraction-less "New
+     *       Year's Eve in Austin" would match the artist "Austin";</li>
+     *   <li>the artist's tokens appear as a CONSECUTIVE run in the event title's tokens -- so
+     *       "Tommy Emmanuel" matches inside "Tommy Emmanuel, CGP - Living In The Light Tour"
+     *       (punctuation can't break the run), but "Austin Symphony Orchestra" does not match
+     *       "Some Unrelated Show"; and</li>
+     *   <li>the title carries no tribute/homage marker. Measured: of the 19 empty-attraction
+     *       events, the first two rules alone rescued 8, and 6 of those 8 were tribute acts for
+     *       dead artists -- Chris Cornell, Jimi Hendrix -- that would otherwise land on the page
+     *       labelled as the artist themselves, which is worse than the missed show this fallback
+     *       exists to fix. {@code featuring}/{@code ft} is deliberately NOT a marker: the
+     *       motivating event above is titled "... ft. Austin Symphony Orchestra", and marking it
+     *       would break the exact case #207 exists to rescue.</li>
+     * </ol>
+     * Error bias is deliberate: a false negative here is just today's status quo, a silently
+     * missed show. A false positive puts a show on the page under the wrong artist and erodes
+     * trust in every other row. Where uncertain, drop -- a real artist whose tour is genuinely
+     * titled "... Celebration" will be missed; that's the accepted trade.
      */
     @SuppressWarnings("unchecked")
     private boolean hasMatchingAttraction(String artistName, Map<String, Object> event) {
         Map<String, Object> embedded = (Map<String, Object>) event.get("_embedded");
         List<Map<String, Object>> attractions = embedded != null
                 ? (List<Map<String, Object>>) embedded.get("attractions") : null;
-        if (attractions == null) return false;
 
-        String normalizedSearch = artistName.trim().toLowerCase();
-        for (Map<String, Object> attraction : attractions) {
-            if (attraction.get("name") instanceof String name
-                    && name.trim().toLowerCase().equals(normalizedSearch)) {
+        if (attractions != null && !attractions.isEmpty()) {
+            String normalizedSearch = artistName.trim().toLowerCase();
+            for (Map<String, Object> attraction : attractions) {
+                if (attraction.get("name") instanceof String name
+                        && name.trim().toLowerCase().equals(normalizedSearch)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return matchesTitleFallback(artistName, (String) event.get("name"));
+    }
+
+    /** #207: only reached when {@code attractions} is null/empty -- see the Javadoc on {@link #hasMatchingAttraction}. */
+    private boolean matchesTitleFallback(String artistName, String eventTitle) {
+        if (eventTitle == null) return false;
+
+        List<String> artistTokens = tokenize(artistName);
+        if (artistTokens.size() < 2) return false;
+
+        List<String> titleTokens = tokenize(eventTitle);
+        return containsConsecutiveRun(titleTokens, artistTokens) && !containsTributeMarker(titleTokens);
+    }
+
+    /** #207: true if any tribute/homage marker appears as a consecutive run in {@code titleTokens}. */
+    private static boolean containsTributeMarker(List<String> titleTokens) {
+        for (List<String> marker : TRIBUTE_MARKER_TOKENS) {
+            if (containsConsecutiveRun(titleTokens, marker)) return true;
+        }
+        return false;
+    }
+
+    /** #207: true if {@code needle} appears as a contiguous, in-order run inside {@code haystack}. */
+    private static boolean containsConsecutiveRun(List<String> haystack, List<String> needle) {
+        if (needle.isEmpty() || needle.size() > haystack.size()) return false;
+        for (int i = 0; i <= haystack.size() - needle.size(); i++) {
+            if (haystack.subList(i, i + needle.size()).equals(needle)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** #207: tokens = maximal runs of {@code [a-z0-9]} after lowercasing, so e.g. "Emmanuel," and "ft." tokenize clean. */
+    private static List<String> tokenize(String text) {
+        List<String> tokens = new ArrayList<>();
+        Matcher matcher = TOKEN_PATTERN.matcher(text.toLowerCase());
+        while (matcher.find()) {
+            tokens.add(matcher.group());
+        }
+        return tokens;
     }
 
     /**
