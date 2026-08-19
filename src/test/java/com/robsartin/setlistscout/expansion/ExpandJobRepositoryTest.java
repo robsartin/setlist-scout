@@ -174,8 +174,14 @@ class ExpandJobRepositoryTest extends AbstractPostgresIntegrationTest {
         assertThat(byStatus.get(JobStatus.SCHEDULED)).isEqualTo(1L);
 
         assertThat(expandJobRepository.countByNextDueAtLessThanEqual(now)).isEqualTo(1L);
+        // Compare against a DB round-trip of this row, not the in-memory `overdue` local -- same
+        // fix as AdminCrossAccountActionsTest's identical comment: Postgres timestamp columns are
+        // microsecond precision (rounded, not truncated) while a JVM Instant.now() can carry
+        // nanosecond precision (observed on CI's Linux runners, not locally on macOS). Both sides
+        // of the equality below must come from the DB.
+        Instant persistedOverdue = expandJobRepository.findById(overdue.getId()).orElseThrow().getNextDueAt();
         assertThat(expandJobRepository.findFirstByOrderByNextDueAtAsc()).isPresent()
-                .get().extracting(ExpandJob::getNextDueAt).isEqualTo(overdue.getNextDueAt());
+                .get().extracting(ExpandJob::getNextDueAt).isEqualTo(persistedOverdue);
 
         List<ExpandJob> failed = expandJobRepository.findByStatusOrderByNextDueAtAsc(JobStatus.FAILED);
         assertThat(failed).extracting(ExpandJob::getOwner)

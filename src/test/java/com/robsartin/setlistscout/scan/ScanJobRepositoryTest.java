@@ -370,11 +370,18 @@ class ScanJobRepositoryTest extends AbstractPostgresIntegrationTest {
 
         Instant oldest = Instant.now().minus(3, ChronoUnit.DAYS);
         persistForOwner(OWNER, 1L, "ticketmaster", JobStatus.SCHEDULED, Instant.now());
-        persistForOwner(OWNER, 2L, "ticketmaster", JobStatus.FAILED, oldest);
+        ScanJob oldestJob = persistForOwner(OWNER, 2L, "ticketmaster", JobStatus.FAILED, oldest);
         persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, Instant.now().plus(1, ChronoUnit.DAYS));
 
+        // Compare against a DB round-trip of this row, not the in-memory `oldest` local -- same
+        // fix as AdminCrossAccountActionsTest's identical comment: Postgres timestamp columns are
+        // microsecond precision (rounded, not truncated) while a JVM Instant.now() can carry
+        // nanosecond precision (observed on CI's Linux runners, not locally on macOS). Both sides
+        // of the equality below must come from the DB.
+        Instant persistedOldest = scanJobRepository.findById(oldestJob.getId()).orElseThrow().getNextDueAt();
+
         assertThat(scanJobRepository.findFirstByOrderByNextDueAtAsc()).isPresent()
-                .get().extracting(ScanJob::getNextDueAt).isEqualTo(oldest);
+                .get().extracting(ScanJob::getNextDueAt).isEqualTo(persistedOldest);
     }
 
     @Test
