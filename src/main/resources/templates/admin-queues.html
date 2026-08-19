@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Admin: Queues', 'admin-queues', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <h1>Background queues</h1>
+    <p class="page-sub">Read-only snapshot of the scan, expand, and import job queues (#201).
+        Reload the page to refresh -- there is no auto-refresh.</p>
+
+    <!--/* #201 item 1, the highest-priority part of this page: FAILED rows across all three
+           queues, with the error nobody would otherwise ever read. Includes shared-scan owners
+           (shared:<uuid>) -- their jobs are real work too. */-->
+    <div class="card">
+        <h2>Failed work</h2>
+        <p class="note" th:if="${#lists.isEmpty(snapshot.failedWork)}">No failed work right now.</p>
+        <div class="table-scroll" th:unless="${#lists.isEmpty(snapshot.failedWork)}">
+            <table>
+                <caption class="visually-hidden">Failed scan, expand, and import jobs, with their error</caption>
+                <thead>
+                <tr>
+                    <th scope="col">Queue</th>
+                    <th scope="col">Owner</th>
+                    <th scope="col">Working on</th>
+                    <th scope="col">Attempts</th>
+                    <th scope="col">Last error</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="row : ${snapshot.failedWork}">
+                    <td><span class="chip" th:text="${row.queue}">Scan</span></td>
+                    <td th:text="${row.owner}">owner@example.com</td>
+                    <td th:text="${row.subject}">Radiohead (ticketmaster)</td>
+                    <td th:text="${row.attempts}">3</td>
+                    <td th:text="${row.lastError}">Ticketmaster returned 500</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!--/* #201 items 2 and 4: counts by status, due-now, and the oldest next_due_at -- "is it
+           stuck or just busy" and "how far behind is it", per queue. Every number here is an
+           aggregate query (COUNT/MIN ... GROUP BY), never a loaded entity list -- see
+           AdminQueueService. */-->
+    <div class="card">
+        <h2>Scan queue</h2>
+        <div class="table-scroll">
+            <table>
+                <caption class="visually-hidden">Scan job counts by status</caption>
+                <thead><tr><th scope="col">Status</th><th scope="col">Count</th></tr></thead>
+                <tbody>
+                <tr><td>Scheduled</td><td th:text="${snapshot.scanCounts.scheduled}">0</td></tr>
+                <tr><td>Running</td><td th:text="${snapshot.scanCounts.running}">0</td></tr>
+                <tr><td>Failed</td><td th:text="${snapshot.scanCounts.failed}">0</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="note">
+            <span th:text="${snapshot.scanCounts.dueNow}">0</span> due now.
+            Oldest due:
+            <span th:if="${snapshot.scanCounts.oldestNextDueAt != null}"
+                  th:text="${#temporals.format(snapshot.scanCounts.oldestNextDueAt, 'yyyy-MM-dd HH:mm')}">date</span>
+            <span th:unless="${snapshot.scanCounts.oldestNextDueAt != null}">n/a -- queue is empty</span>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Expand queue</h2>
+        <div class="table-scroll">
+            <table>
+                <caption class="visually-hidden">Expand job counts by status</caption>
+                <thead><tr><th scope="col">Status</th><th scope="col">Count</th></tr></thead>
+                <tbody>
+                <tr><td>Scheduled</td><td th:text="${snapshot.expandCounts.scheduled}">0</td></tr>
+                <tr><td>Running</td><td th:text="${snapshot.expandCounts.running}">0</td></tr>
+                <tr><td>Failed</td><td th:text="${snapshot.expandCounts.failed}">0</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="note">
+            <span th:text="${snapshot.expandCounts.dueNow}">0</span> due now.
+            Oldest due:
+            <span th:if="${snapshot.expandCounts.oldestNextDueAt != null}"
+                  th:text="${#temporals.format(snapshot.expandCounts.oldestNextDueAt, 'yyyy-MM-dd HH:mm')}">date</span>
+            <span th:unless="${snapshot.expandCounts.oldestNextDueAt != null}">n/a -- queue is empty</span>
+        </p>
+    </div>
+
+    <!--/* #201 item 3: artist_import pending/done/failed per owner. */-->
+    <div class="card">
+        <h2>Import queue</h2>
+        <p class="note" th:if="${#lists.isEmpty(snapshot.importCounts)}">No imports queued.</p>
+        <div class="table-scroll" th:unless="${#lists.isEmpty(snapshot.importCounts)}">
+            <table>
+                <caption class="visually-hidden">Import queue counts per owner</caption>
+                <thead>
+                <tr>
+                    <th scope="col">Owner</th>
+                    <th scope="col">Pending</th>
+                    <th scope="col">Done</th>
+                    <th scope="col">Failed</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="row : ${snapshot.importCounts}">
+                    <td th:text="${row.owner}">owner@example.com</td>
+                    <td th:text="${row.pending}">0</td>
+                    <td th:text="${row.done}">0</td>
+                    <td th:text="${row.failed}">0</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</body>
+</html>

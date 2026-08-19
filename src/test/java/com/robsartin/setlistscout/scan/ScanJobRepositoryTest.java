@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.CatalogSeeder;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.JobStatusCount;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -11,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -20,6 +23,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -55,6 +59,18 @@ class ScanJobRepositoryTest extends AbstractPostgresIntegrationTest {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    /**
+     * #172/#203: CatalogSeeder is a CommandLineRunner that imports the real data/seed-bands.txt
+     * for the seed owner at startup; each seeded artist fires ArtistActivated, whose async
+     * ScanJobListener enqueues a real scan_job per source -- see PollerFlowTest's catalogSeeder
+     * field for the full history. That was invisible to every owner-scoped test in this class, but
+     * the #201 admin-queue aggregate queries below have no owner filter by design, so a
+     * still-in-flight seeded row lands directly in their result. Stubbed empty so this context's
+     * scan_job table contains ONLY what a @Test method itself writes.
+     */
+    @MockitoBean
+    private CatalogSeeder catalogSeeder;
 
     /**
      * claimDue has no owner filter (it's a poller-wide claim, not scoped to one caller), so a
@@ -304,5 +320,91 @@ class ScanJobRepositoryTest extends AbstractPostgresIntegrationTest {
         job.setOwner(OWNER);
         job.setClaimedAt(claimedAt);
         return scanJobRepository.save(job);
+    }
+
+    private ScanJob persistForOwner(String owner, Long artistId, String source, JobStatus status, Instant nextDueAt) {
+        ScanJob job = new ScanJob(artistId, source, status, 0, nextDueAt);
+        job.setOwner(owner);
+        return scanJobRepository.save(job);
+    }
+
+    // #201: the admin queues page's aggregate queries. These must never load whole-table entity
+    // lists to compute a count (see JobRepository#countGroupedByStatus's Javadoc) -- proven here
+    // against real Postgres, not just against a mock.
+
+    @Test
+    @DisplayName("countGroupedByStatus aggregates across every owner, including a shared-scan owner")
+    void countGroupedByStatusAggregatesAcrossOwnersIncludingSharedOwner() {
+        Instant now = Instant.now();
+        persistForOwner("owner-a@example.com", 1L, "ticketmaster", JobStatus.SCHEDULED, now);
+        persistForOwner("owner-b@example.com", 2L, "ticketmaster", JobStatus.SCHEDULED, now);
+        persistForOwner("shared:11111111-1111-1111-1111-111111111111", 3L, "bandsintown",
+                JobStatus.SCHEDULED, now);
+        persistForOwner("owner-a@example.com", 4L, "lastfm", JobStatus.RUNNING, now);
+        persistForOwner("shared:11111111-1111-1111-1111-111111111111", 5L, "ticketmaster",
+                JobStatus.FAILED, now);
+
+        Map<JobStatus, Long> byStatus = scanJobRepository.countGroupedByStatus().stream()
+                .collect(Collectors.toMap(JobStatusCount::getStatus, JobStatusCount::getCount));
+
+        assertThat(byStatus.get(JobStatus.SCHEDULED)).isEqualTo(3L);
+        assertThat(byStatus.get(JobStatus.RUNNING)).isEqualTo(1L);
+        assertThat(byStatus.get(JobStatus.FAILED)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("countByNextDueAtLessThanEqual counts only rows due at or before the given instant")
+    void countByNextDueAtLessThanEqualCountsOnlyDueRows() {
+        Instant now = Instant.now();
+        persistForOwner(OWNER, 1L, "ticketmaster", JobStatus.SCHEDULED, now.minus(1, ChronoUnit.HOURS));
+        persistForOwner(OWNER, 2L, "ticketmaster", JobStatus.SCHEDULED, now);
+        persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, now.plus(1, ChronoUnit.HOURS));
+
+        assertThat(scanJobRepository.countByNextDueAtLessThanEqual(now)).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("findFirstByOrderByNextDueAtAsc returns the single oldest next_due_at, and empty when the table is empty")
+    void findFirstByOrderByNextDueAtAscReturnsTheOldestRow() {
+        assertThat(scanJobRepository.findFirstByOrderByNextDueAtAsc()).isEmpty();
+
+        Instant oldest = Instant.now().minus(3, ChronoUnit.DAYS);
+        persistForOwner(OWNER, 1L, "ticketmaster", JobStatus.SCHEDULED, Instant.now());
+        ScanJob oldestJob = persistForOwner(OWNER, 2L, "ticketmaster", JobStatus.FAILED, oldest);
+        persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, Instant.now().plus(1, ChronoUnit.DAYS));
+
+        // Compare against a DB round-trip of this row, not the in-memory `oldest` local -- same
+        // fix as AdminCrossAccountActionsTest's identical comment: Postgres timestamp columns are
+        // microsecond precision (rounded, not truncated) while a JVM Instant.now() can carry
+        // nanosecond precision (observed on CI's Linux runners, not locally on macOS). Both sides
+        // of the equality below must come from the DB.
+        Instant persistedOldest = scanJobRepository.findById(oldestJob.getId()).orElseThrow().getNextDueAt();
+
+        assertThat(scanJobRepository.findFirstByOrderByNextDueAtAsc()).isPresent()
+                .get().extracting(ScanJob::getNextDueAt).isEqualTo(persistedOldest);
+    }
+
+    @Test
+    @DisplayName("findByStatusOrderByNextDueAtAsc returns FAILED rows across every owner, most-overdue first, with attempts/lastError intact")
+    void findByStatusOrderByNextDueAtAscReturnsFailedRowsAcrossOwners() {
+        Instant now = Instant.now();
+        ScanJob moreOverdue = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 5, now.minus(2, ChronoUnit.DAYS));
+        moreOverdue.setOwner("owner-a@example.com");
+        moreOverdue.setLastError("Ticketmaster 500");
+        scanJobRepository.save(moreOverdue);
+
+        ScanJob lessOverdue = new ScanJob(2L, "bandsintown", JobStatus.FAILED, 2, now.minus(1, ChronoUnit.HOURS));
+        lessOverdue.setOwner("shared:22222222-2222-2222-2222-222222222222");
+        lessOverdue.setLastError("timeout");
+        scanJobRepository.save(lessOverdue);
+
+        persistForOwner(OWNER, 3L, "ticketmaster", JobStatus.SCHEDULED, now);
+
+        List<ScanJob> failed = scanJobRepository.findByStatusOrderByNextDueAtAsc(JobStatus.FAILED);
+
+        assertThat(failed).extracting(ScanJob::getOwner)
+                .containsExactly("owner-a@example.com", "shared:22222222-2222-2222-2222-222222222222");
+        assertThat(failed).extracting(ScanJob::getLastError).containsExactly("Ticketmaster 500", "timeout");
+        assertThat(failed).extracting(ScanJob::getAttempts).containsExactly(5, 2);
     }
 }

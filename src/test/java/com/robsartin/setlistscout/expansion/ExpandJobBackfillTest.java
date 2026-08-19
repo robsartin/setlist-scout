@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -33,6 +34,11 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest
 @Testcontainers
+// #203: the suite default (src/test/resources/application.properties) turns this bean off so its
+// own async startup fire can't pollute the owner-less admin-queue aggregates other tests assert
+// on. This class exists to test the backfill itself, so it needs the bean back -- same pattern as
+// PollerFlowTest re-enabling the pollers.
+@TestPropertySource(properties = "setlistscout.job-backfill-enabled=true")
 class ExpandJobBackfillTest extends AbstractPostgresIntegrationTest {
 
     @Container

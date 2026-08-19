@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.expansion;
 
+import com.robsartin.setlistscout.catalog.CatalogSeeder;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.JobStatusCount;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -9,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -16,7 +19,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,6 +45,15 @@ class ExpandJobRepositoryTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
     private ExpandJobRepository expandJobRepository;
+
+    /**
+     * #172/#203: stubbed empty so this context's expand_job table contains ONLY what a @Test
+     * method itself writes -- see ScanJobRepositoryTest#catalogSeeder for the full rationale
+     * (CatalogSeeder's real-time ArtistActivated -> ExpandJobListener path is invisible to every
+     * owner-scoped test, but not to the owner-less #201 admin-queue aggregates below).
+     */
+    @MockitoBean
+    private CatalogSeeder catalogSeeder;
 
     /**
      * claimDue has no owner filter (poller-wide claim), so start every test from an empty table
@@ -136,5 +150,42 @@ class ExpandJobRepositoryTest extends AbstractPostgresIntegrationTest {
         ExpandJob reloadedNotYetDue = expandJobRepository.findById(notYetDue.getId()).orElseThrow();
         assertThat(reloadedNotYetDue.getStatus()).isEqualTo(JobStatus.SCHEDULED);
         assertThat(reloadedNotYetDue.getClaimedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("the #201 admin-queue aggregates (countGroupedByStatus/countByNextDueAtLessThanEqual/"
+            + "findFirstByOrderByNextDueAtAsc/findByStatusOrderByNextDueAtAsc) resolve correctly for "
+            + "expand_job too -- smoke test, full behavioral coverage lives in "
+            + "ScanJobRepositoryTest#countGroupedByStatus*/countByNextDueAtLessThanEqual*/find*")
+    void adminQueueAggregatesResolveForExpandJobToo() {
+        Instant now = Instant.now();
+        ExpandJob overdue = new ExpandJob(1L, "lastfm", JobStatus.FAILED, 4, now.minus(2, ChronoUnit.DAYS));
+        overdue.setOwner("shared:33333333-3333-3333-3333-333333333333");
+        overdue.setLastError("MusicBrainz 503");
+        expandJobRepository.save(overdue);
+
+        ExpandJob dueSoon = new ExpandJob(2L, "musicbrainz", JobStatus.SCHEDULED, 0, now.plus(1, ChronoUnit.HOURS));
+        dueSoon.setOwner(OWNER);
+        expandJobRepository.save(dueSoon);
+
+        Map<JobStatus, Long> byStatus = expandJobRepository.countGroupedByStatus().stream()
+                .collect(Collectors.toMap(JobStatusCount::getStatus, JobStatusCount::getCount));
+        assertThat(byStatus.get(JobStatus.FAILED)).isEqualTo(1L);
+        assertThat(byStatus.get(JobStatus.SCHEDULED)).isEqualTo(1L);
+
+        assertThat(expandJobRepository.countByNextDueAtLessThanEqual(now)).isEqualTo(1L);
+        // Compare against a DB round-trip of this row, not the in-memory `overdue` local -- same
+        // fix as AdminCrossAccountActionsTest's identical comment: Postgres timestamp columns are
+        // microsecond precision (rounded, not truncated) while a JVM Instant.now() can carry
+        // nanosecond precision (observed on CI's Linux runners, not locally on macOS). Both sides
+        // of the equality below must come from the DB.
+        Instant persistedOverdue = expandJobRepository.findById(overdue.getId()).orElseThrow().getNextDueAt();
+        assertThat(expandJobRepository.findFirstByOrderByNextDueAtAsc()).isPresent()
+                .get().extracting(ExpandJob::getNextDueAt).isEqualTo(persistedOverdue);
+
+        List<ExpandJob> failed = expandJobRepository.findByStatusOrderByNextDueAtAsc(JobStatus.FAILED);
+        assertThat(failed).extracting(ExpandJob::getOwner)
+                .containsExactly("shared:33333333-3333-3333-3333-333333333333");
+        assertThat(failed).extracting(ExpandJob::getLastError).containsExactly("MusicBrainz 503");
     }
 }
