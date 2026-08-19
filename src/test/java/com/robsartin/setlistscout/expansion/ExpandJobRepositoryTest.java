@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.expansion;
 
+import com.robsartin.setlistscout.catalog.CatalogSeeder;
 import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.shared.JobStatusCount;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
@@ -10,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -43,6 +45,15 @@ class ExpandJobRepositoryTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
     private ExpandJobRepository expandJobRepository;
+
+    /**
+     * #172/#203: stubbed empty so this context's expand_job table contains ONLY what a @Test
+     * method itself writes -- see ScanJobRepositoryTest#catalogSeeder for the full rationale
+     * (CatalogSeeder's real-time ArtistActivated -> ExpandJobListener path is invisible to every
+     * owner-scoped test, but not to the owner-less #201 admin-queue aggregates below).
+     */
+    @MockitoBean
+    private CatalogSeeder catalogSeeder;
 
     /**
      * claimDue has no owner filter (poller-wide claim), so start every test from an empty table

@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.CatalogSeeder;
 import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.shared.JobStatusCount;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -57,6 +59,18 @@ class ScanJobRepositoryTest extends AbstractPostgresIntegrationTest {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    /**
+     * #172/#203: CatalogSeeder is a CommandLineRunner that imports the real data/seed-bands.txt
+     * for the seed owner at startup; each seeded artist fires ArtistActivated, whose async
+     * ScanJobListener enqueues a real scan_job per source -- see PollerFlowTest's catalogSeeder
+     * field for the full history. That was invisible to every owner-scoped test in this class, but
+     * the #201 admin-queue aggregate queries below have no owner filter by design, so a
+     * still-in-flight seeded row lands directly in their result. Stubbed empty so this context's
+     * scan_job table contains ONLY what a @Test method itself writes.
+     */
+    @MockitoBean
+    private CatalogSeeder catalogSeeder;
 
     /**
      * claimDue has no owner filter (it's a poller-wide claim, not scoped to one caller), so a

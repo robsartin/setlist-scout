@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -34,6 +35,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @Testcontainers
+// #203: the suite default (src/test/resources/application.properties) turns the backfill beans
+// off so their own async startup fire can't pollute the owner-less admin-queue aggregates other
+// tests assert on. This class autowires ScanJobBackfill/ExpandJobBackfill directly and drives
+// them, so it needs the beans back -- same pattern as PollerFlowTest re-enabling the pollers.
+@TestPropertySource(properties = "setlistscout.job-backfill-enabled=true")
 class SharedScanGuardsTest extends AbstractPostgresIntegrationTest {
 
     @Container

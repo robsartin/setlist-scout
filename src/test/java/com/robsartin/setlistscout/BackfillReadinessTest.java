@@ -122,7 +122,17 @@ class BackfillReadinessTest {
         // shape ScanJobBackfillTest already covers at small scale, here at production scale.
         seedRealisticBacklog(connectionProps);
 
-        // Phase 2: the real, timed boot under test -- the backfill beans are enabled (default).
+        // Phase 2: the real, timed boot under test -- the backfill beans must be enabled.
+        // #203: src/test/resources/application.properties now defaults job-backfill-enabled OFF
+        // suite-wide (so the backfill's async startup fire can't pollute the owner-less
+        // admin-queue aggregates other tests assert on). That classpath config file outranks
+        // connectionProps above -- properties(Map) registers as Boot's lowest-precedence
+        // "defaultProperties" source, same tier that already loses to application.yml's own
+        // default (see the PORT comment), so adding the key there was tried and empirically
+        // measured to still boot with the bean missing (0 rows after the full RECONCILE_BOUND).
+        // A command-line argument to run() lands in Boot's highest-precedence source instead,
+        // genuinely overriding the classpath file -- this test's whole point is proving the
+        // backfill reconciles, so it must turn the bean on for real, not merely try to.
         ExecutorService bootExecutor = Executors.newSingleThreadExecutor();
         CompletableFuture<Integer> portFuture = new CompletableFuture<>();
         ApplicationListener<ApplicationEvent> capturePort = event -> {
@@ -135,7 +145,8 @@ class BackfillReadinessTest {
                 .properties(connectionProps)
                 .listeners(capturePort);
 
-        Future<ConfigurableApplicationContext> contextFuture = bootExecutor.submit(() -> builder.run());
+        Future<ConfigurableApplicationContext> contextFuture = bootExecutor.submit(
+                () -> builder.run("--setlistscout.job-backfill-enabled=true"));
         ConfigurableApplicationContext context = null;
         try {
             int port = portFuture.get(60, TimeUnit.SECONDS);
