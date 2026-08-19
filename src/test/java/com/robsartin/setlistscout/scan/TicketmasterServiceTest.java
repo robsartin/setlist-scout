@@ -315,24 +315,28 @@ class TicketmasterServiceTest {
 
     // ---- #202: comedy alongside music -----------------------------------------------------
     //
-    // One broader query, not one call per classification: see the "one broader query, not one
-    // call per classification" comment in TicketmasterService#searchShows for the full reasoning
-    // (doubling ~6,400 scan jobs' worth of calls against a rate-limited free-tier key). This
-    // test proves that choice at the request level -- the old classificationName=music
-    // restriction that excluded comedy results is gone, and nothing has replaced it with a
-    // second restriction -- while the tests below prove labeling is read from each event's own
-    // response data, never assumed from the query.
+    // One call, classificationName sent twice (music and comedy): see the comment in
+    // TicketmasterService#searchShows for the full reasoning, including a live-verified reason
+    // this ISN'T "no classificationName at all" -- that broader-query design has a real
+    // page-crowd-out bug for artist names that collide with other segments (Chicago, Boston,
+    // Phoenix, Kansas, Europe, Alabama are all real tracked bands), confirmed against the real
+    // API before it shipped further. This test proves the fix at the request level -- both
+    // values are actually sent, so comedy isn't excluded AND the response is still narrowed
+    // server-side, so nothing else can crowd out either -- while the tests below prove labeling
+    // is read from each event's own response data, never assumed from the query.
 
     @Test
-    @DisplayName("#202: should not restrict the search by classificationName, so comedy events aren't excluded at the query level")
-    void queryIsNotRestrictedByClassificationName() throws InterruptedException {
+    @DisplayName("#202: should send classificationName for both music and comedy, in one call")
+    void queryIncludesBothClassificationNames() throws InterruptedException {
         server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
 
         service.searchShows("Aziz Ansari", "78701", null, null, 50,
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
+        assertThat(server.getRequestCount()).as("one HTTP call, not one per classification").isEqualTo(1);
         RecordedRequest request = server.takeRequest();
-        assertThat(request.getPath()).doesNotContain("classificationName");
+        assertThat(request.getPath()).contains("classificationName=music");
+        assertThat(request.getPath()).contains("classificationName=comedy");
     }
 
     @Test
