@@ -105,6 +105,15 @@
                         <span th:text="${show.artistName}">Band</span>
                         <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
                               class="chip tribute">Tribute</span>
+                        <!--/* #202: comedy is the minority case, so it's the one that gets a chip --
+                               a music show (the common case) stays unlabeled, same as a non-tribute
+                               artist gets no Tribute chip above. No kind filter control in v1 (the
+                               issue explicitly left it optional): with only Ticketmaster able to
+                               return comedy at all and most tracked artists still musicians, a
+                               filter is low-value clutter until real comedy-artist usage says
+                               otherwise -- the chip alone gives "at a glance" distinguishability. */-->
+                        <span th:if="${show.kind != null and show.kind.name() == 'COMEDY'}"
+                              class="chip comedy">Comedy</span>
                         <span th:if="${show.hidden}" class="note">(hidden)</span>
                     </td>
                     <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>

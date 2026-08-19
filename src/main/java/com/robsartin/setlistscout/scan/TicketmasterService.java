@@ -29,6 +29,11 @@ public class TicketmasterService {
     /** ~5m resolution; verified working against the live Ticketmaster API for #152. */
     private static final int GEOHASH_PRECISION = 9;
 
+    /** Ticketmaster classification names read from each event's {@code classifications} entry (#202). */
+    private static final String SEGMENT_MUSIC = "Music";
+    private static final String SEGMENT_ARTS_THEATRE = "Arts & Theatre";
+    private static final String GENRE_COMEDY = "Comedy";
+
     private final RestClient restClient;
     private final String apiKey;
 
@@ -74,12 +79,50 @@ public class TicketmasterService {
                         } else {
                             uriBuilder.queryParam("postalCode", postalCode);
                         }
+                        // #202: classificationName sent TWICE (music and comedy), not omitted --
+                        // NOT the "one broader query, filtered on return" this comment originally
+                        // described. That first version dropped classificationName entirely and
+                        // relied on classify() below to sort the response out; it turned out to
+                        // have a real crowd-out bug, caught in review before this shipped further:
+                        // Ticketmaster's default page size is 20, and this catalog is full of
+                        // artist names that collide with other segments -- Chicago, Boston,
+                        // Phoenix, Kansas, Europe, Alabama are all real tracked bands. With no
+                        // classificationName at all, EVERY segment competes for those 20 slots
+                        // server-side, ranked by Ticketmaster's own relevance -- not just the
+                        // Music/Comedy ones this app wants. Verified live (GET against the real
+                        // API, Ticketmaster's own public tutorial demo key, 2026-08-19):
+                        // keyword=Chicago with no classificationName returned 20/20 Sports events
+                        // (Bulls, Blackhawks, Bears) -- ZERO music, even though "Chicago & Styx:
+                        // The Windy Cities Tour" is real, current, and ranks #1-2 the moment
+                        // classificationName=music narrows the field. hasMatchingAttraction can
+                        // only filter what's IN the response; a show crowded off the first page
+                        // never arrives to be filtered, so this was a silent recall regression --
+                        // fewer real shows found, nothing in the logs to show it.
+                        //
+                        // The fix is one call, not two: classificationName is documented as an
+                        // array-type parameter, and repeating it is a real OR filter, confirmed
+                        // against the live API for the same keyword -- totalElements rose from
+                        // 1215 (music alone) to 1676 (music+comedy, ~= 1215+467 comedy alone,
+                        // ruling out AND, which would be 0), and the returned page was 100%
+                        // Music/Comedy, zero Sports. So this keeps the ORIGINAL #202 concern
+                        // solved too (TicketmasterShowSource runs once per (artist, source) with
+                        // ~6,400 scan jobs; a genuine second HTTP round trip per artist would still
+                        // double load against the rate-limited free-tier key) while also closing
+                        // the crowd-out gap a single call cost nothing extra to close.
+                        //
+                        // classify() below still reads each event's OWN classifications array to
+                        // label and double-check it, rather than trusting "it came back from a
+                        // music+comedy-filtered query" -- classificationName's own docs describe it
+                        // as matching against segment/genre/sub-genre/type/sub-type names, loosely
+                        // enough that what comes back isn't guaranteed to be cleanly one or the
+                        // other, and hasMatchingAttraction's fuzzy keyword match means an event
+                        // being returned at all was never proof it's about what was searched.
                         return uriBuilder
+                                .queryParam("classificationName", "music", "comedy")
                                 .queryParam("radius", radiusMiles)
                                 .queryParam("unit", "miles")
                                 .queryParam("startDateTime", start.format(fmt))
                                 .queryParam("endDateTime", end.format(fmt))
-                                .queryParam("classificationName", "music")
                                 .build();
                     })
                     .retrieve()
@@ -103,7 +146,15 @@ public class TicketmasterService {
         if (events != null) {
             for (Map<String, Object> event : events) {
                 if (!hasMatchingAttraction(artistName, event)) continue;
-                shows.add(parseEvent(artistName, event));
+                // #202: classificationName=music,comedy narrows the server-side result, but its
+                // own docs describe it as a loose match across segment/genre/sub-genre/type/
+                // sub-type names, not a strict segment filter -- classify() re-checks each event's
+                // actual classifications and returns null for anything that isn't cleanly Music or
+                // Arts & Theatre/Comedy (Film (#204), other Arts & Theatre genres, or a stray
+                // Sports/Misc match), which drops the event here rather than mislabeling it.
+                Show.Kind kind = classify(event);
+                if (kind == null) continue;
+                shows.add(parseEvent(artistName, event, kind));
             }
         }
         log.atDebug().addKeyValue("source", "ticketmaster").addKeyValue("artist", artistName)
@@ -135,8 +186,60 @@ public class TicketmasterService {
         return false;
     }
 
+    /**
+     * Reads Ticketmaster's own per-event classification (#202) instead of assuming every result
+     * is music: {@code classifications} is an array of {@code {segment, genre, subGenre, ...}}
+     * entries, at most one marked {@code "primary": true}. Returns {@link Show.Kind#MUSIC} for the
+     * Music segment, {@link Show.Kind#COMEDY} for Arts & Theatre with a Comedy genre or sub-genre,
+     * and {@code null} for everything else -- Sports, Film (#204), Miscellaneous, and every other
+     * Arts & Theatre genre (theatre, dance, magic, ...) are out of scope for #202, and {@code null}
+     * tells the caller to drop the event rather than mislabel it.
+     * <p>
+     * Missing/empty classifications default to MUSIC rather than {@code null}/dropped: before
+     * #202 every result was forced music-only by the query itself, so a show that would have
+     * matched then must not silently disappear now just because this one field is absent --
+     * Ticketmaster documents {@code classifications} as a core field, but not a guaranteed one.
+     */
     @SuppressWarnings("unchecked")
-    private Show parseEvent(String artistName, Map<String, Object> event) {
+    private Show.Kind classify(Map<String, Object> event) {
+        List<Map<String, Object>> classifications = (List<Map<String, Object>>) event.get("classifications");
+        if (classifications == null || classifications.isEmpty()) {
+            return Show.Kind.MUSIC;
+        }
+        Map<String, Object> classification = primaryClassification(classifications);
+        String segment = classificationName(classification, "segment");
+        if (SEGMENT_MUSIC.equalsIgnoreCase(segment)) {
+            return Show.Kind.MUSIC;
+        }
+        if (SEGMENT_ARTS_THEATRE.equalsIgnoreCase(segment)
+                && (GENRE_COMEDY.equalsIgnoreCase(classificationName(classification, "genre"))
+                    || GENRE_COMEDY.equalsIgnoreCase(classificationName(classification, "subGenre")))) {
+            return Show.Kind.COMEDY;
+        }
+        return null;
+    }
+
+    /** The {@code "primary": true} entry, or the first when none is marked (rare, but not contractually guaranteed). */
+    private static Map<String, Object> primaryClassification(List<Map<String, Object>> classifications) {
+        for (Map<String, Object> classification : classifications) {
+            if (Boolean.TRUE.equals(classification.get("primary"))) {
+                return classification;
+            }
+        }
+        return classifications.get(0);
+    }
+
+    /** Reads {@code classification.<key>.name}, e.g. {@code classification.segment.name}. */
+    @SuppressWarnings("unchecked")
+    private static String classificationName(Map<String, Object> classification, String key) {
+        if (classification.get(key) instanceof Map<?, ?> nested && nested.get("name") instanceof String name) {
+            return name;
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Show parseEvent(String artistName, Map<String, Object> event, Show.Kind kind) {
         Map<String, Object> dates = (Map<String, Object>) event.get("dates");
         Map<String, Object> start = dates != null ? (Map<String, Object>) dates.get("start") : null;
         LocalDateTime eventDateTime = parseStartDateTime(start);
@@ -160,7 +263,7 @@ public class TicketmasterService {
         String eventName = (String) event.get("name");
         String label = (eventName != null && !eventName.isBlank()) ? eventName : artistName;
 
-        return new Show(label, eventDateTime, venueName, venueCity, price, "ticketmaster", url);
+        return new Show(label, eventDateTime, venueName, venueCity, price, "ticketmaster", url, kind);
     }
 
     /**

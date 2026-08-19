@@ -71,7 +71,7 @@ class SharedOwnerIsolationTest extends AbstractPostgresIntegrationTest {
         artistRepository.save(sharedArtist);
 
         Show sharedShow = new Show("Shared Only Artist", LocalDateTime.now().plusDays(10),
-                "Shared Only Venue", "Chicago", BigDecimal.TEN, "ticketmaster", "https://x");
+                "Shared Only Venue", "Chicago", BigDecimal.TEN, "ticketmaster", "https://x", Show.Kind.MUSIC);
         sharedShow.setOwner(sharedKey);
         showRepository.save(sharedShow);
     }

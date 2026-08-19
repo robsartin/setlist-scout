@@ -63,7 +63,7 @@ class ShowControllerTest {
     // web.ShowHideActionsTest and scan.HiddenShowSurvivesRescanTest.
     private static Show show(String artistName) {
         Show show = new Show(artistName, LocalDateTime.now().plusDays(5), "Moody Center", "Austin",
-                BigDecimal.TEN, "ticketmaster", null);
+                BigDecimal.TEN, "ticketmaster", null, Show.Kind.MUSIC);
         show.setOwner(OWNER);
         return show;
     }

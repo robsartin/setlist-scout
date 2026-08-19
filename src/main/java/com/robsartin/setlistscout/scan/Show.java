@@ -37,6 +37,17 @@ public class Show {
 
     private String ticketUrl;
 
+    /**
+     * Music or comedy (#202). Every {@code Show} carries one -- {@link TicketmasterService} reads
+     * Ticketmaster's own per-event classification, while {@link BandsintownService} and {@link
+     * BandSiteScraperService} pass {@link Kind#MUSIC} explicitly, since those sources are
+     * music-only/music-oriented and have no classification signal of their own to read (see their
+     * call sites for why that's a true label, not an inferred one).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Kind kind;
+
     @Column(nullable = false)
     private Instant discoveredAt = Instant.now();
 
@@ -53,7 +64,7 @@ public class Show {
     }
 
     public Show(String artistName, LocalDateTime eventDateTime, String venueName, String venueCity,
-                BigDecimal price, String source, String ticketUrl) {
+                BigDecimal price, String source, String ticketUrl, Kind kind) {
         this.artistName = artistName;
         this.eventDateTime = eventDateTime;
         this.venueName = venueName;
@@ -61,6 +72,7 @@ public class Show {
         this.price = price;
         this.source = source;
         this.ticketUrl = ticketUrl;
+        this.kind = kind;
     }
 
     public Long getId() { return id; }
@@ -73,8 +85,12 @@ public class Show {
     public BigDecimal getPrice() { return price; }
     public String getSource() { return source; }
     public String getTicketUrl() { return ticketUrl; }
+    public Kind getKind() { return kind; }
     public Instant getDiscoveredAt() { return discoveredAt; }
     public Instant getHiddenAt() { return hiddenAt; }
     public void setHiddenAt(Instant hiddenAt) { this.hiddenAt = hiddenAt; }
     public boolean isHidden() { return hiddenAt != null; }
+
+    /** #202: what kind of event this is. Comedy is the only non-music case in scope -- film (#204) is deliberately excluded. */
+    public enum Kind { MUSIC, COMEDY }
 }

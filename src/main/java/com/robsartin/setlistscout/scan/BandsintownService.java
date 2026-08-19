@@ -122,6 +122,9 @@ public class BandsintownService {
             label = headliner;
         }
 
-        return new Show(label, eventDateTime, venueName, venueCity, null, "bandsintown", url);
+        // Bandsintown is a music-only API (#202) -- there's no classification field to read, but
+        // MUSIC is a true label here, not a guess: every artist searched against Bandsintown is
+        // being searched as a musical act, so every show it returns is one.
+        return new Show(label, eventDateTime, venueName, venueCity, null, "bandsintown", url, Show.Kind.MUSIC);
     }
 }
