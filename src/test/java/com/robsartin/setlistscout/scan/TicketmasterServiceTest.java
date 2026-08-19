@@ -465,4 +465,356 @@ class TicketmasterServiceTest {
         assertThat(shows).hasSize(1);
         assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.MUSIC);
     }
+
+    // ---- #207: rescue attraction-less events whose title names the artist -----------------
+    //
+    // hasMatchingAttraction's exact match only fires when Ticketmaster actually linked an
+    // attraction; a null OR empty array used to drop the event unconditionally, even when the
+    // artist's name is right there in the event title (measured: 19 of 137 returned events
+    // across 60 random tracked artists, 13.9%, had empty attractions). The fallback below runs
+    // ONLY in that null/empty case -- a populated-but-non-matching array still returns false
+    // without ever trying the title fallback (see the "critical regression guard" test below) --
+    // and only keeps the event when the artist's name (>= 2 tokens) appears as a consecutive
+    // token run in the title AND the title carries no tribute/homage marker. See the Javadoc on
+    // TicketmasterService#hasMatchingAttraction for the full rationale, including why
+    // featuring/ft is deliberately NOT a marker.
+
+    @Test
+    @DisplayName("#207: should rescue an attraction-less event when the artist's name is a consecutive token run in the title")
+    void shouldRescueEventWithNoAttractionsWhenArtistNameIsAConsecutiveRunInTheTitle() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "A Very Merry Symphony ft. Austin Symphony Orchestra",
+                            "dates": {"start": {"dateTime": "2026-12-20T19:00:00Z"}},
+                            "_embedded": {"venues": [{"name": "H-E-B Center at Cedar Park", "city": {"name": "Cedar Park"}}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony Orchestra", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("A Very Merry Symphony ft. Austin Symphony Orchestra");
+    }
+
+    @Test
+    @DisplayName("#207: should rescue an event with an empty attractions array the same way as a missing one")
+    void shouldRescueEventWithEmptyAttractionsArrayTheSameAsAMissingOne() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "A Very Merry Symphony ft. Austin Symphony Orchestra",
+                            "dates": {"start": {"dateTime": "2026-12-20T19:00:00Z"}},
+                            "_embedded": {"attractions": []}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony Orchestra", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207: should rescue an attraction-less event when the artist's tokens match despite adjacent punctuation")
+    void shouldRescueEventWhenArtistTokensMatchDespiteAdjacentPunctuation() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tommy Emmanuel, CGP - Living In The Light Tour",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Tommy Emmanuel", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'tribute'")
+    void shouldDropAttractionlessEventWhoseTitleContainsTribute() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tribute to JIMI HENDRIX by THE HENDRIX EXPERIMENT",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Jimi Hendrix", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'celebration', proving 'featuring' alone is not a marker")
+    void shouldDropAttractionlessEventWhoseTitleContainsCelebration() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Jimi Hendrix Celebration featuring Jeff Moore",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Jimi Hendrix", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'the gospel of'")
+    void shouldDropAttractionlessEventWhoseTitleContainsGospelOf() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Revelations: The Gospel of Chris Cornell",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Chris Cornell", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event for a single-token artist name, even when it appears in the title")
+    void shouldDropAttractionlessEventForSingleTokenArtistName() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "New Year's Eve in Austin",
+                            "dates": {"start": {"dateTime": "2026-12-31T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title contains 'the music of'")
+    void shouldDropAttractionlessEventWhoseTitleContainsTheMusicOf() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "The Rob Dylan Band - Performing The Music of Bob Dylan",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Bob Dylan", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should drop an attraction-less event whose title has no consecutive run of the artist's tokens")
+    void shouldDropAttractionlessEventWhoseTitleHasNoTokenRunMatch() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Some Unrelated Show",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony Orchestra", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: a populated but non-matching attractions array is still dropped, even where the title fallback would not have applied anyway")
+    void shouldDropWhenAttractionsArrayIsPopulatedButNonMatching() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "UNDERTALE Symphony",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "UNDERTALE Symphony"}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Austin Symphony", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#207: should keep an event via exact match when the populated attractions array matches")
+    void shouldKeepWhenAttractionsArrayIsPopulatedAndMatches() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tommy Emmanuel Live",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Tommy Emmanuel"}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Tommy Emmanuel", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207: critical regression guard -- a populated but non-matching attractions array must not fall through to the title fallback")
+    void shouldNotFallBackToTitleWhenAttractionsArrayIsPopulatedButNonMatching() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Tommy Emmanuel Live",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}},
+                            "_embedded": {"attractions": [{"name": "Some Other Act"}]}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Tommy Emmanuel", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
+
+    // ---- #207 fix round 1: Unicode-aware tokenizer -----------------------------------------
+    //
+    // TOKEN_PATTERN was ASCII-only ([a-z0-9]), so an accented or non-Latin artist name tokenized
+    // to a corrupted count -- e.g. "Antonio Sánchez" (2 real words) split into 3 fragments
+    // (["antonio","s","nchez"]), and a fully non-Latin name could tokenize to an empty list.
+    //
+    // IMPORTANT for whoever touches this section next: a "does the fix rescue an event" test
+    // needs care about WHICH guard it actually exercises, verified empirically (not just by
+    // inspection) while building this section. Embedding the artist's exact name as a literal,
+    // space-delimited substring of the title -- e.g. artist "Antonio Sánchez", title "Antonio
+    // Sánchez Trio Live..." -- looks like it should fail under the old ASCII regex, but it
+    // doesn't: tokenize() is a simple left-to-right scan with no lookahead, so the tokens
+    // produced for "Antonio Sánchez" alone are always identical to the tokens produced for that
+    // same substring embedded in a larger title (whitespace is an unambiguous separator under
+    // BOTH the old and new pattern). Old and new tokenize() therefore corrupt the artist-name
+    // needle and its matching span inside the title THE SAME WAY, and guard 2's consecutive-run
+    // check is satisfied either way -- confirmed by actually running that exact case (and the
+    // analogous "Béla Fleck" / "Béla Fleck and the Flecktones" one) against the pre-fix code:
+    // both already passed. A same-script, name-is-a-title-prefix fixture can only ever prove
+    // guard 2 still works; it cannot distinguish the old tokenizer from the new one.
+    //
+    // The bug IS real and IS observable, just through guard 1 (the artist name's own token
+    // count), not guard 2: an artist name that's a single word in truth but fragments into 2+
+    // pieces under the ASCII pattern wrongly SATISFIES ">= 2 tokens" (shouldDropAttraction...
+    // ForSingleTokenAccentedArtistName below); an artist name whose word(s) are entirely
+    // non-Latin script (no bare ASCII letters at all -- true for Cyrillic, Greek, Hangul, etc.,
+    // as opposed to a Latin word with one accented letter, which still leaves ASCII consonants
+    // behind) tokenizes to FEWER pieces than it has real words, which can push a genuine 2+-word
+    // name's old count below 2 and wrongly BLOCK it. The two "should rescue" tests below use
+    // real multi-word non-Latin names for exactly that reason, and both were confirmed to fail
+    // (empty result where one show was expected) against the pre-fix ASCII pattern before this
+    // section was finalized.
+
+    @Test
+    @DisplayName("#207 fix round 1: should rescue an attraction-less event for a multi-word Cyrillic artist name")
+    void shouldRescueEventWithMultiTokenCyrillicArtistName() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Земфира Рамазанова Live in Concert",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Земфира Рамазанова", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207 fix round 1: should rescue an attraction-less event for a multi-word Greek artist name")
+    void shouldRescueEventWithMultiTokenGreekArtistName() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Άλκηστις Πρωτοψάλτη Live in Concert",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Άλκηστις Πρωτοψάλτη", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("#207 fix round 1: should drop an attraction-less event for a single-token accented artist name -- the old ASCII tokenizer wrongly split it into 2+ fragments, passing guard 1 by accident")
+    void shouldDropAttractionlessEventForSingleTokenAccentedArtistName() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"_embedded": {"events": [
+                          {
+                            "name": "Sinéad Live in Austin",
+                            "dates": {"start": {"dateTime": "2026-09-01T19:00:00Z"}}
+                          }
+                        ]}}
+                        """));
+
+        List<Show> shows = service.searchShows("Sinéad", "78701", null, null, 50,
+                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+
+        assertThat(shows).isEmpty();
+    }
 }
