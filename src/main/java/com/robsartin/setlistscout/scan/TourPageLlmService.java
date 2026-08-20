@@ -34,14 +34,24 @@ public class TourPageLlmService {
     private static final int PAGE_TEXT_CHAR_CAP = 200_000;
 
     /**
-     * Sized for a full venue-calendar response, not a typical one (#208). ~50 Cap City Comedy
-     * Club shows in the "YYYY-MM-DD | Venue | City | Performer | KIND" format measured at
-     * roughly 1,100-1,400 tokens across two realistic name-length samples (GPT-class tokenizer
-     * proxy -- Claude's own tokenizer isn't available offline) -- already past the old 1000-token
-     * budget on its own. This leaves comfortable headroom above that measured range for longer
-     * venue/performer names, tokenizer differences, and incidental model preamble.
+     * Sized for a full venue-calendar response, not a typical one (#208), from a live measurement
+     * rather than an estimate: the real Cap City Comedy Club calendar extracts to <b>181 shows,
+     * 6,906 output tokens</b> ({@code stop_reason: end_turn}), i.e. 38.2 tokens per line, spanning
+     * 2026-08-20 to 2027-11-10.
+     * <p>
+     * An earlier estimate of "~50 shows, 1,100-1,400 tokens" was wrong by more than 3x, and the
+     * error is instructive: a comedy club books <b>multi-night runs</b>, so one booked act becomes
+     * three or four dated lines. Counting acts badly undercounts shows. At {@code 4000} the real
+     * calendar was cut off mid-line after ~105 of 181 shows -- 42% of it silently discarded, with
+     * {@code stop_reason: max_tokens} the only trace and every unit test still green, since no test
+     * exercises a full-calendar response.
+     * <p>
+     * 12,000 leaves ~74% headroom over the measured 6,906. Note this is a <b>ceiling, not a
+     * charge</b>: a typical band tour page emits a handful of lines and costs a handful of tokens,
+     * so raising it does not raise the cost of the common case. Truncation here is the failure mode
+     * that looks like success, which is why the bound is generous.
      */
-    private static final int MAX_OUTPUT_TOKENS = 4000;
+    private static final int MAX_OUTPUT_TOKENS = 12_000;
 
     private final RestClient restClient;
     private final String apiKey;

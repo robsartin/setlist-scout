@@ -160,8 +160,8 @@ class TourPageLlmServiceTest {
     }
 
     @Test
-    @DisplayName("sends a max_tokens budget sized to hold a full ~50-show venue calendar response, not "
-            + "just the old 1000 (#208)")
+    @DisplayName("sends a max_tokens budget sized to hold the full 181-show Cap City calendar "
+            + "(measured 6,906 output tokens), not the old 1000 (#208)")
     void sendsRaisedMaxTokensBudget() throws InterruptedException, IOException {
         server.enqueue(json("""
                 {"content": [{"type": "text", "text": ""}]}
@@ -171,7 +171,7 @@ class TourPageLlmServiceTest {
 
         RecordedRequest request = server.takeRequest();
         JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
-        assertThat(body.path("max_tokens").asInt()).isEqualTo(4000);
+        assertThat(body.path("max_tokens").asInt()).isEqualTo(12_000);
     }
 
     // ---- #211: read the text block even when extended thinking precedes it ----------------
