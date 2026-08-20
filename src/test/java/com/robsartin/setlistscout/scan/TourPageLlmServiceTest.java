@@ -2,10 +2,13 @@ package com.robsartin.setlistscout.scan;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robsartin.setlistscout.service.LogCapture;
 import com.robsartin.setlistscout.service.TestAppProperties;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +20,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TourPageLlmServiceTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private MockWebServer server;
     private TourPageLlmService service;
@@ -35,6 +40,30 @@ class TourPageLlmServiceTest {
 
     private static MockResponse json(String body) {
         return new MockResponse().setHeader("Content-Type", "application/json").setBody(body);
+    }
+
+    /** Reads the one request the service sent and returns the prompt text of its "content" field. */
+    private String capturedPromptText() throws InterruptedException, IOException {
+        RecordedRequest request = server.takeRequest();
+        JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
+        return body.path("messages").get(0).path("content").asText();
+    }
+
+    /**
+     * A non-repeating string ("0123456789101112...") truncated to {@code length} chars. Unlike a
+     * repeated filler character, no two differently-positioned or differently-sized windows of
+     * this string are equal, so an {@code endsWith} assertion against a slice of it proves both
+     * the exact cut point *and* the exact length of whatever the production code actually sent --
+     * a same-length homogeneous filler could pass that assertion by coincidence even from the
+     * wrong offset.
+     */
+    private static String longDigitString(int length) {
+        StringBuilder sb = new StringBuilder(length + 16);
+        int i = 0;
+        while (sb.length() < length) {
+            sb.append(i++);
+        }
+        return sb.substring(0, length);
     }
 
     @Test
@@ -90,5 +119,58 @@ class TourPageLlmServiceTest {
         TourPageLlmService.ExtractedShow show = result.get(0);
         assertThat(show.performer()).isNull();
         assertThat(show.kind()).isEqualTo(Show.Kind.MUSIC);
+    }
+
+    // ---- #208: raise the page-text cap so venue calendars survive it ----------------------
+
+    @Test
+    @DisplayName("truncates page text to the new 200,000-char cap, not the old 8,000-char cap, when the "
+            + "page exceeds it (#208)")
+    void truncatesOverCapTextToTheNewCapNotTheOldOne() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"text": ""}]}
+                """));
+        // Comfortably past both the old 8,000-char cap and the new 200,000-char cap. pageText is
+        // non-repeating (see longDigitString), so the prompt's tail can equal pageText[0,200_000)
+        // only if that's actually what got sent -- not pageText[0,8_000) (the old cap) and not
+        // the full 250,000 chars (cap silently dropped).
+        String pageText = longDigitString(250_000);
+
+        service.extractShows("Cap City Comedy Club", pageText);
+
+        String prompt = capturedPromptText();
+        assertThat(prompt).endsWith(pageText.substring(0, 200_000));
+    }
+
+    @Test
+    @DisplayName("sends page text unmodified when it's under the new 200,000-char cap, even though it's "
+            + "well over the old 8,000-char cap (#208)")
+    void sendsUnderCapTextUnmodified() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"text": ""}]}
+                """));
+        // Mirrors the real Cap City Comedy Club calendar (149,420 chars, #208) that the old
+        // 8,000-char cap silently discarded 94.6% of.
+        String pageText = longDigitString(150_000);
+
+        service.extractShows("Cap City Comedy Club", pageText);
+
+        String prompt = capturedPromptText();
+        assertThat(prompt).endsWith(pageText);
+    }
+
+    @Test
+    @DisplayName("sends a max_tokens budget sized to hold a full ~50-show venue calendar response, not "
+            + "just the old 1000 (#208)")
+    void sendsRaisedMaxTokensBudget() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"text": ""}]}
+                """));
+
+        service.extractShows("Cap City Comedy Club", "short page text, far under any cap");
+
+        RecordedRequest request = server.takeRequest();
+        JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
+        assertThat(body.path("max_tokens").asInt()).isEqualTo(4000);
     }
 }

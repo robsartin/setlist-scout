@@ -25,6 +25,24 @@ public class TourPageLlmService {
 
     private static final Logger log = LoggerFactory.getLogger(TourPageLlmService.class);
 
+    /**
+     * Safety bound against a pathological page, not a cost lever (#208) -- the measured median
+     * {@code official_site_url} page is 1,646 chars (18-page production sample), and 80% of
+     * sampled pages never reach even the old 8,000-char cap. Cap City Comedy Club's real venue
+     * calendar (the motivating case, #208) is 149,420 chars and fits comfortably under this.
+     */
+    private static final int PAGE_TEXT_CHAR_CAP = 200_000;
+
+    /**
+     * Sized for a full venue-calendar response, not a typical one (#208). ~50 Cap City Comedy
+     * Club shows in the "YYYY-MM-DD | Venue | City | Performer | KIND" format measured at
+     * roughly 1,100-1,400 tokens across two realistic name-length samples (GPT-class tokenizer
+     * proxy -- Claude's own tokenizer isn't available offline) -- already past the old 1000-token
+     * budget on its own. This leaves comfortable headroom above that measured range for longer
+     * venue/performer names, tokenizer differences, and incidental model preamble.
+     */
+    private static final int MAX_OUTPUT_TOKENS = 4000;
+
     private final RestClient restClient;
     private final String apiKey;
 
@@ -47,7 +65,7 @@ public class TourPageLlmService {
     public List<ExtractedShow> extractShows(String artistName, String pageText) {
         List<ExtractedShow> result = new ArrayList<>();
         // Cap the text sent to the model -- tour pages can be huge; the dates are near the top.
-        String text = pageText.length() > 8000 ? pageText.substring(0, 8000) : pageText;
+        String text = pageText.length() > PAGE_TEXT_CHAR_CAP ? pageText.substring(0, PAGE_TEXT_CHAR_CAP) : pageText;
         String prompt = "This is the text of a tour/shows page belonging to \"" + artistName + "\","
                 + " which may be a band's own site or a venue's calendar of other acts."
                 + " Extract each upcoming live show as one line in exactly this format:\n"
@@ -60,7 +78,7 @@ public class TourPageLlmService {
 
         Map<String, Object> body = Map.of(
                 "model", "claude-sonnet-5",
-                "max_tokens", 1000,
+                "max_tokens", MAX_OUTPUT_TOKENS,
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
