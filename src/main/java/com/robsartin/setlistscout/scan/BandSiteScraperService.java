@@ -80,10 +80,13 @@ public class BandSiteScraperService {
             for (TourPageLlmService.ExtractedShow es : tourPageLlm.extractShows(artistName, doc.text())) {
                 LocalDateTime dt = es.date().atStartOfDay();
                 if (!dt.isBefore(start) && !dt.isAfter(end)) {
-                    // #202: the LLM extractor has no classification signal either -- MUSIC here
-                    // is the same "true by what this source is" label BandsintownService uses,
-                    // not an inferred one. See the class javadoc: "music-oriented".
-                    shows.add(new Show(artistName, dt, es.venue(), es.city(), null, source, pageUrl, Show.Kind.MUSIC));
+                    // #208: the page may be a venue calendar listing other acts, not the tracked
+                    // artist's own tour page -- use the LLM's per-show performer and kind when it
+                    // gave them, falling back to the tracked artist/MUSIC for an older-style or
+                    // partially-compliant response (see ExtractedShow's javadoc).
+                    String performer = (es.performer() != null && !es.performer().isBlank())
+                            ? es.performer() : artistName;
+                    shows.add(new Show(performer, dt, es.venue(), es.city(), null, source, pageUrl, es.kind()));
                 }
             }
         }
@@ -142,8 +145,27 @@ public class BandSiteScraperService {
         String venue = (loc != null && loc.hasNonNull("name")) ? loc.get("name").asText() : "Unknown venue";
         String city = cityOf(loc);
         String url = event.hasNonNull("url") ? event.get("url").asText() : pageUrl;
-        // #202: same "music-oriented, no classification signal" reasoning as extractShows above.
-        return new Show(artistName, dt, venue, city, null, source, url, Show.Kind.MUSIC);
+        String performer = performerOf(event, artistName);
+        // #202: unlike the performer, kind has no schema.org signal this app can trust -- MUSIC
+        // here is the same "true by what this source is" label BandsintownService uses, not an
+        // inferred one. Extending to COMEDY on this path is out of scope for #208.
+        return new Show(performer, dt, venue, city, null, source, url, Show.Kind.MUSIC);
+    }
+
+    /**
+     * schema.org {@code Event.performer} is optional and may be a single {@code Person}/
+     * {@code Organization} object, a bare string, or an array of either (#208) -- a venue
+     * calendar's JSON-LD carries this even though the venue's own tour page never needed it.
+     * Falls back to the tracked artist name (the pre-#208 behaviour) when absent or empty.
+     */
+    private String performerOf(JsonNode event, String artistName) {
+        JsonNode p = event.get("performer");
+        if (p != null && p.isArray()) {
+            p = p.isEmpty() ? null : p.get(0);
+        }
+        if (p == null) return artistName;
+        String name = p.isTextual() ? p.asText() : (p.hasNonNull("name") ? p.get("name").asText() : null);
+        return (name != null && !name.isBlank()) ? name : artistName;
     }
 
     private String cityOf(JsonNode loc) {

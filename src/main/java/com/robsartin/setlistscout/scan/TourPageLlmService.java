@@ -15,8 +15,10 @@ import java.util.Map;
 
 /**
  * LLM fallback for the band-site scraper (#22): when a tour page has no structured JSON-LD
- * events, ask Claude to extract shows from the page text. Returns each show as a
- * (date, venue, city) triple. Degrades to empty on any error so a scrape never breaks a scan.
+ * events, ask Claude to extract shows from the page text. Returns each show as an
+ * {@link ExtractedShow} -- date, venue, city, plus an optional performer and a kind (#208), since
+ * the source page may be a venue calendar listing other acts rather than the tracked artist's own
+ * tour page. Degrades to empty on any error so a scrape never breaks a scan.
  */
 @Service
 public class TourPageLlmService {
@@ -46,9 +48,13 @@ public class TourPageLlmService {
         List<ExtractedShow> result = new ArrayList<>();
         // Cap the text sent to the model -- tour pages can be huge; the dates are near the top.
         String text = pageText.length() > 8000 ? pageText.substring(0, 8000) : pageText;
-        String prompt = "This is the text of a tour/shows page for the band \"" + artistName + "\"."
+        String prompt = "This is the text of a tour/shows page belonging to \"" + artistName + "\","
+                + " which may be a band's own site or a venue's calendar of other acts."
                 + " Extract each upcoming live show as one line in exactly this format:\n"
-                + "YYYY-MM-DD | Venue name | City\n"
+                + "YYYY-MM-DD | Venue name | City | Performer | MUSIC or COMEDY\n"
+                + "Performer is the name of the act actually performing that date -- for a band's own"
+                + " tour page that is \"" + artistName + "\" itself; for a venue calendar it is whoever"
+                + " is booked that date, not the venue. Classify each show as MUSIC or COMEDY.\n"
                 + "One show per line, no header, no commentary. If there are no shows, return nothing.\n\n"
                 + text;
 
@@ -87,8 +93,14 @@ public class TourPageLlmService {
                 LocalDate date = LocalDate.parse(parts[0].trim());
                 String venue = parts[1].trim();
                 String city = parts[2].trim();
+                // Both trail the original 3-field format (#22); a model that doesn't comply still
+                // yields a usable show rather than zero shows -- see class javadoc.
+                String performerRaw = parts.length > 3 ? parts[3].trim() : "";
+                String performer = performerRaw.isBlank() ? null : performerRaw;
+                String kindRaw = parts.length > 4 ? parts[4].trim() : "";
+                Show.Kind kind = kindRaw.equalsIgnoreCase("COMEDY") ? Show.Kind.COMEDY : Show.Kind.MUSIC;
                 if (!venue.isBlank()) {
-                    result.add(new ExtractedShow(date, venue, city));
+                    result.add(new ExtractedShow(date, venue, city, performer, kind));
                 }
             } catch (Exception e) {
                 // skip lines that aren't a well-formed "date | venue | city"; one bad line among
@@ -105,5 +117,12 @@ public class TourPageLlmService {
         return result;
     }
 
-    public record ExtractedShow(LocalDate date, String venue, String city) {}
+    /**
+     * @param performer the performing act's name, or {@code null} when the model didn't return a
+     *     4th field (either an older-style 3-field response, or a genuinely blank field -- both
+     *     collapse to {@code null} so callers have one fallback check, not two).
+     * @param kind {@link Show.Kind#MUSIC} unless the model's 5th field trims to "COMEDY"
+     *     (case-insensitive); also the default when the field is absent.
+     */
+    public record ExtractedShow(LocalDate date, String venue, String city, String performer, Show.Kind kind) {}
 }

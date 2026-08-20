@@ -133,7 +133,8 @@ class BandSiteScraperServiceTest {
         String html = "<html><body><h1>Tour dates</h1><p>Jul 4 - The Fillmore</p></body></html>";
         Document doc = Jsoup.parse(html, "https://band.com");
         when(tourPageLlm.extractShows(eq("Dawes"), anyString())).thenReturn(List.of(
-                new TourPageLlmService.ExtractedShow(LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco")));
+                new TourPageLlmService.ExtractedShow(
+                        LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco", null, Show.Kind.MUSIC)));
 
         List<Show> shows = service.extractShows("Dawes", doc, "https://band.com", START, END);
 
@@ -141,5 +142,114 @@ class BandSiteScraperServiceTest {
         assertThat(shows.get(0).getVenueName()).isEqualTo("The Fillmore");
         assertThat(shows.get(0).getVenueCity()).isEqualTo("San Francisco");
         assertThat(shows.get(0).getSource()).isEqualTo("band-site:band.com");
+    }
+
+    @Test
+    @DisplayName("LLM extraction: a performer name and COMEDY kind override the tracked artist and default kind (#208)")
+    void llmExtractionUsesPerformerAndComedyKind() {
+        String html = "<html><body><h1>Shows</h1><p>Jul 4 - Some Comedian</p></body></html>";
+        Document doc = Jsoup.parse(html, "https://capcitycomedy.com");
+        when(tourPageLlm.extractShows(eq("Cap City Comedy Club"), anyString())).thenReturn(List.of(
+                new TourPageLlmService.ExtractedShow(
+                        LocalDate.of(2026, 7, 4), "Cap City Comedy Club", "Austin", "Some Comedian", Show.Kind.COMEDY)));
+
+        List<Show> shows = service.extractShows(
+                "Cap City Comedy Club", doc, "https://capcitycomedy.com", START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Some Comedian");
+        assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.COMEDY);
+    }
+
+    @Test
+    @DisplayName("LLM extraction: an explicit MUSIC kind is honored, on a venue calendar where the "
+            + "performer must still override the tracked (venue) name (#208)")
+    void llmExtractionUsesMusicKindAndPerformerName() {
+        // Deliberately a venue-calendar shape (tracked name != performer) so this test cannot pass
+        // under the pre-#208 hardcoded "always tracked name" fallback: MUSIC alone is not
+        // discriminating since it's also the old hardcoded default, but the performer assertion is.
+        String html = "<html><body><h1>Calendar</h1><p>Jul 4 - Indie Rock Trio</p></body></html>";
+        Document doc = Jsoup.parse(html, "https://thevenuedowntown.com");
+        when(tourPageLlm.extractShows(eq("The Venue Downtown"), anyString())).thenReturn(List.of(
+                new TourPageLlmService.ExtractedShow(LocalDate.of(2026, 7, 4), "The Venue Downtown",
+                        "Austin", "Indie Rock Trio", Show.Kind.MUSIC)));
+
+        List<Show> shows = service.extractShows(
+                "The Venue Downtown", doc, "https://thevenuedowntown.com", START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Indie Rock Trio");
+        assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.MUSIC);
+    }
+
+    @Test
+    @DisplayName("LLM extraction: a null performer (3-field backward-compat response) falls back to the "
+            + "tracked artist name (#208)")
+    void llmExtractionFallsBackToTrackedArtistWhenPerformerNull() {
+        String html = "<html><body><h1>Tour dates</h1><p>Jul 4 - The Fillmore</p></body></html>";
+        Document doc = Jsoup.parse(html, "https://band.com");
+        when(tourPageLlm.extractShows(eq("Dawes"), anyString())).thenReturn(List.of(
+                new TourPageLlmService.ExtractedShow(
+                        LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco", null, Show.Kind.MUSIC)));
+
+        List<Show> shows = service.extractShows("Dawes", doc, "https://band.com", START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Dawes");
+        assertThat(shows.get(0).getKind()).isEqualTo(Show.Kind.MUSIC);
+    }
+
+    @Test
+    @DisplayName("LLM extraction: a blank (non-null) performer field falls back to the tracked artist name (#208)")
+    void llmExtractionFallsBackToTrackedArtistWhenPerformerBlank() {
+        String html = "<html><body><h1>Tour dates</h1><p>Jul 4 - The Fillmore</p></body></html>";
+        Document doc = Jsoup.parse(html, "https://band.com");
+        when(tourPageLlm.extractShows(eq("Dawes"), anyString())).thenReturn(List.of(
+                new TourPageLlmService.ExtractedShow(
+                        LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco", "   ", Show.Kind.MUSIC)));
+
+        List<Show> shows = service.extractShows("Dawes", doc, "https://band.com", START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Dawes");
+    }
+
+    @Test
+    @DisplayName("JSON-LD: uses the performer name as the show's artist when present (#208)")
+    void jsonLdUsesPerformerNameWhenPresent() {
+        String html = """
+                <html><head>
+                <script type="application/ld+json">
+                {"@type":"Event","startDate":"2026-06-01","location":{"name":"Cap City Comedy Club"},
+                 "performer":{"@type":"Person","name":"Some Comedian"}}
+                </script>
+                </head><body></body></html>
+                """;
+        Document doc = Jsoup.parse(html, "https://capcitycomedy.com");
+
+        List<Show> shows = service.extractShows(
+                "Cap City Comedy Club", doc, "https://capcitycomedy.com", START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Some Comedian");
+    }
+
+    @Test
+    @DisplayName("JSON-LD: falls back to the tracked artist name when there is no performer (existing "
+            + "behaviour, must not regress) (#208)")
+    void jsonLdFallsBackToTrackedArtistWhenNoPerformer() {
+        String html = """
+                <html><head>
+                <script type="application/ld+json">
+                {"@type":"MusicEvent","startDate":"2026-06-01","location":{"name":"Moody Center"}}
+                </script>
+                </head><body></body></html>
+                """;
+        Document doc = Jsoup.parse(html, "https://dawestheband.com");
+
+        List<Show> shows = service.extractShows("Dawes", doc, "https://dawestheband.com", START, END);
+
+        assertThat(shows).hasSize(1);
+        assertThat(shows.get(0).getArtistName()).isEqualTo("Dawes");
     }
 }

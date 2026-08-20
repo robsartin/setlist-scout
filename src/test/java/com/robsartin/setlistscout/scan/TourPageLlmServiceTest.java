@@ -58,4 +58,37 @@ class TourPageLlmServiceTest {
             assertThat(debugEvent.getThrowableProxy().getClassName()).isNotBlank();
         }
     }
+
+    @Test
+    @DisplayName("parses the performer and kind fields (case-insensitively) when the model returns five "
+            + "fields (#208)")
+    void parsesPerformerAndKindFromFiveFieldLine() {
+        server.enqueue(json("""
+                {"content": [{"text": "2026-07-04 | Cap City Comedy Club | Austin | Some Comedian | Comedy"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("Cap City Comedy Club", "irrelevant page text");
+
+        assertThat(result).hasSize(1);
+        TourPageLlmService.ExtractedShow show = result.get(0);
+        assertThat(show.performer()).isEqualTo("Some Comedian");
+        assertThat(show.kind()).isEqualTo(Show.Kind.COMEDY);
+    }
+
+    @Test
+    @DisplayName("defaults performer to null and kind to MUSIC when the model returns only three fields "
+            + "(backward compatibility) (#208)")
+    void defaultsPerformerAndKindOnThreeFieldLine() {
+        server.enqueue(json("""
+                {"content": [{"text": "2026-07-04 | The Fillmore | San Francisco"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result = service.extractShows("Dawes", "irrelevant page text");
+
+        assertThat(result).hasSize(1);
+        TourPageLlmService.ExtractedShow show = result.get(0);
+        assertThat(show.performer()).isNull();
+        assertThat(show.kind()).isEqualTo(Show.Kind.MUSIC);
+    }
 }
