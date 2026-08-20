@@ -70,7 +70,7 @@ class TourPageLlmServiceTest {
     @DisplayName("logs a DEBUG line with cause for a malformed response line, and still parses the well-formed ones")
     void logsDebugOnMalformedLine() {
         server.enqueue(json("""
-                {"content": [{"text": "2026-07-04 | The Fillmore | San Francisco\\nnotadate | Some Venue | Some City\\n2026-08-01 | The Fox Theatre | Atlanta"}]}
+                {"content": [{"type": "text", "text": "2026-07-04 | The Fillmore | San Francisco\\nnotadate | Some Venue | Some City\\n2026-08-01 | The Fox Theatre | Atlanta"}]}
                 """));
 
         try (LogCapture logs = LogCapture.attachAt(TourPageLlmService.class, Level.DEBUG)) {
@@ -93,7 +93,7 @@ class TourPageLlmServiceTest {
             + "fields (#208)")
     void parsesPerformerAndKindFromFiveFieldLine() {
         server.enqueue(json("""
-                {"content": [{"text": "2026-07-04 | Cap City Comedy Club | Austin | Some Comedian | Comedy"}]}
+                {"content": [{"type": "text", "text": "2026-07-04 | Cap City Comedy Club | Austin | Some Comedian | Comedy"}]}
                 """));
 
         List<TourPageLlmService.ExtractedShow> result =
@@ -110,7 +110,7 @@ class TourPageLlmServiceTest {
             + "(backward compatibility) (#208)")
     void defaultsPerformerAndKindOnThreeFieldLine() {
         server.enqueue(json("""
-                {"content": [{"text": "2026-07-04 | The Fillmore | San Francisco"}]}
+                {"content": [{"type": "text", "text": "2026-07-04 | The Fillmore | San Francisco"}]}
                 """));
 
         List<TourPageLlmService.ExtractedShow> result = service.extractShows("Dawes", "irrelevant page text");
@@ -128,7 +128,7 @@ class TourPageLlmServiceTest {
             + "page exceeds it (#208)")
     void truncatesOverCapTextToTheNewCapNotTheOldOne() throws InterruptedException, IOException {
         server.enqueue(json("""
-                {"content": [{"text": ""}]}
+                {"content": [{"type": "text", "text": ""}]}
                 """));
         // Comfortably past both the old 8,000-char cap and the new 200,000-char cap. pageText is
         // non-repeating (see longDigitString), so the prompt's tail can equal pageText[0,200_000)
@@ -147,7 +147,7 @@ class TourPageLlmServiceTest {
             + "well over the old 8,000-char cap (#208)")
     void sendsUnderCapTextUnmodified() throws InterruptedException, IOException {
         server.enqueue(json("""
-                {"content": [{"text": ""}]}
+                {"content": [{"type": "text", "text": ""}]}
                 """));
         // Mirrors the real Cap City Comedy Club calendar (149,420 chars, #208) that the old
         // 8,000-char cap silently discarded 94.6% of.
@@ -164,7 +164,7 @@ class TourPageLlmServiceTest {
             + "just the old 1000 (#208)")
     void sendsRaisedMaxTokensBudget() throws InterruptedException, IOException {
         server.enqueue(json("""
-                {"content": [{"text": ""}]}
+                {"content": [{"type": "text", "text": ""}]}
                 """));
 
         service.extractShows("Cap City Comedy Club", "short page text, far under any cap");
@@ -172,5 +172,77 @@ class TourPageLlmServiceTest {
         RecordedRequest request = server.takeRequest();
         JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
         assertThat(body.path("max_tokens").asInt()).isEqualTo(4000);
+    }
+
+    // ---- #211: read the text block even when extended thinking precedes it ----------------
+
+    @Test
+    @DisplayName("reads the text block even when a thinking block precedes it in content (#211)")
+    void readsTextBlockWhenThinkingBlockPrecedesIt() {
+        server.enqueue(json("""
+                {"content": [{"type": "thinking", "thinking": "reasoning about the page..."}, \
+                {"type": "text", "text": "2026-07-04 | The Fillmore | San Francisco\\n2026-08-01 | The Fox Theatre | Atlanta"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("Dawes", "irrelevant page text");
+
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("logs a WARN with stop_reason when the response contains no text block at all (#211)")
+    void logsWarnWhenNoTextBlockPresent() {
+        server.enqueue(json("""
+                {"content": [{"type": "thinking", "thinking": "reasoning about the page..."}], \
+                "stop_reason": "max_tokens"}
+                """));
+
+        try (LogCapture logs = LogCapture.attach(TourPageLlmService.class)) {
+            List<TourPageLlmService.ExtractedShow> result =
+                    service.extractShows("Cap City Comedy Club", "irrelevant page text");
+
+            assertThat(result).isEmpty();
+
+            ILoggingEvent warnEvent = logs.events().stream()
+                    .filter(e -> e.getLevel() == Level.WARN)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("expected a WARN log for the missing text block"));
+            assertThat(warnEvent.getKeyValuePairs().stream()
+                    .filter(kv -> "stop_reason".equals(kv.key))
+                    .map(kv -> String.valueOf(kv.value))
+                    .findFirst())
+                    .contains("max_tokens");
+        }
+    }
+
+    @Test
+    @DisplayName("does not log a warning when a text block is present but legitimately parses to zero shows (#211)")
+    void doesNotWarnWhenTextBlockParsesToZeroShows() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": ""}]}
+                """));
+
+        try (LogCapture logs = LogCapture.attach(TourPageLlmService.class)) {
+            List<TourPageLlmService.ExtractedShow> result =
+                    service.extractShows("Some Venue With No Shows", "irrelevant page text");
+
+            assertThat(result).isEmpty();
+            assertThat(logs.events()).noneMatch(e -> e.getLevel() == Level.WARN);
+        }
+    }
+
+    @Test
+    @DisplayName("disables extended thinking so the full output budget goes to extraction, not reasoning (#211)")
+    void disablesExtendedThinking() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": ""}]}
+                """));
+
+        service.extractShows("Dawes", "irrelevant page text");
+
+        RecordedRequest request = server.takeRequest();
+        JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
+        assertThat(body.path("thinking").path("type").asText()).isEqualTo("disabled");
     }
 }
