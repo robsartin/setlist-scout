@@ -15,13 +15,43 @@ import java.util.Map;
 
 /**
  * LLM fallback for the band-site scraper (#22): when a tour page has no structured JSON-LD
- * events, ask Claude to extract shows from the page text. Returns each show as a
- * (date, venue, city) triple. Degrades to empty on any error so a scrape never breaks a scan.
+ * events, ask Claude to extract shows from the page text. Returns each show as an
+ * {@link ExtractedShow} -- date, venue, city, plus an optional performer and a kind (#208), since
+ * the source page may be a venue calendar listing other acts rather than the tracked artist's own
+ * tour page. Degrades to empty on any error so a scrape never breaks a scan.
  */
 @Service
 public class TourPageLlmService {
 
     private static final Logger log = LoggerFactory.getLogger(TourPageLlmService.class);
+
+    /**
+     * Safety bound against a pathological page, not a cost lever (#208) -- the measured median
+     * {@code official_site_url} page is 1,646 chars (18-page production sample), and 80% of
+     * sampled pages never reach even the old 8,000-char cap. Cap City Comedy Club's real venue
+     * calendar (the motivating case, #208) is 149,420 chars and fits comfortably under this.
+     */
+    private static final int PAGE_TEXT_CHAR_CAP = 200_000;
+
+    /**
+     * Sized for a full venue-calendar response, not a typical one (#208), from a live measurement
+     * rather than an estimate: the real Cap City Comedy Club calendar extracts to <b>181 shows,
+     * 6,906 output tokens</b> ({@code stop_reason: end_turn}), i.e. 38.2 tokens per line, spanning
+     * 2026-08-20 to 2027-11-10.
+     * <p>
+     * An earlier estimate of "~50 shows, 1,100-1,400 tokens" was wrong by more than 3x, and the
+     * error is instructive: a comedy club books <b>multi-night runs</b>, so one booked act becomes
+     * three or four dated lines. Counting acts badly undercounts shows. At {@code 4000} the real
+     * calendar was cut off mid-line after ~105 of 181 shows -- 42% of it silently discarded, with
+     * {@code stop_reason: max_tokens} the only trace and every unit test still green, since no test
+     * exercises a full-calendar response.
+     * <p>
+     * 12,000 leaves ~74% headroom over the measured 6,906. Note this is a <b>ceiling, not a
+     * charge</b>: a typical band tour page emits a handful of lines and costs a handful of tokens,
+     * so raising it does not raise the cost of the common case. Truncation here is the failure mode
+     * that looks like success, which is why the bound is generous.
+     */
+    private static final int MAX_OUTPUT_TOKENS = 12_000;
 
     private final RestClient restClient;
     private final String apiKey;
@@ -45,16 +75,24 @@ public class TourPageLlmService {
     public List<ExtractedShow> extractShows(String artistName, String pageText) {
         List<ExtractedShow> result = new ArrayList<>();
         // Cap the text sent to the model -- tour pages can be huge; the dates are near the top.
-        String text = pageText.length() > 8000 ? pageText.substring(0, 8000) : pageText;
-        String prompt = "This is the text of a tour/shows page for the band \"" + artistName + "\"."
+        String text = pageText.length() > PAGE_TEXT_CHAR_CAP ? pageText.substring(0, PAGE_TEXT_CHAR_CAP) : pageText;
+        String prompt = "This is the text of a tour/shows page belonging to \"" + artistName + "\","
+                + " which may be a band's own site or a venue's calendar of other acts."
                 + " Extract each upcoming live show as one line in exactly this format:\n"
-                + "YYYY-MM-DD | Venue name | City\n"
+                + "YYYY-MM-DD | Venue name | City | Performer | MUSIC or COMEDY\n"
+                + "Performer is the name of the act actually performing that date -- for a band's own"
+                + " tour page that is \"" + artistName + "\" itself; for a venue calendar it is whoever"
+                + " is booked that date, not the venue. Classify each show as MUSIC or COMEDY.\n"
                 + "One show per line, no header, no commentary. If there are no shows, return nothing.\n\n"
                 + text;
 
         Map<String, Object> body = Map.of(
                 "model", "claude-sonnet-5",
-                "max_tokens", 1000,
+                "max_tokens", MAX_OUTPUT_TOKENS,
+                // Mechanical extraction from supplied text, not a reasoning task -- extended
+                // thinking is on by default and can consume the whole output budget before a
+                // text block is ever produced (#211).
+                "thinking", Map.of("type", "disabled"),
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
@@ -77,8 +115,31 @@ public class TourPageLlmService {
         if (response == null) return result;
         List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
         if (content == null || content.isEmpty()) return result;
-        String responseText = (String) content.get(0).get("text");
-        if (responseText == null) return result;
+
+        // content is a list of typed blocks, not always text-first -- claude-sonnet-5 returns
+        // extended thinking by default, so content[0] can be a "thinking" block with no "text"
+        // key (#211). Scan for the first block actually typed "text" instead of indexing 0.
+        String responseText = null;
+        for (Map<String, Object> block : content) {
+            if ("text".equals(block.get("type"))) {
+                responseText = (String) block.get("text");
+                break;
+            }
+        }
+        if (responseText == null) {
+            // Total failure (e.g. thinking consumed the whole output budget) and "this page
+            // genuinely has no shows" must not look identical from the outside (#211) -- the
+            // latter always produces a text block, even an empty/non-matching one.
+            var warn = log.atWarn()
+                    .addKeyValue("source", "tour-llm")
+                    .addKeyValue("artist", artistName);
+            Object stopReason = response.get("stop_reason");
+            if (stopReason != null) {
+                warn = warn.addKeyValue("stop_reason", stopReason);
+            }
+            warn.log("tour-page extraction returned no text block");
+            return result;
+        }
 
         for (String line : responseText.split("\n")) {
             String[] parts = line.split("\\|");
@@ -87,8 +148,14 @@ public class TourPageLlmService {
                 LocalDate date = LocalDate.parse(parts[0].trim());
                 String venue = parts[1].trim();
                 String city = parts[2].trim();
+                // Both trail the original 3-field format (#22); a model that doesn't comply still
+                // yields a usable show rather than zero shows -- see class javadoc.
+                String performerRaw = parts.length > 3 ? parts[3].trim() : "";
+                String performer = performerRaw.isBlank() ? null : performerRaw;
+                String kindRaw = parts.length > 4 ? parts[4].trim() : "";
+                Show.Kind kind = kindRaw.equalsIgnoreCase("COMEDY") ? Show.Kind.COMEDY : Show.Kind.MUSIC;
                 if (!venue.isBlank()) {
-                    result.add(new ExtractedShow(date, venue, city));
+                    result.add(new ExtractedShow(date, venue, city, performer, kind));
                 }
             } catch (Exception e) {
                 // skip lines that aren't a well-formed "date | venue | city"; one bad line among
@@ -105,5 +172,12 @@ public class TourPageLlmService {
         return result;
     }
 
-    public record ExtractedShow(LocalDate date, String venue, String city) {}
+    /**
+     * @param performer the performing act's name, or {@code null} when the model didn't return a
+     *     4th field (either an older-style 3-field response, or a genuinely blank field -- both
+     *     collapse to {@code null} so callers have one fallback check, not two).
+     * @param kind {@link Show.Kind#MUSIC} unless the model's 5th field trims to "COMEDY"
+     *     (case-insensitive); also the default when the field is absent.
+     */
+    public record ExtractedShow(LocalDate date, String venue, String city, String performer, Show.Kind kind) {}
 }
