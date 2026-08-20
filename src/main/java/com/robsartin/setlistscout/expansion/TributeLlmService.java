@@ -57,6 +57,10 @@ public class TributeLlmService {
         Map<String, Object> body = Map.of(
                 "model", "claude-sonnet-5",
                 "max_tokens", 300,
+                // A recall-and-list request, not a reasoning task -- extended thinking is on by
+                // default and can consume the whole output budget before a text block is ever
+                // produced (#213, same fix as #211).
+                "thinking", Map.of("type", "disabled"),
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
@@ -80,8 +84,30 @@ public class TributeLlmService {
         List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
         if (content == null || content.isEmpty()) return result;
 
-        String text = (String) content.get(0).get("text");
-        if (text == null) return result;
+        // content is a list of typed blocks, not always text-first -- claude-sonnet-5 returns
+        // extended thinking by default, so content[0] can be a "thinking" block with no "text"
+        // key (#213). Scan for the first block actually typed "text" instead of indexing 0.
+        String text = null;
+        for (Map<String, Object> block : content) {
+            if ("text".equals(block.get("type"))) {
+                text = (String) block.get("text");
+                break;
+            }
+        }
+        if (text == null) {
+            // Total failure (e.g. thinking consumed the whole output budget) and "the model knows
+            // of none" must not look identical from the outside (#213) -- the latter always
+            // produces a text block, even an empty one.
+            var warn = log.atWarn()
+                    .addKeyValue("source", "tribute-llm")
+                    .addKeyValue("artist", artistName);
+            Object stopReason = response.get("stop_reason");
+            if (stopReason != null) {
+                warn = warn.addKeyValue("stop_reason", stopReason);
+            }
+            warn.log("tribute-bands returned no text block");
+            return result;
+        }
 
         for (String line : text.split("\n")) {
             if (line.isBlank()) continue;
