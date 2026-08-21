@@ -115,4 +115,24 @@ tasks.withType<Test> {
     // class javadoc). Set to 4, not the host's full core count: Docker Desktop here has ~7.75GB
     // memory allocated and is shared with other concurrent build processes on this machine.
     maxParallelForks = 4
+    // Without this, Gradle prints a failure as a bare `AssertionError at SomeTest.java:159` and
+    // discards the exception's type and message -- the two things that actually identify it.
+    //
+    // That cost real diagnosis time (#210). `ArtistSeedServiceRaceTest`'s failing assertion is an
+    // `assertThatCode(...).doesNotThrowAnyException()`, where the escaping exception IS the entire
+    // diagnosis; #199 restructured that test specifically so its failure would name its own cause,
+    // and this omission made that work invisible at the console. The same failure was consequently
+    // misdiagnosed three separate times in one day -- once as a dead Testcontainers Postgres, once
+    // as an ON CONFLICT constraint bug (#219, closed as not-a-bug) -- when the real cause was a
+    // TimeoutException under a 6x-slowed build, which the message would have named immediately.
+    //
+    // `events("failed")` keeps green runs as quiet as they are today: this only ever fires on a
+    // failure, so it costs nothing on the happy path.
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+    }
 }
