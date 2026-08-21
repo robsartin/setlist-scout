@@ -19,12 +19,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Issue #223: {@code V27__add_show_event_artist_id} adds {@code show_event.artist_id} and backfills
+ * Issue #223: {@code V28__add_show_event_artist_id} adds {@code show_event.artist_id} and backfills
  * it for every row that already existed before it ran -- the riskiest part of the migration, since
  * it runs once against the full live table (227 rows profiled 2026-08-21: 172 venue, 6 band-site,
  * 49 ticketmaster) and can never be re-triggered for a row it got wrong.
  * <p>
- * Builds a populated pre-V27 DB (migrated through V26) with one hand-seeded {@code artist} row per
+ * Builds a populated pre-V28 DB (migrated through V26) with one hand-seeded {@code artist} row per
  * case the migration has to get right: an exact-name match, a CASE variant, and a HYPHEN-SPACING
  * variant -- deliberately not just a case variant, since a case-only fixture cannot distinguish the
  * required {@link com.robsartin.setlistscout.catalog.ArtistNameNormalizer} backfill from a cheaper
@@ -44,7 +44,7 @@ class AddShowEventArtistIdMigrationTest {
 
     @Test
     void backfillsArtistIdByNormalizedNameAndLeavesUnmatchedAndCrossOwnerRowsNull() throws Exception {
-        // 1. Migrate up to V26 (pre-V27 state): artist_id does not exist yet.
+        // 1. Migrate up to V26 (pre-V28 state): artist_id does not exist yet.
         Flyway toV26 = Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .baselineOnMigrate(true)
@@ -94,10 +94,10 @@ class AddShowEventArtistIdMigrationTest {
                     "SELECT count(*) FROM information_schema.columns "
                             + "WHERE table_name = 'show_event' AND column_name = 'artist_id'");
             columnExists.next();
-            assertThat(columnExists.getInt(1)).as("artist_id column absent before V27").isZero();
+            assertThat(columnExists.getInt(1)).as("artist_id column absent before V28").isZero();
         }
 
-        // 3. Migrate to latest (V27 adds the column, index, FK, and runs the Java backfill).
+        // 3. Migrate to latest (V28 adds the column, index, FK, and runs the Java backfill).
         Flyway toLatest = Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .baselineOnMigrate(true)
@@ -132,7 +132,7 @@ class AddShowEventArtistIdMigrationTest {
             // 5. No row deleted or added by the backfill itself.
             ResultSet count = s.executeQuery("SELECT count(*) FROM show_event");
             count.next();
-            assertThat(count.getInt(1)).as("no rows deleted or added by V27").isEqualTo(5);
+            assertThat(count.getInt(1)).as("no rows deleted or added by V28").isEqualTo(5);
 
             // 6. The column is indexed (the whole point -- #220's filter becomes a join).
             ResultSet indexExists = s.executeQuery(

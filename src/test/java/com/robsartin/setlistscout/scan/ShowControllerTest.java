@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
@@ -39,6 +40,7 @@ class ShowControllerTest {
     private ArtistRepository artistRepository;
     private ScanJobRepository scanJobRepository;
     private SettingsService settingsService;
+    private ArtistActivationService activationService;
     private ShowController controller;
 
     @BeforeEach
@@ -47,6 +49,7 @@ class ShowControllerTest {
         artistRepository = mock(ArtistRepository.class);
         scanJobRepository = mock(ScanJobRepository.class);
         settingsService = mock(SettingsService.class);
+        activationService = mock(ArtistActivationService.class);
         CurrentUser currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
         // #206 fix round 1 (Important 2): populateShows issues two narrow queries -- this stub
@@ -56,7 +59,7 @@ class ShowControllerTest {
         when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION)).thenReturn(List.of());
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         controller = new ShowController(showRepository, artistRepository, scanJobRepository,
-                settingsService, currentUser, adminGuard);
+                settingsService, currentUser, adminGuard, activationService);
     }
 
     // No id is set here (Show's id is JPA-generated, no setter) -- these controller-unit tests
@@ -227,5 +230,152 @@ class ShowControllerTest {
 
         verify(showRepository, never()).save(any());
         assertThat(view).isEqualTo("redirect:/");
+    }
+
+    // ---- issue #223: hide-and-cancel -------------------------------------------------------
+
+    private static Artist artistWithId(long id, String name, ArtistSource source, ArtistStatus status) {
+        Artist artist = new Artist(name, source, status, null, null);
+        org.springframework.test.util.ReflectionTestUtils.setField(artist, "id", id);
+        return artist;
+    }
+
+    @Test
+    @DisplayName("issue #223: hide-and-cancel hides the show and transitions a SEED artist to REMOVED")
+    void hideAndCancelTransitionsSeedArtistToRemoved() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show target = show("Radiohead");
+        target.setArtistId(42L);
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(target));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Artist seedArtist = artistWithId(42L, "Radiohead", ArtistSource.SEED_LIST, ArtistStatus.SEED);
+        when(artistRepository.findByIdAndOwner(42L, OWNER)).thenReturn(Optional.of(seedArtist));
+        Model model = new ExtendedModelMap();
+
+        controller.hideAndCancel(9L, "eventDate", false, "hx", model);
+
+        verify(showRepository).save(target);
+        assertThat(target.getHiddenAt()).isNotNull();
+        verify(activationService).changeStatus(42L, OWNER, ArtistStatus.REMOVED);
+    }
+
+    @Test
+    @DisplayName("issue #223: hide-and-cancel transitions a PENDING_REVIEW artist to REJECTED")
+    void hideAndCancelTransitionsPendingReviewArtistToRejected() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show target = show("Nick Mullen");
+        target.setArtistId(43L);
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(target));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Artist pending = artistWithId(43L, "Nick Mullen", ArtistSource.VENUE_EXPANSION, ArtistStatus.PENDING_REVIEW);
+        when(artistRepository.findByIdAndOwner(43L, OWNER)).thenReturn(Optional.of(pending));
+        Model model = new ExtendedModelMap();
+
+        controller.hideAndCancel(9L, "eventDate", false, "hx", model);
+
+        verify(activationService).changeStatus(43L, OWNER, ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("issue #223: hide-and-cancel transitions an APPROVED (expansion-sourced) artist to REJECTED")
+    void hideAndCancelTransitionsApprovedArtistToRejected() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show target = show("Damn the Torpedoes");
+        target.setArtistId(44L);
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(target));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Artist approved = artistWithId(44L, "Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, ArtistStatus.APPROVED);
+        when(artistRepository.findByIdAndOwner(44L, OWNER)).thenReturn(Optional.of(approved));
+        Model model = new ExtendedModelMap();
+
+        controller.hideAndCancel(9L, "eventDate", false, "hx", model);
+
+        verify(activationService).changeStatus(44L, OWNER, ArtistStatus.REJECTED);
+    }
+
+    @Test
+    @DisplayName("issue #223: hide-and-cancel never bumps an already-REMOVED artist to REJECTED")
+    void hideAndCancelLeavesAnAlreadyRemovedArtistAsRemoved() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show target = show("Old Seed");
+        target.setArtistId(45L);
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(target));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Artist removed = artistWithId(45L, "Old Seed", ArtistSource.SEED_LIST, ArtistStatus.REMOVED);
+        when(artistRepository.findByIdAndOwner(45L, OWNER)).thenReturn(Optional.of(removed));
+        Model model = new ExtendedModelMap();
+
+        controller.hideAndCancel(9L, "eventDate", false, "hx", model);
+
+        verify(activationService).changeStatus(45L, OWNER, ArtistStatus.REMOVED);
+    }
+
+    @Test
+    @DisplayName("issue #223: a null artist_id hides the show and does nothing to any artist")
+    void hideAndCancelWithNullArtistIdOnlyHidesTheShow() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show target = show("A Very Merry Symphony ft. Austin Symphony Orchestra");
+        // artistId left null -- a Ticketmaster row from before #223, or otherwise unresolved.
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(target));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Model model = new ExtendedModelMap();
+
+        controller.hideAndCancel(9L, "eventDate", false, "hx", model);
+
+        verify(showRepository).save(target);
+        assertThat(target.getHiddenAt()).isNotNull();
+        verify(artistRepository, never()).findByIdAndOwner(any(), any());
+        verify(activationService, never()).changeStatus(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("issue #223: hide-and-cancel on another owner's show id is a no-op, not a leak")
+    void hideAndCancelIsNoOpWhenShowNotOwned() {
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.empty());
+        Model model = new ExtendedModelMap();
+
+        String view = controller.hideAndCancel(9L, "eventDate", false, null, model);
+
+        verify(showRepository, never()).save(any());
+        verify(activationService, never()).changeStatus(any(), any(), any());
+        assertThat(view).isEqualTo("redirect:/");
+    }
+
+    @Test
+    @DisplayName("issue #223: an artist_id that doesn't resolve for this owner is treated like null -- "
+            + "still hides the show, never touches another owner's artist")
+    void hideAndCancelTreatsAForeignArtistIdAsAbsent() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show target = show("Somebody Else's Artist");
+        target.setArtistId(999L);
+        when(showRepository.findByIdAndOwner(9L, OWNER)).thenReturn(Optional.of(target));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        // Owner-scoped lookup finds nothing -- id 999 doesn't belong to this owner. Deliberately ALSO
+        // stub the unscoped findById to return a real (foreign-owned) artist: a production regression
+        // that swapped findByIdAndOwner for a plain findById would find and act on THIS row, which is
+        // exactly what the verify(never()) below must catch -- an unstubbed findById (defaulting to
+        // Optional.empty()) would let that regression sail through undetected.
+        when(artistRepository.findByIdAndOwner(999L, OWNER)).thenReturn(Optional.empty());
+        Artist foreignArtist = artistWithId(999L, "Somebody Else's Artist", ArtistSource.SEED_LIST, ArtistStatus.SEED);
+        when(artistRepository.findById(999L)).thenReturn(Optional.of(foreignArtist));
+        Model model = new ExtendedModelMap();
+
+        controller.hideAndCancel(9L, "eventDate", false, "hx", model);
+
+        verify(showRepository).save(target);
+        assertThat(target.getHiddenAt()).isNotNull();
+        verify(activationService, never()).changeStatus(any(), any(), any());
     }
 }

@@ -125,10 +125,15 @@
                     <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
                     <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
                     <td>
-                        <!--/* Owner-scoped server-side (ShowController#toggleHidden via
+                        <!--/* Owner-scoped server-side (ShowController#toggleHidden/#hideAndCancel via
                                findByIdAndOwner); sort/showHidden hidden inputs carry the current
                                view state through the swap, same technique as candidates.html's
-                               group-action forms carrying `via`/`type`/`decision`. */-->
+                               group-action forms carrying `via`/`type`/`decision`.
+
+                               Issue #223: a non-hidden row now carries TWO buttons, so each
+                               th:autofocus check names its OWN action ('hide' / 'hide-and-cancel'),
+                               not just the row id -- otherwise an outcome targeting this row would
+                               make both satisfy autofocus at once. */-->
                         <form th:if="${not show.hidden}" class="inline" method="post"
                               th:action="@{/shows/{id}/hide(id=${show.id})}"
                               th:hx-post="@{/shows/{id}/hide(id=${show.id})}"
@@ -136,8 +141,23 @@
                             <input type="hidden" name="sort" th:value="${currentSort}"/>
                             <input type="hidden" name="showHidden" th:value="${showHidden}"/>
                             <button type="submit" class="btn-sm"
-                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id)}"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'hide')}"
                                     th:aria-label="'Hide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide</button>
+                        </form>
+                        <!--/* #223: hides the show AND transitions the artist behind it (SEED ->
+                               REMOVED; PENDING_REVIEW/APPROVED -> REJECTED) in one request. Renders
+                               unconditionally alongside Hide, even when show.artistId is null --
+                               ShowController#hideAndCancel just hides in that case, same as plain
+                               Hide, so the button always does at least as much as Hide does. */-->
+                        <form th:if="${not show.hidden}" class="inline" method="post"
+                              th:action="@{/shows/{id}/hide-and-cancel(id=${show.id})}"
+                              th:hx-post="@{/shows/{id}/hide-and-cancel(id=${show.id})}"
+                              hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                            <input type="hidden" name="sort" th:value="${currentSort}"/>
+                            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                            <button type="submit" class="btn-sm"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'hide-and-cancel')}"
+                                    th:aria-label="'Hide ' + ${show.artistName} + ' and stop following the artist, at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide &amp; Stop Following</button>
                         </form>
                         <form th:if="${show.hidden}" class="inline" method="post"
                               th:action="@{/shows/{id}/unhide(id=${show.id})}"
@@ -146,7 +166,7 @@
                             <input type="hidden" name="sort" th:value="${currentSort}"/>
                             <input type="hidden" name="showHidden" th:value="${showHidden}"/>
                             <button type="submit" class="btn-sm"
-                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id)}"
+                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'unhide')}"
                                     th:aria-label="'Unhide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Unhide</button>
                         </form>
                     </td>

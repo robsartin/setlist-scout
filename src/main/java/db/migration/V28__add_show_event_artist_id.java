@@ -57,7 +57,7 @@ import java.sql.Statement;
  * {@code ticketmaster} row, and the total row count staying 227 (see the report for the actual
  * counts observed).
  */
-public class V27__add_show_event_artist_id extends BaseJavaMigration {
+public class V28__add_show_event_artist_id extends BaseJavaMigration {
 
     @Override
     public void migrate(Context context) throws Exception {
