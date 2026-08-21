@@ -194,8 +194,10 @@ class UniqueNormalizedNameMigrationTest {
             assertThat(indexDef(s, "idx_artist_owner_normalized_name"))
                     .as("V19's superseded non-unique index dropped").isNull();
             assertThat(indexDef(s, "artist_owner_name_key"))
-                    .as("(owner, name) uniqueness deliberately kept -- see ArtistRepository#insertIfAbsent")
-                    .isNotNull();
+                    .as("(owner, name) uniqueness -- deliberately kept through V22, dropped later as "
+                            + "redundant by V27 (#219); this test migrates to latest, so that later "
+                            + "drop is visible here too")
+                    .isNull();
 
             // 10. The constraint TOOK: a spelling variant of an existing row is now rejected by the
             // database, not merely discouraged by an application pre-check.

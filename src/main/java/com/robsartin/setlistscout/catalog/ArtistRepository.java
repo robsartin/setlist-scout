@@ -139,16 +139,43 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
      * constraints, and the normalized arbiter fires first, so nothing that used to be absorbed
      * stops being absorbed.
      *
-     * <h2>Why (owner, name) uniqueness is kept anyway -- #179</h2>
-     * It is now redundant in normal operation and deliberately left in place. {@code normalize} is
-     * a function of {@code name}, so two rows sharing {@code (owner, name)} necessarily share
-     * {@code (owner, normalized_name)} -- meaning the normalized constraint strictly implies this
-     * one and this one can never fire on its own. That is precisely what makes it worth keeping:
-     * the only way to violate it is to write a {@code normalized_name} that is NOT the normalizer's
-     * output for its own {@code name} (a hand-written SQL insert, or a future call site passing a
-     * mismatched value to this method), which is a data-integrity bug worth failing on rather than
-     * absorbing. It also keeps {@link #findByOwnerAndName}'s single-result contract an explicit
-     * database guarantee instead of one derived from the normalizer's behaviour.
+     * <h2>Why (owner, name) uniqueness was DROPPED -- #219, reversing #179</h2>
+     * #179 kept this narrower constraint deliberately, arguing that since {@code normalize} is a
+     * function of {@code name}, two rows sharing {@code (owner, name)} necessarily share
+     * {@code (owner, normalized_name)} too -- so the normalized constraint strictly implies this
+     * one, and "this one can never fire on its own". A CI failure under real concurrency (PR #226)
+     * falsified that "never" outright: {@code ArtistSeedServiceRaceTest} threw a genuine
+     * {@code DataIntegrityViolationException} on {@code artist_owner_name_key} with fully
+     * self-consistent data -- a full Java recompute of {@code normalized_name} across all 33,077
+     * production rows found zero that differ from a fresh
+     * {@link ArtistNameNormalizer#normalize(String)}.
+     * <p>
+     * The mechanism needs no inconsistent data at all. Postgres {@code ON CONFLICT} uses
+     * SPECULATIVE insertion: pre-check the arbiter index; if clear, insert the tuple speculatively;
+     * then insert into EVERY index on the table. A conflict found on the ARBITER aborts the
+     * speculative insert cleanly (DO NOTHING). A conflict found on a NON-arbiter index RAISES. Two
+     * genuinely simultaneous calls to this method for the same brand-new name can both pass the
+     * {@code (owner, normalized_name)} arbiter's pre-check, both insert speculatively, and only
+     * THEN collide on {@code artist_owner_name_key} during index insertion -- a step neither
+     * transaction's own arbiter-conflict handling ever covers, because it happens after the
+     * pre-check both of them already passed. That window is narrow enough to need real concurrency
+     * on a loaded machine to hit, which is why it survived two earlier, wrong diagnoses that each
+     * tested a sequential or artificially-staggered interleave instead of the real one (issue
+     * #219's comment history records both).
+     * <p>
+     * The redundancy half of #179's argument was always correct, and is exactly what makes
+     * DROPPING this constraint -- rather than re-targeting {@code ON CONFLICT} again -- the right
+     * fix: every {@code (owner, name)} duplicate it ever caught is also an {@code (owner,
+     * normalized_name)} duplicate, so {@code V27__drop_artist_owner_name_constraint} removes no
+     * real protection, and the surviving constraint catches strictly more (case and punctuation
+     * variants this one never could -- see the section above). The one behaviour that genuinely
+     * changes: {@link #findByOwnerAndName}'s single-result contract is no longer an INDEPENDENT
+     * database guarantee -- it now holds only because every write path on this table derives
+     * {@code normalized_name} from {@code name} ({@link Artist#syncNormalizedName()} for JPA, an
+     * explicit parameter here for this native query), not because the database would still reject
+     * a hand-written row that broke that invariant. See
+     * {@code DropArtistOwnerNameConstraintMigrationTest} for the schema assertion and that one
+     * now-permitted case, made deliberately explicit rather than left as a silent side effect.
      * <p>
      * Has no {@code @Transactional} of its own -- like every other {@code insertIfAbsent} in this
      * codebase, it relies on an already-transactional caller (see {@code ArtistSeedService

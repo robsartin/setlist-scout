@@ -4,12 +4,17 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
-// Both constraints are real and both are deliberate -- see ArtistRepository#insertIfAbsent for
-// why (owner, normalized_name) is the stronger one and the ON CONFLICT target, and why the
-// narrower (owner, name) is kept anyway. ddl-auto=validate does not check unique constraints, so
-// these are documentation of the schema V1/V21 actually create, not their source of truth.
+// (owner, normalized_name) is the ONLY unique constraint on this table as of #219 -- see
+// ArtistRepository#insertIfAbsent for why it's the ON CONFLICT target, and for why the narrower
+// (owner, name) constraint that used to be declared here too was DROPPED rather than kept: #179
+// argued the stronger constraint made it impossible to violate on its own, but a CI failure under
+// real concurrency (PR #226) falsified that -- Postgres speculative insertion can raise on a
+// non-arbiter constraint before a racing insert ever reaches the arbiter's own conflict check (see
+// V27's migration and insertIfAbsent's javadoc for the full mechanism). ddl-auto=validate does not
+// check unique constraints, so this annotation is documentation of the schema V1/V21 actually
+// create, not their source of truth -- removing the narrower entry here cannot break startup, and
+// leaving it in would document a constraint that no longer exists.
 @Table(name = "artist", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"owner", "name"}),
         @UniqueConstraint(columnNames = {"owner", "normalized_name"})
 })
 public class Artist {

@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -30,6 +31,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * names, a violation of this OTHER, still-present constraint keeps throwing -- hit repeatedly in
  * production whenever two different owners add an artist with the same name, a case the composite
  * {@code (owner, name)} constraint is supposed to allow.
+ *
+ * <p>This test always migrates through to latest, so it also sees every later change to
+ * {@code artist}'s constraints -- including #219's V27, which drops {@code artist_owner_name_key}
+ * itself as redundant with the stronger {@code artist_owner_normalized_name_key} (V21, #179). The
+ * assertions below were updated accordingly: they now check the surviving normalized constraint
+ * rather than the composite one this test originally pinned, and step 5's last case (a hand-written
+ * row with a {@code normalized_name} inconsistent with its own {@code name}) now succeeds instead
+ * of throwing, since #219 is precisely what stopped catching that shape. See
+ * {@code DropArtistOwnerNameConstraintMigrationTest} for the dedicated schema assertion.
  *
  * <p>Builds a genuine pre-#27 legacy {@code artist} shape (no {@code owner} column, like
  * {@link LegacyOwnerColumnMigrationTest}) but ALSO carrying a hash-named single-column
@@ -102,12 +112,16 @@ class DropOrphanedArtistNameConstraintMigrationTest {
             assertThat(uniqueConstraintColumnSets(s)).as("no unique constraint left on just {name}")
                     .doesNotContain("name");
 
-            // 5. The composite constraint is still present, by its real name, with the right
-            // column set, and still enforced: same owner + same name twice is still rejected.
+            // 5. artist_owner_name_key itself is dropped later, as redundant (#219) -- this test
+            // migrates through the FULL chain, so what remains here is the stronger
+            // artist_owner_normalized_name_key, and IT is what still rejects a same-owner
+            // same-name duplicate. No unique constraint on just {name} was left behind either way
+            // (asserted above), which is the actual claim V15/#141 makes.
             assertThat(constraintExists(s, "artist_owner_name_key"))
-                    .as("composite artist_owner_name_key constraint untouched").isTrue();
-            assertThat(uniqueConstraintColumnSets(s)).as("composite (owner, name) constraint present")
-                    .contains("name,owner");
+                    .as("artist_owner_name_key -- dropped later as redundant, see #219").isFalse();
+            assertThat(uniqueConstraintColumnSets(s))
+                    .as("only the normalized (owner, normalized_name) constraint remains -- #219")
+                    .containsExactly("normalized_name,owner");
 
             String wilburysNormalizedName = ArtistNameNormalizer.normalize("Traveling Wilburys");
             s.execute("INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
@@ -117,26 +131,26 @@ class DropOrphanedArtistNameConstraintMigrationTest {
                     "INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
                             + "VALUES ('rob@example.com', 'Traveling Wilburys', '" + wilburysNormalizedName
                             + "', 'SEED_LIST', 'SEED', now())"))
-                    .as("same owner + same name is still rejected")
+                    .as("same owner + same name is still rejected, now via the normalized arbiter alone")
                     .isInstanceOf(SQLException.class)
-                    .hasMessageContaining("duplicate key value violates unique constraint");
+                    .hasMessageContaining("artist_owner_normalized_name_key");
 
-            // Deliberately NOT asserting WHICH constraint rejected that one: since #179 the row
-            // above violates both artist_owner_name_key and the stronger
-            // artist_owner_normalized_name_key, and which one Postgres reports first is an index
-            // ordering detail, not a promise. This next row is the case only the composite
-            // (owner, name) constraint can catch -- same owner and name, but a normalized_name that
-            // is NOT the normalizer's output for it, so the stronger constraint sees no conflict.
-            // It is exactly why #179 kept the narrower constraint rather than dropping it as
-            // redundant (see ArtistRepository#insertIfAbsent), and it pins that this migration left
-            // it enforcing something real.
-            assertThatThrownBy(() -> s.execute(
+            // #219: this next row is the one shape ONLY the now-dropped artist_owner_name_key ever
+            // caught -- same owner and name, but a normalized_name that is NOT the normalizer's
+            // output for it. Through V22 that made it worth keeping (see the pre-#219
+            // ArtistRepository#insertIfAbsent javadoc); #219 found that reasoning falsified by a CI
+            // failure under real concurrency and dropped the constraint as redundant. This row now
+            // inserts cleanly -- deliberately pinned here rather than left as an unnoticed
+            // behaviour change, and safe because no live write path can ever produce a
+            // normalized_name inconsistent with its own name (see
+            // DropArtistOwnerNameConstraintMigrationTest).
+            assertThatCode(() -> s.execute(
                     "INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
                             + "VALUES ('rob@example.com', 'Traveling Wilburys', 'not-the-normalized-form'"
                             + ", 'SEED_LIST', 'SEED', now())"))
-                    .as("composite (owner, name) constraint still enforced on its own")
-                    .isInstanceOf(SQLException.class)
-                    .hasMessageContaining("artist_owner_name_key");
+                    .as("#219: no longer rejected -- artist_owner_name_key, the only constraint that "
+                            + "ever caught this shape, is gone")
+                    .doesNotThrowAnyException();
         }
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {

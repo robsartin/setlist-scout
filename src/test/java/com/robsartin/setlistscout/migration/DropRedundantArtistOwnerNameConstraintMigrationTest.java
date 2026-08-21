@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -47,6 +48,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * survives untouched, {@code artist_owner_normalized_name_key} is unaffected, and the composite
  * constraint still does its job -- one owner still cannot duplicate a name, two different owners
  * still can share one.
+ *
+ * <p>Both test methods migrate through to latest, so both also see every later change to
+ * {@code artist}'s constraints -- including #219's V27, which drops the real, declared
+ * {@code artist_owner_name_key} itself as redundant with the stronger
+ * {@code artist_owner_normalized_name_key}. The assertions below were updated accordingly: only
+ * the normalized constraint survives to "latest" any more, and the one row shape that used to be
+ * rejected only by {@code artist_owner_name_key} now inserts cleanly. See
+ * {@code DropArtistOwnerNameConstraintMigrationTest} for the dedicated schema assertion.
  *
  * <p>{@link #noOpWhenTheRedundantConstraintNeverExisted} is the companion case: a database built
  * from V1 onward never has the redundant constraint (V1 creates {@code artist} with only the
@@ -100,24 +109,27 @@ class DropRedundantArtistOwnerNameConstraintMigrationTest {
         assertThat(migrate(null).success).isTrue();
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
-            // 5. Exactly the two real constraints remain -- the redundant one dropped, nothing
-            // else touched.
+            // 5. Exactly the normalized constraint remains: the fake redundant twin V22 targets is
+            // dropped here, and the real artist_owner_name_key -- which survives V22 -- is itself
+            // dropped later, as redundant, by V27 (#219). This test always migrates to latest, so
+            // that later drop is visible in this same assertion.
             assertThat(uniqueConstraintNames(s))
-                    .as("only the two declared constraints remain")
-                    .containsExactlyInAnyOrder("artist_owner_name_key", "artist_owner_normalized_name_key");
+                    .as("only the normalized constraint remains -- artist_owner_name_key dropped by #219")
+                    .containsExactly("artist_owner_normalized_name_key");
 
-            // 6. Same owner, same name, but a normalized_name that is NOT the normalizer's output
-            // for it -- the one case only the (owner, name) constraint can catch, isolating that
-            // artist_owner_name_key specifically is still enforcing (not merely the stronger
-            // artist_owner_normalized_name_key). Mirrors
-            // DropOrphanedArtistNameConstraintMigrationTest's same trick.
-            assertThatThrownBy(() -> s.execute(
+            // 6. #219: same owner, same name, but a normalized_name that is NOT the normalizer's
+            // output for it -- the one shape that used to be rejected only by the now-dropped
+            // artist_owner_name_key (see the pre-#219 version of this assertion, which named that
+            // constraint explicitly). No live write path can ever produce this shape, so it now
+            // inserts cleanly rather than throwing -- pinned deliberately, not left as a silent
+            // behaviour change.
+            assertThatCode(() -> s.execute(
                     "INSERT INTO artist (owner, name, normalized_name, source, status, created_at) "
                             + "VALUES ('" + OWNER_A + "', 'Nebraska', 'not-the-normalized-form', "
                             + "'SEED_LIST', 'SEED', now())"))
-                    .as("one owner still cannot duplicate a name -- artist_owner_name_key enforces it")
-                    .isInstanceOf(SQLException.class)
-                    .hasMessageContaining("artist_owner_name_key");
+                    .as("#219: no longer rejected -- artist_owner_name_key, the only constraint that "
+                            + "ever caught this shape, is gone")
+                    .doesNotThrowAnyException();
         }
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
@@ -127,9 +139,13 @@ class DropRedundantArtistOwnerNameConstraintMigrationTest {
                     + "VALUES ('" + OWNER_B + "', 'Nebraska', '" + nebraskaNormalized
                     + "', 'SEED_LIST', 'SEED', now())");
 
+            // Three rows now, not two: OWNER_A's real Nebraska row (step 2), OWNER_A's
+            // mismatched-normalized-name row that step 6 proved now inserts cleanly (#219), and
+            // OWNER_B's Nebraska row (this step).
             ResultSet rs = s.executeQuery("SELECT count(*) FROM artist WHERE name = 'Nebraska'");
             rs.next();
-            assertThat(rs.getInt(1)).as("both owners' Nebraska rows persisted").isEqualTo(2);
+            assertThat(rs.getInt(1)).as("both owners' Nebraska rows persisted, plus step 6's #219 row")
+                    .isEqualTo(3);
         }
     }
 
@@ -141,9 +157,12 @@ class DropRedundantArtistOwnerNameConstraintMigrationTest {
         assertThat(migrate(null).success).isTrue();
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
+            // Only the normalized constraint remains: V22 had nothing to drop (no fake redundant
+            // twin was ever created in this test), and artist_owner_name_key itself -- the real,
+            // declared constraint V22 leaves alone -- is dropped later by V27 as redundant (#219).
             assertThat(uniqueConstraintNames(s))
-                    .as("only the two declared constraints ever existed -- V22 had nothing to drop")
-                    .containsExactlyInAnyOrder("artist_owner_name_key", "artist_owner_normalized_name_key");
+                    .as("V22 had nothing to drop; artist_owner_name_key is dropped later by #219")
+                    .containsExactly("artist_owner_normalized_name_key");
         }
     }
 
