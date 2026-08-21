@@ -79,8 +79,8 @@ class ScanUnitRunnerTest {
         Show show = new Show("ZZ Top", LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(show));
-        when(showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
-                eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(false);
+        when(showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(Optional.empty());
 
         int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
 
@@ -94,6 +94,33 @@ class ScanUnitRunnerTest {
         verify(artistSiteUrlService).recordOfficialSiteUrl(zz.getId(), OWNER, "https://zztop.com");
         verify(artistRepository, never()).save(any());
         verify(showRepository).save(show);
+        assertThat(show.getArtistId())
+                .as("issue #223: the persist path writes the scanning artist's id through")
+                .isEqualTo(ARTIST_ID);
+    }
+
+    @Test
+    @DisplayName("issue #223: writes the scanning artist's id through even when artist_name is an "
+            + "event title name-matching could never resolve (the Ticketmaster case)")
+    void writesArtistIdThroughEvenWhenNameIsAnEventTitle() {
+        Artist symphony = seed("Austin Symphony Orchestra");
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(symphony));
+
+        // TicketmasterService sets artist_name to the EVENT TITLE, not the artist's catalog name --
+        // this string matches nothing in the catalog by name, on purpose (see TicketmasterService).
+        String eventTitle = "A Very Merry Symphony ft. Austin Symphony Orchestra";
+        Show show = new Show(eventTitle, LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
+        when(showSource.search(any())).thenReturn(List.of(show));
+        when(showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                eq(OWNER), eq(eventTitle), any(), eq("Moody Center"))).thenReturn(Optional.empty());
+
+        int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
+
+        assertThat(saved).isEqualTo(1);
+        assertThat(show.getArtistId())
+                .as("100% accurate even though name-matching could never have resolved this row")
+                .isEqualTo(ARTIST_ID);
     }
 
     @Test
@@ -105,12 +132,64 @@ class ScanUnitRunnerTest {
         Show show = new Show("ZZ Top", LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(show));
-        when(showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
-                eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(true);
+        Show existing = new Show("ZZ Top", show.getEventDateTime(), "Moody Center", "Austin",
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
+        existing.setArtistId(ARTIST_ID);
+        when(showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(Optional.of(existing));
 
         int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
 
         assertThat(saved).isEqualTo(0);
+        verify(showRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("issue #223: a rescan fills a null artist_id on an existing row (self-heal)")
+    void rescanRepairsNullArtistIdOnExistingRow() {
+        Artist zz = seed("ZZ Top");
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(zz));
+
+        Show rediscovered = new Show("ZZ Top", LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
+        when(showSource.search(any())).thenReturn(List.of(rediscovered));
+
+        // The existing row was written before artist_id existed (or otherwise left unresolved) --
+        // artistId is left null here to model that.
+        Show existing = new Show("ZZ Top", rediscovered.getEventDateTime(), "Moody Center", "Austin",
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
+        when(showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(Optional.of(existing));
+
+        int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
+
+        assertThat(saved).as("the row already existed -- not counted as newly saved").isEqualTo(0);
+        assertThat(existing.getArtistId()).as("the null was repaired").isEqualTo(ARTIST_ID);
+        verify(showRepository).save(existing);
+        verify(showRepository, never()).save(rediscovered);
+    }
+
+    @Test
+    @DisplayName("issue #223: a rescan never overwrites an existing row's already-set artist_id")
+    void rescanNeverOverwritesNonNullArtistId() {
+        Artist zz = seed("ZZ Top");
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER)).thenReturn(Optional.of(zz));
+
+        Show rediscovered = new Show("ZZ Top", LocalDateTime.now().plusDays(10), "Moody Center", "Austin",
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
+        when(showSource.search(any())).thenReturn(List.of(rediscovered));
+
+        Show existing = new Show("ZZ Top", rediscovered.getEventDateTime(), "Moody Center", "Austin",
+                BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
+        existing.setArtistId(999L); // a different, already-resolved artist -- must survive untouched
+        when(showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"))).thenReturn(Optional.of(existing));
+
+        int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
+
+        assertThat(saved).isEqualTo(0);
+        assertThat(existing.getArtistId())
+                .as("never overwritten, even though this scan's artistId differs").isEqualTo(999L);
         verify(showRepository, never()).save(any());
     }
 

@@ -89,7 +89,7 @@ public class ScanUnitRunner {
 
         ScanQuery query = buildQuery(artist, settings, start, end);
 
-        return persistNew(owner, source.search(query));
+        return persistNew(owner, artistId, source.search(query));
     }
 
     /**
@@ -121,16 +121,36 @@ public class ScanUnitRunner {
         return url;
     }
 
-    int persistNew(String owner, List<Show> shows) {
+    /**
+     * Persists every genuinely-new show, and repairs a null {@code artist_id} on one already
+     * persisted (issue #223).
+     * <p>
+     * {@code artistId} is written through on a NEW row unconditionally: {@code run}'s caller
+     * already knows exactly which artist it scanned, so this is 100% accurate even for a
+     * Ticketmaster row whose {@code artistName} is the event title, since it never goes through
+     * name matching at all.
+     * <p>
+     * For a row that already exists by natural key, the null-repair is deliberately narrow: only
+     * fills a null {@code artist_id} (a row written before this column existed, or otherwise left
+     * unresolved), and never overwrites one already set. That bounds a name-matching-era null to
+     * self-heal within one scan cycle instead of staying null for up to six months (until the
+     * show's own event date passes) -- see the {@code V27} Java backfill migration for the
+     * one-time historical repair this complements.
+     */
+    int persistNew(String owner, Long artistId, List<Show> shows) {
         int saved = 0;
         for (Show show : shows) {
             if (show.getEventDateTime() == null) continue;
-            boolean exists = showRepository.existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+            Optional<Show> existing = showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
                     owner, show.getArtistName(), show.getEventDateTime(), show.getVenueName());
-            if (!exists) {
+            if (existing.isEmpty()) {
                 show.setOwner(owner);
+                show.setArtistId(artistId);
                 showRepository.save(show);
                 saved++;
+            } else if (existing.get().getArtistId() == null) {
+                existing.get().setArtistId(artistId);
+                showRepository.save(existing.get());
             }
         }
         return saved;

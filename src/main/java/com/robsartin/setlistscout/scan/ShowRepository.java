@@ -24,6 +24,14 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
 
     boolean existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(String owner, String artistName, LocalDateTime eventDateTime, String venueName);
 
+    /**
+     * Same natural-key lookup as {@link #existsByOwnerAndArtistNameAndEventDateTimeAndVenueName},
+     * but returns the row itself (issue #223): {@code ScanUnitRunner#persistNew} needs to inspect
+     * an EXISTING row's {@code artist_id} to self-heal a null one on rescan, not just know whether
+     * it exists.
+     */
+    Optional<Show> findByOwnerAndArtistNameAndEventDateTimeAndVenueName(String owner, String artistName, LocalDateTime eventDateTime, String venueName);
+
     /** Owner-scoped lookup for hide/unhide -- absent for a foreign id, never a leak. */
     Optional<Show> findByIdAndOwner(Long id, String owner);
 
@@ -52,6 +60,10 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
      * {@code scan.ScanUnitRunner#persistNew}, which predates this rule, {@code VenueScanRunner}
      * (#206 Task 3) uses this instead of that read-then-write pattern.
      * <p>
+     * {@code artistId} (issue #223) is nullable -- {@code VenueScanRunner} has no single scanning
+     * artist for a whole venue calendar, so it resolves one per show by owner-scoped normalized-name
+     * lookup against the catalog and passes whatever it found (or {@code null}).
+     * <p>
      * {@code @Transactional} directly on this interface method -- mirrors
      * {@code ScanJobRepository#redueAll}'s exact rationale: this is a {@code @Modifying} native
      * query, which needs an ambient transaction to execute, and its caller ({@code
@@ -65,9 +77,9 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     @Transactional
     @Query(value = """
             INSERT INTO show_event
-                (owner, artist_name, event_date_time, venue_name, venue_city, price, source, ticket_url, kind, discovered_at)
+                (owner, artist_name, event_date_time, venue_name, venue_city, price, source, ticket_url, kind, discovered_at, artist_id)
             VALUES
-                (:owner, :artistName, :eventDateTime, :venueName, :venueCity, :price, :source, :ticketUrl, :kind, :discoveredAt)
+                (:owner, :artistName, :eventDateTime, :venueName, :venueCity, :price, :source, :ticketUrl, :kind, :discoveredAt, :artistId)
             ON CONFLICT (owner, artist_name, event_date_time, venue_name) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("owner") String owner,
@@ -79,5 +91,6 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
                         @Param("source") String source,
                         @Param("ticketUrl") String ticketUrl,
                         @Param("kind") String kind,
-                        @Param("discoveredAt") Instant discoveredAt);
+                        @Param("discoveredAt") Instant discoveredAt,
+                        @Param("artistId") Long artistId);
 }
