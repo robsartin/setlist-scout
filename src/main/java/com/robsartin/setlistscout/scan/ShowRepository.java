@@ -31,6 +31,19 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     List<Show> findByOwnerOrderByEventDateTimeAsc(String owner);
 
     /**
+     * Per-source show counts, venue sources only (#206 Task 6, the {@code /venues} page's
+     * "shows contributed" column). A {@code COUNT(*) ... GROUP BY}, never {@code
+     * findAll().size()} -- CLAUDE.md/the task brief are explicit that this must scale with the
+     * count, not the row set. Grouped by {@code source} (not one owner-wide total) because {@code
+     * VenueScanRunner#persist} computes each venue's source as {@code "venue:" + host(calendarUrl)}
+     * -- distinct venues get distinct source strings, so {@code VenueController} can attribute
+     * each group back to the one venue whose own calendar-URL host produced it.
+     */
+    @Query("SELECT s.source AS source, COUNT(s) AS showCount FROM Show s "
+            + "WHERE s.owner = :owner AND s.source LIKE 'venue:%' GROUP BY s.source")
+    List<VenueSourceCount> countByOwnerGroupedByVenueSource(@Param("owner") String owner);
+
+    /**
      * Add one show, idempotently (#206). {@code ON CONFLICT (owner, artist_name, event_date_time,
      * venue_name) DO NOTHING} against {@code show_event}'s existing unique constraint
      * ({@code show_event_owner_artist_name_event_date_time_venue_name_key}, V1/V2) -- a DB-level

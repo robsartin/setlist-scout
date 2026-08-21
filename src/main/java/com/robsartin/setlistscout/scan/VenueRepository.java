@@ -36,4 +36,12 @@ public interface VenueRepository extends JpaRepository<Venue, Long> {
     List<Venue> findByOwnerOrderByNameAsc(String owner);
 
     Optional<Venue> findByIdAndOwner(Long id, String owner);
+
+    /**
+     * Looks up the row {@link #insertIfAbsent} just created (or absorbed into) by its identity
+     * key, since that native {@code INSERT} returns only a row count, never the entity or its
+     * generated id (#206 Task 6: {@code VenueService#addVenue} needs the id to create the venue's
+     * {@code venue_scan_job} row).
+     */
+    Optional<Venue> findByOwnerAndNormalizedName(String owner, String normalizedName);
 }
