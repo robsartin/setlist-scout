@@ -4,6 +4,7 @@ import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.time.Instant;
 
 /**
@@ -36,10 +37,23 @@ public class VenueService {
     }
 
     /**
+     * What {@link #addVenue} actually did, so {@code VenueController} can decide whether the owner
+     * needs to be told something (#206 fix round 1, Important 1). {@code BLANK} stays silent --
+     * mirrors {@code ArtistSeedService#addSeedIfNew}'s existing blank-guard convention, an empty
+     * submission is its own obvious feedback. {@code INVALID_URL} is NOT silent: a stored venue
+     * whose calendar URL resolves to a null host can only ever fail to scan, forever, with no
+     * signal that anything is wrong -- the concrete failure the review called out
+     * ("capcitycomedy.com/events" with no scheme -&gt; {@code URI.create(...).getHost()} is null
+     * -&gt; {@code source} becomes the literal "venue:null").
+     */
+    public enum AddVenueOutcome { ADDED, BLANK, INVALID_URL }
+
+    /**
      * Adds {@code rawName}/{@code rawUrl} as a new venue for {@code owner}, unless either is
-     * blank after trimming (mirrors {@code catalog.ArtistSeedService#addSeedIfNew}'s blank guard).
-     * Idempotent by name, matching every other seed path in this app: a duplicate name (by
-     * {@link ArtistNameNormalizer#normalize}) is silently absorbed by {@link
+     * blank after trimming (mirrors {@code catalog.ArtistSeedService#addSeedIfNew}'s blank guard)
+     * or {@code rawUrl}'s host cannot be resolved (#206 fix round 1, Important 1 -- see {@link
+     * #hasResolvableHost}). Idempotent by name, matching every other seed path in this app: a
+     * duplicate name (by {@link ArtistNameNormalizer#normalize}) is silently absorbed by {@link
      * VenueRepository#insertIfAbsent} -- no error, no second row.
      * <p>
      * Both writes happen in this ONE transaction: a venue that exists without a job is scanned by
@@ -54,16 +68,51 @@ public class VenueService {
      * ended up without a job in the past, rather than leaving it stuck inert forever.
      */
     @Transactional
-    public void addVenue(String owner, String rawName, String rawUrl) {
+    public AddVenueOutcome addVenue(String owner, String rawName, String rawUrl) {
         String name = rawName == null ? "" : rawName.trim();
         String url = rawUrl == null ? "" : rawUrl.trim();
         if (name.isEmpty() || url.isEmpty()) {
-            return;
+            return AddVenueOutcome.BLANK;
+        }
+        if (!hasResolvableHost(url)) {
+            return AddVenueOutcome.INVALID_URL;
         }
         String normalizedName = ArtistNameNormalizer.normalize(name);
         Instant now = Instant.now();
         venueRepository.insertIfAbsent(owner, name, normalizedName, url, now);
         venueRepository.findByOwnerAndNormalizedName(owner, normalizedName)
                 .ifPresent(venue -> venueScanJobRepository.insertIfAbsent(owner, venue.getId(), now));
+        return AddVenueOutcome.ADDED;
+    }
+
+    /**
+     * Removes {@code id}'s venue for {@code owner}, if it exists and belongs to them; a no-op,
+     * not a leak, for a foreign or unknown id (#206 fix round 1, Important 1) -- matches this
+     * codebase's established owner-scoped-mutation shape (e.g. {@code
+     * ArtistController#setSiteUrl}'s {@code findByIdAndOwner(...).ifPresent(...)}). V25's {@code
+     * venue_scan_job.venue_id REFERENCES venue (id) ON DELETE CASCADE} means this single delete is
+     * enough to remove the venue's scan job too -- confirmed by a real Postgres-backed test
+     * ({@code VenuePageRenderTest.removingAVenueDeletesItAndItsScanJob}) rather than assumed from
+     * the migration's own comment.
+     */
+    @Transactional
+    public void removeVenue(String owner, Long id) {
+        venueRepository.findByIdAndOwner(id, owner).ifPresent(venueRepository::delete);
+    }
+
+    /**
+     * Whether {@code url} has a resolvable host component -- the same check, and the same
+     * "unknown host" failure mode, {@code VenueController#sourceFor} already has to defend against
+     * when computing a venue's {@code "venue:" + host} source key. A scheme-less URL like
+     * "capcitycomedy.com/events" parses as a relative reference (no authority component), so
+     * {@link URI#getHost()} returns null rather than throwing -- the exact case this method exists
+     * to catch before the row is ever stored.
+     */
+    private static boolean hasResolvableHost(String url) {
+        try {
+            return URI.create(url).getHost() != null;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 }

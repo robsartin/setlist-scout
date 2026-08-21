@@ -15,6 +15,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -87,6 +88,12 @@ class VenuePageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(addIdx).isPositive();
         assertThat(listIdx).isPositive();
         assertThat(addIdx).isLessThan(listIdx);
+
+        // Minor 4 (#206 fix round 1): venues.html used to carry a SECOND <h1> ("Add a venue") over
+        // the form, an accessibility regression -- artists.html's equivalent add-form uses a
+        // <label> only, with exactly one <h1> on the whole page (its list section). Match that.
+        assertThat(html).as("exactly one <h1> on the page, matching every other page in this app: %s", html)
+                .containsOnlyOnce("<h1");
     }
 
     @Test
@@ -94,7 +101,12 @@ class VenuePageRenderTest extends AbstractPostgresIntegrationTest {
     void inputsAreLabelled() throws Exception {
         String html = mvc.perform(get("/venues").with(oidcLogin().idToken(t -> t.claim("email", OWNER))))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(html).contains("for=\"venue-name\"").contains("for=\"venue-url\"");
+        // Minor 3 (#206 fix round 1): the given test only asserted for="venue-name"/"venue-url" --
+        // deleting id="venue-name" from the input breaks the label association while this stays
+        // green (the for= attribute is still literally present in the markup). Assert the id too,
+        // so the association itself -- not just half of it -- is pinned.
+        assertThat(html).contains("for=\"venue-name\"").contains("id=\"venue-name\"")
+                .contains("for=\"venue-url\"").contains("id=\"venue-url\"");
     }
 
     @Test
@@ -200,6 +212,79 @@ class VenuePageRenderTest extends AbstractPostgresIntegrationTest {
         String quietRow = html.substring(quietIdx);
         assertThat(busyRow).contains("2 shows");
         assertThat(quietRow).contains("0 shows");
+    }
+
+    /**
+     * Important 1 (#206 fix round 1): the design's "Managing venues" section calls for "name +
+     * calendar URL, the list, and remove" -- Task 6 shipped add + list but no remove, leaving a
+     * venue whose calendar URL resolves to a null host (see
+     * {@link #addingAVenueWithAnUnresolvableHostIsRejectedWithAVisibleMessage}) permanently
+     * unrecoverable. Confirms V25's {@code ON DELETE CASCADE} actually fires from a plain venue
+     * delete, rather than assuming the migration comment is accurate.
+     */
+    @Test
+    @DisplayName("#206 fix round 1 (Important 1): removing a venue deletes it and its scan job")
+    void removingAVenueDeletesItAndItsScanJob() throws Exception {
+        String owner = "venues-remove@example.com";
+        venueService.addVenue(owner, "Temporary Room", "https://temp.example.com/events");
+        Long venueId = venueRepository.findByOwnerOrderByNameAsc(owner).get(0).getId();
+        assertThat(venueScanJobRepository.findByOwner(owner)).hasSize(1);
+
+        mvc.perform(post("/venues/{id}/remove", venueId)
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))).with(csrf()))
+                .andExpect(status().is3xxRedirection());
+
+        assertThat(venueRepository.findByIdAndOwner(venueId, owner)).isEmpty();
+        assertThat(venueScanJobRepository.findByOwner(owner))
+                .as("V25's venue_scan_job.venue_id REFERENCES venue(id) ON DELETE CASCADE")
+                .isEmpty();
+        String html = mvc.perform(get("/venues").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(html).doesNotContain("Temporary Room");
+    }
+
+    @Test
+    @DisplayName("#206 fix round 1 (Important 1): one owner cannot remove another owner's venue")
+    void removeIsOwnerScoped() throws Exception {
+        String victim = "venues-remove-victim@example.com";
+        venueService.addVenue(victim, "Victim Room", "https://victim.example.com/events");
+        Long venueId = venueRepository.findByOwnerOrderByNameAsc(victim).get(0).getId();
+
+        String attacker = "venues-remove-attacker@example.com";
+        mvc.perform(post("/venues/{id}/remove", venueId)
+                        .with(oidcLogin().idToken(t -> t.claim("email", attacker))).with(csrf()))
+                .andExpect(status().is3xxRedirection());
+
+        assertThat(venueRepository.findByIdAndOwner(venueId, victim))
+                .as("another owner's remove request must not delete this venue")
+                .isPresent();
+        assertThat(venueScanJobRepository.findByOwner(victim)).hasSize(1);
+    }
+
+    /**
+     * Important 1 (#206 fix round 1): the concrete failure the review called out. The owner types
+     * "capcitycomedy.com/events" (no scheme) -- {@code URI.create(...).getHost()} returns null,
+     * {@code source} becomes the literal "venue:null", and the scrape fails every cycle forever
+     * with (pre-fix) no way to even see it was rejected. Reject it up front instead.
+     */
+    @Test
+    @DisplayName("#206 fix round 1 (Important 1): a calendar URL with no scheme (null host) is rejected at add time, with a visible message")
+    void addingAVenueWithAnUnresolvableHostIsRejectedWithAVisibleMessage() throws Exception {
+        String owner = "venues-invalid-url@example.com";
+
+        MvcResult result = mvc.perform(post("/venues")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))).with(csrf())
+                        .param("name", "Cap City Comedy Club")
+                        .param("url", "capcitycomedy.com/events"))
+                .andExpect(status().is3xxRedirection())
+                .andReturn();
+
+        assertThat(venueRepository.findByOwnerOrderByNameAsc(owner))
+                .as("a null-host URL must not be stored -- it can only ever fail to scan")
+                .isEmpty();
+        assertThat((String) result.getFlashMap().get("venueMessage"))
+                .as("the rejection must be visible, not silent like the blank-field guard")
+                .isNotBlank();
     }
 
     private void seedShow(String owner, String artistName, String source, LocalDateTime eventDateTime) {

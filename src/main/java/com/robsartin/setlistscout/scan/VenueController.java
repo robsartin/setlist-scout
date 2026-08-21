@@ -4,9 +4,11 @@ import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.net.URI;
 import java.time.Instant;
@@ -53,10 +55,34 @@ public class VenueController {
      * list. Plain redirect, not an htmx fragment response: matches {@code
      * ArtistController#upload}'s equivalent handler, and this page's add form has no fragment
      * contract to honor (see the class javadoc).
+     * <p>
+     * #206 fix round 1 (Important 1): a rejected {@code INVALID_URL} outcome carries a flash
+     * message back through the redirect -- matches {@code ArtistController#upload}'s {@code
+     * uploadMessage} convention (a {@code role="status"} paragraph rendered by the target page,
+     * see {@code venues.html}) -- so a calendar URL with no resolvable host is a visible rejection,
+     * not a silently-stored row that can only ever fail to scan. {@code BLANK} stays silent,
+     * matching the pre-existing empty-submission behavior.
      */
     @PostMapping
-    public String add(@RequestParam String name, @RequestParam String url) {
-        venueService.addVenue(currentUser.email(), name, url);
+    public String add(@RequestParam String name, @RequestParam String url, RedirectAttributes redirect) {
+        VenueService.AddVenueOutcome outcome = venueService.addVenue(currentUser.email(), name, url);
+        if (outcome == VenueService.AddVenueOutcome.INVALID_URL) {
+            redirect.addFlashAttribute("venueMessage",
+                    "Could not add that venue: the calendar URL needs a scheme (e.g. \"https://\") "
+                            + "so its host can be resolved.");
+        }
+        return "redirect:/venues";
+    }
+
+    /**
+     * Removes a venue (#206 fix round 1, Important 1 -- the design's "Managing venues" section
+     * calls for "name + calendar URL, the list, and remove", which Task 6 didn't ship). Owner-
+     * scoped via {@link VenueService#removeVenue}; a foreign or unknown id is a silent no-op, not
+     * a leak, matching {@code ArtistController}'s established shape for this kind of action.
+     */
+    @PostMapping("/{id}/remove")
+    public String remove(@PathVariable Long id) {
+        venueService.removeVenue(currentUser.email(), id);
         return "redirect:/venues";
     }
 
