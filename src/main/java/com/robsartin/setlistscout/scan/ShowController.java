@@ -1,7 +1,10 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.AdminGuard;
@@ -67,10 +70,30 @@ public class ShowController {
         List<Show> shows = queryShows(owner, showHidden, start, end);
         shows.sort(comparatorFor(sort));
 
-        Set<String> tributeArtistNames = artistRepository.findByOwnerAndSource(owner, ArtistSource.TRIBUTE_EXPANSION)
-                .stream()
+        // One findByOwner load feeds both name sets below -- the real owner's catalog is
+        // 13,000+ rows, so this avoids issuing a second full-catalog-shaped query alongside it.
+        List<Artist> ownerArtists = artistRepository.findByOwner(owner);
+
+        Set<String> tributeArtistNames = ownerArtists.stream()
+                .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION)
                 .map(a -> a.getName().toLowerCase(Locale.ROOT))
                 .collect(Collectors.toSet());
+
+        // #206: TicketmasterService stores the EVENT TITLE, not a catalog artist name, in
+        // artist_name (label is the event name; it falls back to the artist name only when
+        // blank) -- e.g. "A Very Merry Symphony ft. Austin Symphony Orchestra" for a real show
+        // the owner has today, a string that is not, and never will be, in the catalog. So this
+        // active-artist check applies ONLY to venue:-sourced rows (Task 3's per-venue scan);
+        // a blanket filter would hide every Ticketmaster/Bandsintown show the owner has.
+        Set<String> activeArtistNames = ownerArtists.stream()
+                .filter(a -> a.getStatus() == ArtistStatus.SEED || a.getStatus() == ArtistStatus.APPROVED)
+                .map(a -> ArtistNameNormalizer.normalize(a.getName()))
+                .collect(Collectors.toSet());
+
+        shows = shows.stream()
+                .filter(s -> !s.getSource().startsWith("venue:")
+                        || activeArtistNames.contains(ArtistNameNormalizer.normalize(s.getArtistName())))
+                .toList();
 
         long hiddenCount = showRepository.countByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(owner, start, end);
 
