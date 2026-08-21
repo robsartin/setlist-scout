@@ -19,8 +19,16 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     /** The default (toggle off) list: only shows nobody has hidden (issue #166). */
     List<Show> findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(String owner, LocalDateTime start, LocalDateTime end);
 
-    /** How many shows in the window are hidden, regardless of the current toggle state -- feeds the toggle's discoverability count. */
-    long countByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(String owner, LocalDateTime start, LocalDateTime end);
+    /**
+     * Hidden shows in the window, as ROWS rather than a database-side count (issue #220). {@code
+     * ShowController#populateShows} derives {@code hiddenCount} from these by applying the same
+     * venue-follow filter it applies to the display list ({@code ShowController#visibleToOwner})
+     * -- an in-memory normalized-name comparison, not something a {@code COUNT(*)} can push down
+     * to the database (see #220's brief for why this isn't an {@code artist_id} join yet). Replaces
+     * the old {@code countByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull}, which counted
+     * unfiltered and so could promise a "show hidden" toggle count the toggle couldn't deliver.
+     */
+    List<Show> findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(String owner, LocalDateTime start, LocalDateTime end);
 
     boolean existsByOwnerAndArtistNameAndEventDateTimeAndVenueName(String owner, String artistName, LocalDateTime eventDateTime, String venueName);
 
