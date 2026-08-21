@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.AppProperties;
+import com.robsartin.setlistscout.shared.AnthropicMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +13,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * LLM fallback for the band-site scraper (#22): when a tour page has no structured JSON-LD
@@ -71,7 +73,7 @@ public class TourPageLlmService {
         this.apiKey = props.apis().anthropicApiKey();
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings("unchecked") // Map.class -> Map<String, Object> below is an unchecked conversion
     public List<ExtractedShow> extractShows(String artistName, String pageText) {
         List<ExtractedShow> result = new ArrayList<>();
         // Cap the text sent to the model -- tour pages can be huge; the dates are near the top.
@@ -89,10 +91,7 @@ public class TourPageLlmService {
         Map<String, Object> body = Map.of(
                 "model", "claude-sonnet-5",
                 "max_tokens", MAX_OUTPUT_TOKENS,
-                // Mechanical extraction from supplied text, not a reasoning task -- extended
-                // thinking is on by default and can consume the whole output budget before a
-                // text block is ever produced (#211).
-                "thinking", Map.of("type", "disabled"),
+                "thinking", AnthropicMessages.THINKING_DISABLED,
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
@@ -112,28 +111,15 @@ public class TourPageLlmService {
             response = Map.of();
         }
 
-        if (response == null) return result;
-        List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
-        if (content == null || content.isEmpty()) return result;
-
-        // content is a list of typed blocks, not always text-first -- claude-sonnet-5 returns
-        // extended thinking by default, so content[0] can be a "thinking" block with no "text"
-        // key (#211). Scan for the first block actually typed "text" instead of indexing 0.
-        String responseText = null;
-        for (Map<String, Object> block : content) {
-            if ("text".equals(block.get("type"))) {
-                responseText = (String) block.get("text");
-                break;
-            }
-        }
-        if (responseText == null) {
+        Optional<String> responseText = AnthropicMessages.textBlock(response);
+        if (responseText.isEmpty()) {
             // Total failure (e.g. thinking consumed the whole output budget) and "this page
             // genuinely has no shows" must not look identical from the outside (#211) -- the
             // latter always produces a text block, even an empty/non-matching one.
             var warn = log.atWarn()
                     .addKeyValue("source", "tour-llm")
                     .addKeyValue("artist", artistName);
-            Object stopReason = response.get("stop_reason");
+            Object stopReason = AnthropicMessages.stopReason(response).orElse(null);
             if (stopReason != null) {
                 warn = warn.addKeyValue("stop_reason", stopReason);
             }
@@ -141,7 +127,7 @@ public class TourPageLlmService {
             return result;
         }
 
-        for (String line : responseText.split("\n")) {
+        for (String line : responseText.get().split("\n")) {
             String[] parts = line.split("\\|");
             if (parts.length < 3) continue;
             try {
