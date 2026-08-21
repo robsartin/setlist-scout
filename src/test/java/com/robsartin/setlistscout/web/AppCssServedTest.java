@@ -38,6 +38,12 @@ class AppCssServedTest extends AbstractPostgresIntegrationTest {
            .andExpect(content().string(containsString(":root")))
            .andExpect(content().string(containsString("prefers-color-scheme: dark")))
            .andExpect(content().string(containsString("--primary")))
-           .andExpect(content().string(containsString("--tribute-ink")));
+           .andExpect(content().string(containsString("--tribute-ink")))
+           // Minor 1 (#206 fix round 1): CandidateGroups#chipClass returns "venue" (candidates.html's
+           // relation-type chip) and "seed" (rendered the same way for a SEED_LIST candidate back in
+           // PENDING_REVIEW -- see CandidateGroups.UNGROUPED's javadoc), but app.css had no
+           // .chip.venue or .chip.seed rule -- both chips rendered with no background/ink.
+           .andExpect(content().string(containsString(".chip.venue")))
+           .andExpect(content().string(containsString(".chip.seed")));
     }
 }
