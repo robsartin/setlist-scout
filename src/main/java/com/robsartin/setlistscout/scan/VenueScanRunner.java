@@ -1,5 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
+import com.robsartin.setlistscout.catalog.ArtistNameStatusView;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.JobStatus;
@@ -69,6 +72,7 @@ public class VenueScanRunner {
     private final VenueRepository venueRepository;
     private final VenueScanJobRepository venueScanJobRepository;
     private final ShowRepository showRepository;
+    private final ArtistRepository artistRepository;
     private final SettingsService settingsService;
     private final BandSiteScraperService scraper;
     private final ApplicationEventPublisher publisher;
@@ -78,6 +82,7 @@ public class VenueScanRunner {
     public VenueScanRunner(VenueRepository venueRepository,
                             VenueScanJobRepository venueScanJobRepository,
                             ShowRepository showRepository,
+                            ArtistRepository artistRepository,
                             SettingsService settingsService,
                             BandSiteScraperService scraper,
                             ApplicationEventPublisher publisher,
@@ -86,6 +91,7 @@ public class VenueScanRunner {
         this.venueRepository = venueRepository;
         this.venueScanJobRepository = venueScanJobRepository;
         this.showRepository = showRepository;
+        this.artistRepository = artistRepository;
         this.settingsService = settingsService;
         this.scraper = scraper;
         this.publisher = publisher;
@@ -136,11 +142,37 @@ public class VenueScanRunner {
         int saved = 0;
         for (Show show : shows) {
             if (show.getEventDateTime() == null) continue; // defense in depth, mirrors ScanUnitRunner#persistNew
+            Long artistId = resolveArtistId(owner, show.getArtistName());
             saved += showRepository.insertIfAbsent(owner, show.getArtistName(), show.getEventDateTime(),
                     show.getVenueName(), show.getVenueCity(), show.getPrice(), source, show.getTicketUrl(),
-                    show.getKind().name(), discoveredAt);
+                    show.getKind().name(), discoveredAt, artistId);
         }
         return saved;
+    }
+
+    /**
+     * Issue #223: unlike {@code ScanUnitRunner}, this runner has no single scanning artist -- a
+     * venue calendar lists many performers -- so {@code artist_id} is resolved by NAME instead of
+     * carried through directly from a caller. Reuses {@code ArtistRepository
+     * #findByOwnerAndNormalizedName}, the same indexed, owner-scoped, {@link ArtistNameNormalizer}
+     * -backed lookup the catalog module already maintains for "is this the same artist" -- not a
+     * second, hand-rolled name-matching path. Deliberately status-unfiltered (matches that method's
+     * own contract): even a REJECTED artist is still factually the performer this show is for.
+     * <p>
+     * Returns {@code null} when no catalog row exists yet for this name -- typically the
+     * performer's first-ever scan, before {@code catalog.VenuePerformerListener}'s async
+     * candidate-creation has landed. {@code insertIfAbsent}'s {@code ON CONFLICT DO NOTHING} means
+     * that specific row will not be revisited by a later scan (it already exists by natural key),
+     * so a venue show born null here stays null -- the same permanently-nullable state as any other
+     * genuinely unresolved row.
+     */
+    private Long resolveArtistId(String owner, String performerName) {
+        if (performerName == null || performerName.isBlank()) {
+            return null;
+        }
+        return artistRepository.findByOwnerAndNormalizedName(owner, ArtistNameNormalizer.normalize(performerName))
+                .map(ArtistNameStatusView::getId)
+                .orElse(null);
     }
 
     /**

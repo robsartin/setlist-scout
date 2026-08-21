@@ -1,6 +1,10 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +69,9 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     private ShowRepository showRepository;
 
     @Autowired
+    private ArtistRepository artistRepository;
+
+    @Autowired
     private VenueScanRunner runner;
 
     @MockitoBean
@@ -75,6 +82,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @BeforeEach
     void setUp() {
         showRepository.deleteAll();
+        artistRepository.deleteAll();
         venueScanJobRepository.deleteAll();
         venueRepository.deleteAll();
 
@@ -108,6 +116,35 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
                 .containsExactlyInAnyOrder("Matt Braunger", "Nick Mullen");
         assertThat(stored).allSatisfy(s -> assertThat(s.getSource()).startsWith("venue:"));
         assertThat(stored).extracting(Show::getKind).containsOnly(Show.Kind.COMEDY);
+    }
+
+    @Test
+    @DisplayName("issue #223: resolves artist_id by owner-scoped normalized-name lookup when the "
+            + "performer is already a known catalog artist")
+    void resolvesArtistIdForAKnownPerformer() {
+        Artist mattBraunger = new Artist("Matt Braunger", ArtistSource.VENUE_EXPANSION,
+                ArtistStatus.PENDING_REVIEW, null, null);
+        mattBraunger.setOwner(OWNER);
+        Long mattBraungerId = artistRepository.save(mattBraunger).getId();
+
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                // A case variant of the stored name -- proves the real ArtistNameNormalizer lookup,
+                // not a raw exact-string match.
+                new Show("MATT BRAUNGER", DATE_1, "The Red Room at Cap City", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY),
+                // No catalog artist for this one -- must stay null, not throw.
+                new Show("Nick Mullen", DATE_2, "Cap City Comedy Club", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+
+        runner.run(job);
+
+        List<Show> stored = showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER);
+        Show mattShow = stored.stream().filter(s -> s.getArtistName().equals("MATT BRAUNGER")).findFirst().orElseThrow();
+        Show nickShow = stored.stream().filter(s -> s.getArtistName().equals("Nick Mullen")).findFirst().orElseThrow();
+        assertThat(mattShow.getArtistId()).as("resolved via ArtistNameNormalizer, case-insensitively")
+                .isEqualTo(mattBraungerId);
+        assertThat(nickShow.getArtistId()).as("no matching catalog artist -- stays null, not an error")
+                .isNull();
     }
 
     @Test

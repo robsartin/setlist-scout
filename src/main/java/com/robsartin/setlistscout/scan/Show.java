@@ -59,6 +59,18 @@ public class Show {
      */
     private Instant hiddenAt;
 
+    /**
+     * The catalog artist this show was scanned for (issue #223). Written at persist time by
+     * {@link ScanUnitRunner#persistNew} -- the caller already knows which artist it scanned, so
+     * this is 100% accurate even for a Ticketmaster row whose {@link #artistName} is the EVENT
+     * TITLE, not a catalog name, since it never goes through name matching at all. Nullable,
+     * permanently: some rows predate this column (repaired by the {@code V27} Java backfill, or
+     * self-healed on a later rescan -- see {@code ScanUnitRunner#persistNew}), and
+     * {@link VenueScanRunner}'s rows resolve it by performer-name lookup rather than carrying it
+     * through directly, since a venue calendar has no single scanning artist.
+     */
+    private Long artistId;
+
     protected Show() {
         // JPA
     }
@@ -90,6 +102,8 @@ public class Show {
     public Instant getHiddenAt() { return hiddenAt; }
     public void setHiddenAt(Instant hiddenAt) { this.hiddenAt = hiddenAt; }
     public boolean isHidden() { return hiddenAt != null; }
+    public Long getArtistId() { return artistId; }
+    public void setArtistId(Long artistId) { this.artistId = artistId; }
 
     /** #202: what kind of event this is. Comedy is the only non-music case in scope -- film (#204) is deliberately excluded. */
     public enum Kind { MUSIC, COMEDY }

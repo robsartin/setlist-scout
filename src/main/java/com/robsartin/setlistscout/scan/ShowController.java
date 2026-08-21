@@ -1,5 +1,7 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
@@ -31,25 +33,37 @@ public class ShowController {
     private static final DateTimeFormatter SHOW_LABEL_FORMAT =
             DateTimeFormatter.ofPattern("EEE, MMM d yyyy h:mm a", Locale.ENGLISH);
 
+    /**
+     * The three {@code ShowActionOutcome#action} tags this page's rows can carry (issue #223) --
+     * shared constants so the controller and {@code shows.html}'s three button predicates can't
+     * drift apart on the literal string.
+     */
+    private static final String ACTION_HIDE = "hide";
+    private static final String ACTION_UNHIDE = "unhide";
+    private static final String ACTION_HIDE_AND_CANCEL = "hide-and-cancel";
+
     private final ShowRepository showRepository;
     private final ArtistRepository artistRepository;
     private final ScanJobRepository scanJobRepository;
     private final SettingsService settingsService;
     private final CurrentUser currentUser;
     private final AdminGuard adminGuard;
+    private final ArtistActivationService activationService;
 
     public ShowController(ShowRepository showRepository,
                            ArtistRepository artistRepository,
                            ScanJobRepository scanJobRepository,
                            SettingsService settingsService,
                            CurrentUser currentUser,
-                           AdminGuard adminGuard) {
+                           AdminGuard adminGuard,
+                           ArtistActivationService activationService) {
         this.showRepository = showRepository;
         this.artistRepository = artistRepository;
         this.scanJobRepository = scanJobRepository;
         this.settingsService = settingsService;
         this.currentUser = currentUser;
         this.adminGuard = adminGuard;
+        this.activationService = activationService;
     }
 
     @GetMapping("/")
@@ -215,6 +229,9 @@ public class ShowController {
      *   this exact list -- so focus its successor, resolved from the list AS IT STANDS before the
      *   mutation, per {@link ShowActionOutcome#afterRow}'s rule.</li>
      * </ul>
+     * The row-focus {@code action} tag (issue #223) is derived from the row's POST-mutation hidden
+     * state, not from which endpoint was called: a row that ends up hidden only ever renders its
+     * Unhide button, whichever of hide/hide-and-cancel put it there.
      */
     private String toggleHidden(Long id, boolean hide, String sort, boolean showHidden,
                                 String hxRequest, Model model) {
@@ -224,12 +241,78 @@ public class ShowController {
             return actionResult(hxRequest, model, owner, sort, showHidden, ShowActionOutcome.anchor(null));
         }
         String message = (hide ? "Hid " : "Unhid ") + describeShow(acted) + ".";
+        String rowAction = hide ? ACTION_UNHIDE : ACTION_HIDE;
         ShowActionOutcome outcome = showHidden
-                ? ShowActionOutcome.row(id, message)
-                : ShowActionOutcome.afterRow(resolveVisibleShows(owner, sort), id, message);
+                ? ShowActionOutcome.row(id, rowAction, message)
+                : ShowActionOutcome.afterRow(resolveVisibleShows(owner, sort), id, ACTION_HIDE, message);
         acted.setHiddenAt(hide ? Instant.now() : null);
         showRepository.save(acted);
         return actionResult(hxRequest, model, owner, sort, showHidden, outcome);
+    }
+
+    /**
+     * Hide a show AND transition the artist behind it in one request (issue #223) -- the owner is
+     * done with this show, and with the artist that's showing it up.
+     * <ul>
+     *   <li>{@code SEED} -&gt; {@code REMOVED}: a hand-curated seed the owner no longer wants
+     *   tracked, deliberately kept out of the rejected-candidate queue.</li>
+     *   <li>Anything else active ({@code PENDING_REVIEW}, or {@code APPROVED} -- which, in this
+     *   app, only ever got there via expansion review) -&gt; {@code REJECTED}, so {@code
+     *   catalog.VenuePerformerListener}'s {@code ON CONFLICT DO NOTHING} keeps it from being
+     *   re-suggested by the next venue scan.</li>
+     *   <li>Already {@code REMOVED} stays {@code REMOVED} -- never bumped to {@code REJECTED},
+     *   which would clutter the rejected-candidate queue with something the owner already
+     *   handled via the seed-removal path. (An artist already {@code REJECTED} mapping back to
+     *   {@code REJECTED} is a harmless no-op, so it needs no such guard.)</li>
+     * </ul>
+     * Status changes go through {@link ArtistActivationService#changeStatus}, never a direct
+     * repository save, so the domain events fire and {@code ScanJobListener}/{@code
+     * ExpandJobListener} cancel the artist's jobs (CLAUDE.md rule; {@code scan} writing {@code
+     * catalog}'s aggregate directly would also fail {@code ModularityTests}).
+     * <p>
+     * A null {@code artist_id} (a row that predates #223, or a venue-sourced row whose performer
+     * isn't a resolved catalog artist yet) still hides the show; nothing else happens. Owner-scoped
+     * twice over: {@code findByIdAndOwner} for the show, {@code findByIdAndOwner} again for the
+     * artist -- a foreign owner's show or artist is a silent no-op, not a leak.
+     */
+    @PostMapping("/shows/{id}/hide-and-cancel")
+    public String hideAndCancel(@PathVariable Long id,
+                                @RequestParam(defaultValue = "eventDate") String sort,
+                                @RequestParam(defaultValue = "false") boolean showHidden,
+                                @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                                Model model) {
+        String owner = currentUser.email();
+        Show acted = showRepository.findByIdAndOwner(id, owner).orElse(null);
+        if (acted == null) {
+            return actionResult(hxRequest, model, owner, sort, showHidden, ShowActionOutcome.anchor(null));
+        }
+        Artist artist = acted.getArtistId() == null
+                ? null
+                : artistRepository.findByIdAndOwner(acted.getArtistId(), owner).orElse(null);
+        String message = artist == null
+                ? "Hid " + describeShow(acted) + "."
+                : "Hid " + describeShow(acted) + " and stopped following " + artist.getName() + ".";
+        ShowActionOutcome outcome = showHidden
+                ? ShowActionOutcome.row(id, ACTION_UNHIDE, message)
+                : ShowActionOutcome.afterRow(resolveVisibleShows(owner, sort), id, ACTION_HIDE_AND_CANCEL, message);
+
+        acted.setHiddenAt(Instant.now());
+        showRepository.save(acted);
+        if (artist != null) {
+            activationService.changeStatus(artist.getId(), owner, targetStatusFor(artist.getStatus()));
+        }
+        return actionResult(hxRequest, model, owner, sort, showHidden, outcome);
+    }
+
+    /** The status-transition rule {@link #hideAndCancel} applies -- see its own javadoc for the rationale. */
+    private static ArtistStatus targetStatusFor(ArtistStatus current) {
+        if (current == ArtistStatus.SEED) {
+            return ArtistStatus.REMOVED;
+        }
+        if (current == ArtistStatus.REMOVED) {
+            return ArtistStatus.REMOVED;
+        }
+        return ArtistStatus.REJECTED;
     }
 
     /** The default (non-hidden) list in current render order -- used to resolve the post-hide focus successor before the acted-on row is mutated out of it. */

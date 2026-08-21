@@ -1,5 +1,9 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.Artist;
+import com.robsartin.setlistscout.catalog.ArtistRepository;
+import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +50,15 @@ class HiddenShowSurvivesRescanTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private ScanUnitRunner scanUnitRunner;
 
+    @Autowired
+    private ArtistRepository artistRepository;
+
+    private Long seedArtist(String owner, String name) {
+        Artist artist = new Artist(name, ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        artist.setOwner(owner);
+        return artistRepository.save(artist).getId();
+    }
+
     @Test
     void aHiddenShowIsSkippedNotRefreshedByARescanThatRediscoversIt() {
         LocalDateTime eventDateTime = LocalDateTime.now().plusDays(30).truncatedTo(ChronoUnit.SECONDS);
@@ -65,7 +78,8 @@ class HiddenShowSurvivesRescanTest extends AbstractPostgresIntegrationTest {
         Show rediscovered = new Show("Wilco", eventDateTime, "The Moody Center", "Austin",
                 BigDecimal.valueOf(50), "ticketmaster", "https://tickets.example/rediscovered", Show.Kind.MUSIC);
 
-        int saved = scanUnitRunner.persistNew(OWNER, List.of(rediscovered));
+        Long wilcoId = seedArtist(OWNER, "Wilco");
+        int saved = scanUnitRunner.persistNew(OWNER, wilcoId, List.of(rediscovered));
 
         assertThat(saved).as("the rediscovered show is skipped, not inserted as a new row").isEqualTo(0);
         assertThat(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(
@@ -73,5 +87,39 @@ class HiddenShowSurvivesRescanTest extends AbstractPostgresIntegrationTest {
                 .as("still exactly one row for this owner/artist/venue/time").hasSize(1);
         assertThat(showRepository.findById(id).orElseThrow().getHiddenAt())
                 .as("the original row's hidden state is completely untouched by the rescan").isNotNull();
+        // Issue #223: the original row's artist_id was null (as if written before the column
+        // existed) -- the rescan's self-heal repair fills it in, for real, against Postgres.
+        assertThat(showRepository.findById(id).orElseThrow().getArtistId())
+                .as("the rescan repaired the previously-null artist_id").isEqualTo(wilcoId);
+    }
+
+    @Test
+    void aRescanNeverOverwritesAnAlreadyResolvedArtistIdEvenWhileSkippingTheHiddenRow() {
+        // A DIFFERENT owner than the other test method in this class: both share one Postgres
+        // container/Spring context for the whole class with no @BeforeEach cleanup, and the other
+        // test's own assertion queries by a DATE WINDOW (not by artist/venue) -- so even
+        // differently-named fixtures on the same owner could still be double-counted by that
+        // window query if the two tests' event dates land within a day of each other.
+        String owner = "rescan-hidden-no-overwrite@example.com";
+        LocalDateTime eventDateTime = LocalDateTime.now().plusDays(30).truncatedTo(ChronoUnit.SECONDS);
+        Long correctArtistId = seedArtist(owner, "Radiohead");
+        Show original = new Show("Radiohead", eventDateTime, "ACL Live", "Austin",
+                BigDecimal.valueOf(45), "ticketmaster", "https://tickets.example/original", Show.Kind.MUSIC);
+        original.setOwner(owner);
+        original.setArtistId(correctArtistId);
+        Long id = showRepository.save(original).getId();
+
+        Show rediscovered = new Show("Radiohead", eventDateTime, "ACL Live", "Austin",
+                BigDecimal.valueOf(50), "ticketmaster", "https://tickets.example/rediscovered", Show.Kind.MUSIC);
+
+        // A different, also-real artistId than the one already stored -- proves the repair is
+        // narrow (fills a null only) rather than a blind "keep in sync with the latest scan" refresh.
+        Long differentArtistId = seedArtist(owner, "Some Other Artist");
+        int saved = scanUnitRunner.persistNew(owner, differentArtistId, List.of(rediscovered));
+
+        assertThat(saved).isEqualTo(0);
+        assertThat(showRepository.findById(id).orElseThrow().getArtistId())
+                .as("never overwritten -- the row already had a resolved artist_id")
+                .isEqualTo(correctArtistId);
     }
 }

@@ -22,32 +22,42 @@ import java.util.List;
  * refocused.
  * <p>
  * Pure -- no Spring, no I/O -- and unit-testable in isolation, like {@code review.ActionOutcome}.
+ * <p>
+ * <b>{@code action} (issue #223):</b> a non-hidden row now carries TWO action buttons (Hide, and
+ * Hide &amp; Stop Following, alongside {@code /shows/{id}/hide-and-cancel}) instead of #166's one
+ * (Hide XOR Unhide, mutually exclusive on {@code show.hidden}). A {@code ROW} outcome naming only a
+ * show id would then be ambiguous -- BOTH of that row's live buttons would satisfy {@code
+ * th:autofocus}, breaking the "exactly one autofocus per response" contract. {@code action} pins
+ * WHICH button, mirroring {@code review.ActionOutcome#focusesRow(Long, String)}'s identical fix for
+ * the Approve/Reject pair.
  */
-public record ShowActionOutcome(Focus focus, Long showId, String message) {
+public record ShowActionOutcome(Focus focus, Long showId, String action, String message) {
 
     public enum Focus { ANCHOR, ROW }
 
     /**
      * Focus the row after {@code actedId} in {@code orderedRows} -- the list as the page renders
-     * it, so "after" means visually below. Falls back to the anchor when the acted-on row has no
+     * it, so "after" means visually below -- and name {@code action} as the button on that
+     * successor to focus (issue #223: repeats the just-performed action, e.g. hiding a row focuses
+     * the next row's own Hide button). Falls back to the anchor when the acted-on row has no
      * successor: it was last, the list is empty, or the id isn't in the list at all (e.g. it was
      * already hidden, so absent from a "visible only" ordering).
      * <p>
      * Callers must resolve this BEFORE mutating, while the acted-on row is still in the list.
      */
-    public static ShowActionOutcome afterRow(List<Show> orderedRows, long actedId, String message) {
+    public static ShowActionOutcome afterRow(List<Show> orderedRows, long actedId, String action, String message) {
         Long successor = successorOf(orderedRows, actedId);
-        return successor == null ? anchor(message) : row(successor, message);
+        return successor == null ? anchor(message) : row(successor, action, message);
     }
 
-    /** Focus a specific show's action button by id -- used when the acted-on row stays rendered. */
-    public static ShowActionOutcome row(Long id, String message) {
-        return new ShowActionOutcome(Focus.ROW, id, message);
+    /** Focus a specific show's {@code action} button by id -- used when the acted-on row stays rendered. */
+    public static ShowActionOutcome row(Long id, String action, String message) {
+        return new ShowActionOutcome(Focus.ROW, id, action, message);
     }
 
     /** Focus the region's own anchor (the {@code #shows-region} fragment root). */
     public static ShowActionOutcome anchor(String message) {
-        return new ShowActionOutcome(Focus.ANCHOR, null, message);
+        return new ShowActionOutcome(Focus.ANCHOR, null, null, message);
     }
 
     /**
@@ -60,9 +70,13 @@ public record ShowActionOutcome(Focus focus, Long showId, String message) {
         return focus == Focus.ANCHOR ? this : anchor(message);
     }
 
-    /** Template predicate: is this the one show whose action button should carry {@code autofocus}? */
-    public boolean focusesRow(Long id) {
-        return focus == Focus.ROW && showId != null && showId.equals(id);
+    /**
+     * Template predicate: is this the one button -- {@code id}'s row, AND specifically its
+     * {@code action} button (issue #223: "hide", "unhide", or "hide-and-cancel") -- that should
+     * carry {@code autofocus}?
+     */
+    public boolean focusesRow(Long id, String action) {
+        return focus == Focus.ROW && showId != null && showId.equals(id) && this.action.equals(action);
     }
 
     /** Template predicate: should the region's own anchor carry {@code autofocus}? */
