@@ -49,10 +49,11 @@ class ShowControllerTest {
         settingsService = mock(SettingsService.class);
         CurrentUser currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
-        // #206 Task 5: populateShows now loads the owner's whole catalog once (findByOwner) and
-        // derives tributeArtistNames/activeArtistNames from that single list in memory, rather
-        // than issuing a separate findByOwnerAndSource query -- see ShowController#populateShows.
-        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of());
+        // #206 fix round 1 (Important 2): populateShows issues two narrow queries -- this stub
+        // covers tributeArtistNames; activeArtistNames' findByOwnerAndStatusIn is left unstubbed
+        // and relies on Mockito's default empty-list answer, same as every other unstubbed
+        // List-returning call in this test class.
+        when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION)).thenReturn(List.of());
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         controller = new ShowController(showRepository, artistRepository, scanJobRepository,
                 settingsService, currentUser, adminGuard);
@@ -106,7 +107,7 @@ class ShowControllerTest {
                 anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
         Artist tribute = new Artist("Damn the Torpedoes", ArtistSource.TRIBUTE_EXPANSION, ArtistStatus.APPROVED,
                 "expansion", "tribute act");
-        when(artistRepository.findByOwner(OWNER)).thenReturn(List.of(tribute));
+        when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION)).thenReturn(List.of(tribute));
         Model model = new ExtendedModelMap();
 
         controller.shows("eventDate", false, model);
@@ -114,6 +115,23 @@ class ShowControllerTest {
         @SuppressWarnings("unchecked")
         Set<String> tributeNames = (Set<String>) model.getAttribute("tributeArtistNames");
         assertThat(tributeNames).containsExactly("damn the torpedoes");
+    }
+
+    @Test
+    @DisplayName("#206 fix round 1 (Important 2): populateShows issues two narrow owner-scoped "
+            + "queries and never loads the owner's whole catalog via findByOwner")
+    void populateShowsUsesNarrowQueriesNotFullCatalogLoad() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        verify(artistRepository).findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION);
+        verify(artistRepository).findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
+        verify(artistRepository, never()).findByOwner(anyString());
     }
 
     @Test

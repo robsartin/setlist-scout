@@ -1,6 +1,5 @@
 package com.robsartin.setlistscout.scan;
 
-import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
@@ -70,12 +69,17 @@ public class ShowController {
         List<Show> shows = queryShows(owner, showHidden, start, end);
         shows.sort(comparatorFor(sort));
 
-        // One findByOwner load feeds both name sets below -- the real owner's catalog is
-        // 13,000+ rows, so this avoids issuing a second full-catalog-shaped query alongside it.
-        List<Artist> ownerArtists = artistRepository.findByOwner(owner);
-
-        Set<String> tributeArtistNames = ownerArtists.stream()
-                .filter(a -> a.getSource() == ArtistSource.TRIBUTE_EXPANSION)
+        // Two narrow, DB-filtered queries -- NOT one shared findByOwner load. An earlier version
+        // of this method consolidated onto a single findByOwner(owner) call on the mistaken belief
+        // that tributeArtistNames already loaded the full catalog; it did not (it was always this
+        // same narrow findByOwnerAndSource query), so that "consolidation" actually introduced a
+        // full-catalog load -- 13,000+ Artist entities into the persistence context on every render
+        // and every htmx hide/unhide/scan-now -- where none had existed before (#206 fix round 1,
+        // Important 2). tributeArtistNames and activeArtistNames need different ROWS (different
+        // source vs. status predicates), so they genuinely cannot share one query; two queries each
+        // filtered at the database is strictly cheaper than one query that isn't filtered at all.
+        Set<String> tributeArtistNames = artistRepository.findByOwnerAndSource(owner, ArtistSource.TRIBUTE_EXPANSION)
+                .stream()
                 .map(a -> a.getName().toLowerCase(Locale.ROOT))
                 .collect(Collectors.toSet());
 
@@ -85,8 +89,9 @@ public class ShowController {
         // the owner has today, a string that is not, and never will be, in the catalog. So this
         // active-artist check applies ONLY to venue:-sourced rows (Task 3's per-venue scan);
         // a blanket filter would hide every Ticketmaster/Bandsintown show the owner has.
-        Set<String> activeArtistNames = ownerArtists.stream()
-                .filter(a -> a.getStatus() == ArtistStatus.SEED || a.getStatus() == ArtistStatus.APPROVED)
+        Set<String> activeArtistNames = artistRepository
+                .findByOwnerAndStatusIn(owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED))
+                .stream()
                 .map(a -> ArtistNameNormalizer.normalize(a.getName()))
                 .collect(Collectors.toSet());
 
