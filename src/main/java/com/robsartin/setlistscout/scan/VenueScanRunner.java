@@ -3,16 +3,21 @@ package com.robsartin.setlistscout.scan;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.JobStatus;
+import com.robsartin.setlistscout.shared.events.VenuePerformerSeen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Scans one followed venue's calendar (#206 Task 3) and persists whatever shows come back, then
@@ -35,6 +40,20 @@ import java.util.List;
  * row permanently unclaimable by {@code claimDue}'s own hard {@code status = 'SCHEDULED'} filter --
  * a silently dead job, never retried again. Leaving {@code status} alone on failure keeps it
  * exactly where {@code claimDue} needs it to be reclaimed at its backed-off {@code next_due_at}.
+ * <p>
+ * <b>#206 Task 4:</b> after persisting shows, publishes one {@link VenuePerformerSeen} per
+ * distinct performer found in this run's scrape -- not just newly-inserted ones. A venue calendar
+ * re-lists the same performer every scan cycle, and {@code catalog.VenuePerformerListener}'s own
+ * {@code ON CONFLICT DO NOTHING} write is what makes that safe to do unconditionally on every
+ * run: "already a candidate", "already approved", and "already rejected" are all a no-op, and the
+ * REJECTED case in particular must stay a no-op or a rejection would be undone on the very next
+ * scan (see that listener's own doc). Each publish is wrapped in its own short, committed {@link
+ * TransactionTemplate} block, mirroring {@code expansion.ExpandUnitRunner} exactly -- {@code
+ * @ApplicationModuleListener} is {@code @TransactionalEventListener(phase = AFTER_COMMIT)}, so a
+ * publish with no active, committing transaction around it is silently dropped and the listener
+ * never fires (ADR-0024, the PR3a lesson). {@code scan} never touches {@code catalog}'s {@code
+ * Artist} table directly -- {@code ModularityTests} enforces the module boundary; this event is
+ * the only cross-module contact point.
  */
 @Service
 public class VenueScanRunner {
@@ -52,6 +71,8 @@ public class VenueScanRunner {
     private final ShowRepository showRepository;
     private final SettingsService settingsService;
     private final BandSiteScraperService scraper;
+    private final ApplicationEventPublisher publisher;
+    private final TransactionTemplate transactionTemplate;
     private final Duration scanInterval;
 
     public VenueScanRunner(VenueRepository venueRepository,
@@ -59,12 +80,16 @@ public class VenueScanRunner {
                             ShowRepository showRepository,
                             SettingsService settingsService,
                             BandSiteScraperService scraper,
+                            ApplicationEventPublisher publisher,
+                            TransactionTemplate transactionTemplate,
                             @Value("${setlistscout.venue-scan-interval:14d}") Duration scanInterval) {
         this.venueRepository = venueRepository;
         this.venueScanJobRepository = venueScanJobRepository;
         this.showRepository = showRepository;
         this.settingsService = settingsService;
         this.scraper = scraper;
+        this.publisher = publisher;
+        this.transactionTemplate = transactionTemplate;
         this.scanInterval = scanInterval;
     }
 
@@ -89,6 +114,7 @@ public class VenueScanRunner {
             // here, just persist what it returns.
             List<Show> shows = scraper.scrapeShows(venue.getName(), venue.getCalendarUrl(), start, end);
             int saved = persist(job.getOwner(), venue.getCalendarUrl(), shows);
+            publishPerformersSeen(job.getOwner(), shows);
 
             log.atDebug().addKeyValue("owner", job.getOwner()).addKeyValue("venueId", venue.getId())
                     .addKeyValue("found", shows.size()).addKeyValue("saved", saved).log("venue scan");
@@ -115,6 +141,29 @@ public class VenueScanRunner {
                     show.getKind().name(), discoveredAt);
         }
         return saved;
+    }
+
+    /**
+     * Publishes one {@link VenuePerformerSeen} per distinct performer name in {@code shows} (#206
+     * Task 4) -- same null-{@code eventDateTime} defense-in-depth filter as {@link #persist}, so a
+     * show that isn't even worth persisting doesn't spawn a candidate either. Each publish gets its
+     * own short, committed transaction (see the class doc's ADR-0024 note); this method itself is
+     * plain, uncommitted Java otherwise -- no DB reads, nothing slow, nothing that needs a
+     * transaction of its own beyond what each individual publish opens.
+     */
+    private void publishPerformersSeen(String owner, List<Show> shows) {
+        Set<String> performers = new LinkedHashSet<>();
+        for (Show show : shows) {
+            if (show.getEventDateTime() == null) continue; // mirrors persist()'s own defense in depth
+            String name = show.getArtistName();
+            if (name != null && !name.isBlank()) {
+                performers.add(name);
+            }
+        }
+        for (String performer : performers) {
+            transactionTemplate.executeWithoutResult(status ->
+                    publisher.publishEvent(new VenuePerformerSeen(owner, performer)));
+        }
     }
 
     private void recordSuccess(VenueScanJob job) {
