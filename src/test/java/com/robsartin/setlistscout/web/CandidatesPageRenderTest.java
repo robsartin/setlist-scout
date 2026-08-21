@@ -240,6 +240,34 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("Nothing left to review. Run expansion to find more.");
     }
 
+    /**
+     * Important 3 (#206 fix round 1): spec flow step 5 says an unmatched venue performer lands on
+     * this page. It already works today, but nothing pinned it -- and {@code
+     * CandidateGroups.RELATION_ORDER} (a stable-sort-order list, not a filter) omits {@code
+     * VENUE_EXPANSION}. Adding a {@code .filter(RELATION_ORDER::contains)} to {@code
+     * CandidateGroups.from} later would silently delete the whole review gate for venue candidates
+     * with a green suite -- nothing currently proves a VENUE_EXPANSION row survives that method at
+     * all. VENUE_EXPANSION artists carry no discoveredVia (the venue that surfaced them isn't part
+     * of the event -- see {@code VenuePerformerListener}), so this lands in the Ungrouped bucket,
+     * same as a SEED_LIST candidate.
+     */
+    @Test
+    void pendingVenueExpansionCandidateAppearsOnTheCandidatesPage() throws Exception {
+        String owner = "candidates-venue-expansion@example.com";
+        savePending(owner, "Nick Mullen", ArtistSource.VENUE_EXPANSION, null);
+
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Nick Mullen");
+        // The relation-type chip CandidateGroups.label(VENUE_EXPANSION)/chipClass produce --
+        // confirms this is grouped and rendered as a real relation group (CandidateGroups.from),
+        // not merely present in the HTML by some other accident.
+        assertThat(body).contains(">Venue<");
+    }
+
     @Test
     void candidatesAreIsolatedByOwner() throws Exception {
         seedTwoGroups("candidates-owner-a@example.com");

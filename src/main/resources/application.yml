@@ -72,6 +72,13 @@ setlistscout:
   import-batch-size: ${IMPORT_BATCH_SIZE:25}
   import-max-attempts: ${IMPORT_MAX_ATTEMPTS:3}
 
+  # #206 Task 3: followed-venue calendar scan queue (venue_scan_job). Same fast, database-adjacent
+  # tick cadence as the import queue -- one scrape per due venue, not a fleet-wide batch.
+  venue-poller-enabled: ${VENUE_POLLER_ENABLED:true}
+  venue-tick-ms: ${VENUE_TICK_MS:5000}
+  venue-batch-size: ${VENUE_BATCH_SIZE:25}
+  venue-scan-interval: ${VENUE_SCAN_INTERVAL:14d} # how often a venue's calendar is re-checked on success, and the cap on failure backoff
+
   # #174: keyset pagination page size for the /artists active list.
   artists-page-size: ${ARTISTS_PAGE_SIZE:20}
 

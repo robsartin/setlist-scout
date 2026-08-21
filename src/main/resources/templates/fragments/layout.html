@@ -21,6 +21,11 @@
             <a th:href="@{/}" th:attr="aria-current=${navActive == 'shows'} ? 'page' : null">Shows</a>
             <a th:href="@{/shared}" th:attr="aria-current=${navActive == 'shared'} ? 'page' : null">Shared</a>
             <a th:href="@{/artists}" th:attr="aria-current=${navActive == 'artists'} ? 'page' : null">Artists</a>
+            <!--/* #206 Task 6: no fragments/nav.html exists in this codebase -- the nav lives
+                   here, inline in layout.html. Placed right after Artists: both are "things you
+                   follow" that this owner configures, ahead of the review-workflow links
+                   (Candidates/Rejected/Connections) that both artists and venues feed. */-->
+            <a th:href="@{/venues}" th:attr="aria-current=${navActive == 'venues'} ? 'page' : null">Venues</a>
             <a th:href="@{/artists/candidates}" th:attr="aria-current=${navActive == 'candidates'} ? 'page' : null">
                 <!--/* id (issue #154): a stable out-of-band swap target. This span sits OUTSIDE
                        #candidates-app (the id below), so no htmx action on the Candidates page can

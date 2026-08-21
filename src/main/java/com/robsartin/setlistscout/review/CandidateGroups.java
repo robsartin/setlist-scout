@@ -94,6 +94,11 @@ public final class CandidateGroups {
             case SIMILAR_EXPANSION -> "Similar";
             case TRIBUTE_EXPANSION -> "Tributes";
             case SEED_LIST -> "Seed";
+            // #206 Task 4: VENUE_EXPANSION candidates carry no discoveredVia (the venue that
+            // surfaced them isn't part of the event), so they always land in the UNGROUPED bucket
+            // rather than under a base-artist group -- added here only to keep this switch
+            // exhaustive; Task 5 owns any further review-page treatment.
+            case VENUE_EXPANSION -> "Venue";
         };
     }
 
@@ -103,6 +108,7 @@ public final class CandidateGroups {
             case SIMILAR_EXPANSION -> "similar";
             case TRIBUTE_EXPANSION -> "tribute";
             case SEED_LIST -> "seed";
+            case VENUE_EXPANSION -> "venue";
         };
     }
 

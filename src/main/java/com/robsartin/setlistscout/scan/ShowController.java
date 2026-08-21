@@ -1,7 +1,9 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.AdminGuard;
@@ -67,10 +69,36 @@ public class ShowController {
         List<Show> shows = queryShows(owner, showHidden, start, end);
         shows.sort(comparatorFor(sort));
 
+        // Two narrow, DB-filtered queries -- NOT one shared findByOwner load. An earlier version
+        // of this method consolidated onto a single findByOwner(owner) call on the mistaken belief
+        // that tributeArtistNames already loaded the full catalog; it did not (it was always this
+        // same narrow findByOwnerAndSource query), so that "consolidation" actually introduced a
+        // full-catalog load -- 13,000+ Artist entities into the persistence context on every render
+        // and every htmx hide/unhide/scan-now -- where none had existed before (#206 fix round 1,
+        // Important 2). tributeArtistNames and activeArtistNames need different ROWS (different
+        // source vs. status predicates), so they genuinely cannot share one query; two queries each
+        // filtered at the database is strictly cheaper than one query that isn't filtered at all.
         Set<String> tributeArtistNames = artistRepository.findByOwnerAndSource(owner, ArtistSource.TRIBUTE_EXPANSION)
                 .stream()
                 .map(a -> a.getName().toLowerCase(Locale.ROOT))
                 .collect(Collectors.toSet());
+
+        // #206: TicketmasterService stores the EVENT TITLE, not a catalog artist name, in
+        // artist_name (label is the event name; it falls back to the artist name only when
+        // blank) -- e.g. "A Very Merry Symphony ft. Austin Symphony Orchestra" for a real show
+        // the owner has today, a string that is not, and never will be, in the catalog. So this
+        // active-artist check applies ONLY to venue:-sourced rows (Task 3's per-venue scan);
+        // a blanket filter would hide every Ticketmaster/Bandsintown show the owner has.
+        Set<String> activeArtistNames = artistRepository
+                .findByOwnerAndStatusIn(owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED))
+                .stream()
+                .map(a -> ArtistNameNormalizer.normalize(a.getName()))
+                .collect(Collectors.toSet());
+
+        shows = shows.stream()
+                .filter(s -> !s.getSource().startsWith("venue:")
+                        || activeArtistNames.contains(ArtistNameNormalizer.normalize(s.getArtistName())))
+                .toList();
 
         long hiddenCount = showRepository.countByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(owner, start, end);
 

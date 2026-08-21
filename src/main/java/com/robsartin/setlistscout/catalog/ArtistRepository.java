@@ -11,6 +11,14 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ArtistRepository extends JpaRepository<Artist, Long> {
+    /**
+     * Every artist for an owner, any status (#206 Task 4). Added for {@code
+     * VenuePerformerListenerTest}'s idempotency/owner-scoping assertions -- not in the task-4
+     * brief's own file list, but its given test snippets call this exact method, which did not
+     * exist; without it the given tests do not compile (confirmed via a clean {@code
+     * compileTestJava} run before adding this).
+     */
+    List<Artist> findByOwner(String owner);
     List<Artist> findByOwnerAndStatus(String owner, ArtistStatus status);
     List<Artist> findByOwnerAndStatusIn(String owner, List<ArtistStatus> statuses);
     List<Artist> findByStatusIn(List<ArtistStatus> statuses);
