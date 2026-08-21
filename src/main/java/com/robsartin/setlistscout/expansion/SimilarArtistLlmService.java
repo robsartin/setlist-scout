@@ -1,6 +1,7 @@
 package com.robsartin.setlistscout.expansion;
 
 import com.robsartin.setlistscout.AppProperties;
+import com.robsartin.setlistscout.shared.AnthropicMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,7 @@ import org.springframework.web.client.RestClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -55,10 +57,7 @@ public class SimilarArtistLlmService {
         Map<String, Object> body = Map.of(
                 "model", "claude-sonnet-5",
                 "max_tokens", 300,
-                // A recall-and-list request, not a reasoning task -- extended thinking is on by
-                // default and can consume the whole output budget before a text block is ever
-                // produced (#213, same fix as #211).
-                "thinking", Map.of("type", "disabled"),
+                "thinking", AnthropicMessages.THINKING_DISABLED,
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
@@ -78,28 +77,15 @@ public class SimilarArtistLlmService {
             response = Map.of();
         }
 
-        if (response == null) return result;
-        List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
-        if (content == null || content.isEmpty()) return result;
-
-        // content is a list of typed blocks, not always text-first -- claude-sonnet-5 returns
-        // extended thinking by default, so content[0] can be a "thinking" block with no "text"
-        // key (#213). Scan for the first block actually typed "text" instead of indexing 0.
-        String text = null;
-        for (Map<String, Object> block : content) {
-            if ("text".equals(block.get("type"))) {
-                text = (String) block.get("text");
-                break;
-            }
-        }
-        if (text == null) {
+        Optional<String> text = AnthropicMessages.textBlock(response);
+        if (text.isEmpty()) {
             // Total failure (e.g. thinking consumed the whole output budget) and "the model knows
             // of none" must not look identical from the outside (#213) -- the latter always
             // produces a text block, even an empty one.
             var warn = log.atWarn()
                     .addKeyValue("source", "similar-llm")
                     .addKeyValue("artist", artistName);
-            Object stopReason = response.get("stop_reason");
+            Object stopReason = AnthropicMessages.stopReason(response).orElse(null);
             if (stopReason != null) {
                 warn = warn.addKeyValue("stop_reason", stopReason);
             }
@@ -107,7 +93,7 @@ public class SimilarArtistLlmService {
             return result;
         }
 
-        for (String line : text.split("\n")) {
+        for (String line : text.get().split("\n")) {
             if (line.isBlank()) continue;
             Matcher m = LINE_ITEM.matcher(line.trim());
             result.add(m.matches() ? m.group(1).trim() : line.trim());
