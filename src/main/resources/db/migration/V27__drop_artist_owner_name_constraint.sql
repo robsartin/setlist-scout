@@ -1,0 +1,47 @@
+-- Issue #219: drop artist_owner_name_key -- UNIQUE (owner, name), declared directly by
+-- V1__baseline.sql's CREATE TABLE and guaranteed present even on a legacy pre-V1 database by
+-- V2__reconcile_owner_columns.sql's retrofit. #179 (V21__unique_artist_normalized_name) argued it
+-- was safe to KEEP as a data-integrity canary: normalize() is a function of name, so two rows
+-- sharing (owner, name) necessarily share (owner, normalized_name) too, meaning the stronger
+-- UNIQUE (owner, normalized_name) constraint strictly implies this one -- "this one can never fire
+-- on its own" (see ArtistRepository#insertIfAbsent's javadoc, as it read before this migration).
+--
+-- CI (PR #226) falsified that. ArtistSeedServiceRaceTest failed under real concurrency with a
+-- genuine PSQLException on artist_owner_name_key even though the underlying data was fully
+-- consistent -- a full Java recompute of normalized_name across all 33,077 production rows, using
+-- the real ArtistNameNormalizer, found zero that differ from a fresh normalize() (see the issue's
+-- comment history for that check, and two earlier, wrong diagnoses this one superseded). The
+-- mechanism needs no inconsistent data at all: Postgres ON CONFLICT uses SPECULATIVE insertion --
+-- pre-check the arbiter index, insert speculatively if clear, then insert into EVERY index. A
+-- conflict on the arbiter aborts the speculative insert cleanly (DO NOTHING); a conflict on a
+-- NON-arbiter index RAISES instead. ArtistRepository#insertIfAbsent's ON CONFLICT names only
+-- (owner, normalized_name) as arbiter (#179), so two genuinely simultaneous inserts of the same new
+-- name can both pass that pre-check, both insert speculatively, and then collide on
+-- artist_owner_name_key during index insertion -- reached before either transaction's own
+-- arbiter-conflict check ever runs. That is a narrow window, real only under genuine concurrency on
+-- a loaded machine, which is exactly why it survived two earlier probes that each tested the wrong
+-- (sequential, or artificially-staggered) interleave.
+--
+-- The redundancy half of #179's argument was always correct, and is what makes DROPPING this
+-- constraint -- rather than working around the ON CONFLICT target again -- the right fix: every
+-- (owner, name) duplicate it ever caught is also an (owner, normalized_name) duplicate, so the
+-- stronger constraint catches everything real this one did, plus case and punctuation variants it
+-- never could. See ArtistRepository#insertIfAbsent's updated javadoc and
+-- DropArtistOwnerNameConstraintMigrationTest for the schema assertion and the one case whose
+-- behaviour genuinely changes (a hand-written row with a normalized_name inconsistent with its own
+-- name -- unreachable from any live write path, and absent from all 33,077 production rows).
+--
+-- DROP CONSTRAINT IF EXISTS, not a bare DROP, following V14's and V22's precedent: an artist table
+-- predating V1's formal Flyway adoption (#44) could in principle reach this migration without the
+-- constraint, and a bare DROP CONSTRAINT fails (Postgres 42704) against that shape. In practice
+-- V2's retrofit (this same directory's neighbour) unconditionally adds artist_owner_name_key under
+-- this exact name if it's ever absent, and V2 always runs before V27 in version order, so by the
+-- time this migration executes the constraint is guaranteed present on every real database --
+-- IF EXISTS is defensive precedent-following, not a branch this migration expects to actually take.
+--
+-- Expected effect on production (read-only profiled 2026-08-21): two UNIQUE constraints exist on
+-- artist that include owner -- artist_owner_name_key {name, owner} and
+-- artist_owner_normalized_name_key {normalized_name, owner} -- over 33,077 rows. After this
+-- migration: exactly the second remains. artist row count is unaffected -- 33,077 before and after
+-- -- since DROP CONSTRAINT touches no rows.
+ALTER TABLE artist DROP CONSTRAINT IF EXISTS artist_owner_name_key;

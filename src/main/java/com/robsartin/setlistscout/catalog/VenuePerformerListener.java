@@ -24,32 +24,27 @@ import java.time.Instant;
  * (Postgres "current transaction is aborted"), which then fails Modulith's own AFTER_COMMIT
  * completion write and leaves the event stuck for redelivery.
  * <p>
- * <b>Known exposure to issue #219 (not fixed here, per that issue's own scope; comment corrected
- * in #206 fix round 1 to stop overstating it):</b> {@code insertIfAbsent}'s {@code ON CONFLICT}
- * names only the {@code (owner, normalized_name)} arbiter. {@code artist} also carries a second
- * live {@code UNIQUE (owner, name)} constraint (confirmed still present as of {@code
- * V22__drop_redundant_artist_owner_name_constraint.sql}, which drops only a Hibernate ddl-auto-era
- * duplicate of it, not the constraint itself) -- but that second constraint is strictly IMPLIED by
- * the arbiter: {@code normalized_name} is a deterministic function of {@code name}, so any two rows
- * sharing {@code (owner, name)} necessarily also share {@code (owner, normalized_name)} (same
- * reasoning as {@code ArtistRepository#insertIfAbsent}'s own javadoc, "Why (owner, name) uniqueness
- * is kept anyway"). That means the ROUTINE path -- a venue calendar re-listing the same performer
- * every scan cycle, or the same performer later turning up on a second, different venue's calendar
- * -- never hits this: by the time either insert runs, any earlier row for that name is already
- * committed, so the arbiter alone finds it and absorbs the conflict cleanly, every time, with no
- * error and no race.
+ * <b>Issue #219, CLOSED by V27 (previously an open, deliberately-not-fixed-here exposure; see this
+ * class's git history for the earlier wording):</b> {@code artist} used to also carry a second,
+ * narrower {@code UNIQUE (owner, name)} constraint ({@code artist_owner_name_key}) that this
+ * listener's {@code ON CONFLICT (owner, normalized_name)} did not name as arbiter. Because Postgres
+ * {@code ON CONFLICT} uses SPECULATIVE insertion (pre-check the arbiter, insert speculatively if
+ * clear, then insert into EVERY index), two genuinely concurrent {@link VenuePerformerSeen}
+ * deliveries for the same owner and exact performer name -- e.g. a touring comedian appearing on
+ * two different followed venues' calendars, scanned close enough together that their {@code @Async}
+ * dispatches overlap -- could both pass the arbiter's pre-check, both insert speculatively, and
+ * then collide on that OTHER constraint during index insertion instead, throwing rather than being
+ * absorbed. Narrow (both inserts had to be genuinely in flight at once, neither committed yet), but
+ * real: see {@code VenuePerformerListenerTest}/{@code VenuePerformerSeenFlowTest} class docs and the
+ * task-4 report for that scenario in full, and issue #219's own comment history for how a CI
+ * failure under real concurrency confirmed the mechanism after two earlier probes missed it.
  * <p>
- * The real exposure is narrower: a genuine SPECULATIVE-INSERTION race, where two inserts of the
- * exact same performer name for the same owner are both still in flight, NEITHER committed yet.
- * Only then does it become possible for Postgres to reach the (owner, name) index's own conflict
- * check before the named arbiter's during that same concurrent insert, throwing instead of being
- * suppressed. {@code @ApplicationModuleListener} is {@code @Async}, so two {@code
- * VenuePerformerSeen} events for the same owner and exact name CAN have their listener invocations
- * genuinely overlap this way -- e.g. a touring comedian appearing on two different followed venues'
- * calendars, scanned close enough together that their async dispatches overlap -- see {@code
- * VenuePerformerListenerTest}/{@code VenuePerformerSeenFlowTest} class docs and the task-4 report
- * for that scenario in full. Narrow, not theoretical: worth the same "not fixed here" treatment,
- * just not the routine, every-scan-cycle exposure the previous wording implied.
+ * {@code V27__drop_artist_owner_name_constraint} removed {@code artist_owner_name_key} entirely, as
+ * redundant with the stronger arbiter (see {@code ArtistRepository#insertIfAbsent}'s javadoc, "Why
+ * (owner, name) uniqueness was DROPPED -- #219, reversing #179", for the full mechanism and why
+ * dropping it loses no real protection). With only the named arbiter left on {@code artist}, this
+ * listener's {@code ON CONFLICT} now covers every unique constraint on the table, so this exposure
+ * is closed outright, not merely narrowed -- nothing further to fix here.
  */
 @Component
 public class VenuePerformerListener {
