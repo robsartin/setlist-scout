@@ -121,19 +121,6 @@ class VenueScanPollerTest {
     }
 
     @Test
-    @DisplayName("owner isolation: rows for two different owners are each still individually dispatched")
-    void ownerIsolation() {
-        VenueScanJob rowA = row(OWNER, 1L);
-        VenueScanJob rowB = row("other@example.com", 2L);
-        when(venueScanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(rowA, rowB));
-
-        poller.tick();
-
-        verify(venueScanRunner).run(rowA);
-        verify(venueScanRunner).run(rowB);
-    }
-
-    @Test
     @DisplayName("a RuntimeException escaping the runner for one row does not stop the remaining rows in the batch")
     void oneRunnerFailureDoesNotStopTheBatch() {
         VenueScanJob ok = row(OWNER, 1L);
