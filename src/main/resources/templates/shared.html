@@ -116,6 +116,21 @@
                         </form>
                     </div>
                 </details>
+                <!--/* #241: creating a pairing is a rare action that was previously always-visible
+                       directly under this pairing's own name, so the page carried two "Name"
+                       boxes and the more prominent one created a NEW pairing instead of renaming
+                       this one. It joins its siblings in the disclosure corner. Still in the DOM
+                       and still submittable -- #229 exists because this form was once gated on
+                       `scan == null` and vanished entirely once you had a pairing, and a
+                       disclosure keeps it reachable where a th:if does not. Guarded on having
+                       another allow-listed address left to offer: an empty dropdown is not
+                       submittable. */-->
+                <details th:if="${not #lists.isEmpty(otherOwnerEmails)}">
+                    <summary>New pairing</summary>
+                    <div class="scope-edit">
+                        <div th:replace="~{fragments/shared-create :: createForm}"></div>
+                    </div>
+                </details>
             </div>
         </dl>
     </th:block>
@@ -123,29 +138,16 @@
     <!--/* #229 Part B: creation is no longer capped at one pairing (the backend always supported
            many -- SharedScanService#visibleTo returns a list, populatePage computes otherScans,
            the picker above already offers a switcher), so this form must stay reachable even once
-           scan != null, not just on the very first, pairing-less visit. Placed above the shows list
-           below, matching the convention #175 established on /artists -- the create/add action
-           belongs above the list from the start, not retrofitted below it after the fact.
-           Guarded only on having another allow-listed address left to offer: an empty dropdown is
-           not submittable. The isAdmin gate this form used to carry is gone (#229 Part A) -- any
-           signed-in, allow-listed user may create a pairing against any other allow-listed address,
-           with no consent step (decision recorded on #229). */-->
-    <div class="settings" th:if="${not #lists.isEmpty(otherOwnerEmails)}">
-        <!--/* th:hx-post/hx-target/hx-disabled-elt: same double-submit protection as shows.html's
-               "Scan now" and candidates.html's action forms -- disables the submit button for
-               the round trip so a double-click can't fire this twice (SharedScanController#create
-               returns this same "shared :: content" fragment for the htmx branch). */-->
-        <form th:action="@{/shared}" th:hx-post="@{/shared}" hx-target="#shared-content"
-              hx-swap="outerHTML" hx-disabled-elt="find button" method="post">
-            <label for="shared-create-label">Name</label>
-            <input id="shared-create-label" type="text" name="label" value="Shared" required/>
-            <label for="shared-create-target">Shared with</label>
-            <select id="shared-create-target" name="ownerB" required>
-                <option th:each="email : ${otherOwnerEmails}" th:value="${email}"
-                        th:text="${email}">user@example.com</option>
-            </select>
-            <button type="submit" class="btn-primary">Create shared scan</button>
-        </form>
+           scan != null. #241 moved the scan != null case into the "New pairing" disclosure up in
+           the .edit corner; what remains here is the pairing-LESS case, and it stays prominent
+           and expanded on purpose -- it is then the only action on the page, and burying the one
+           thing a new user can do behind a disclosure is worse than the two-Name-boxes problem
+           #241 set out to fix. Guarded only on having another allow-listed address left to offer:
+           an empty dropdown is not submittable. The isAdmin gate this form used to carry is gone
+           (#229 Part A) -- any signed-in, allow-listed user may create a pairing against any other
+           allow-listed address, with no consent step (decision recorded on #229). */-->
+    <div class="settings" th:if="${scan == null and not #lists.isEmpty(otherOwnerEmails)}">
+        <div th:replace="~{fragments/shared-create :: createForm}"></div>
     </div>
     <!--/* Only reachable when there's neither a pairing to show NOR another address left to pair
            with -- otherwise the form above (or an existing scan's own content below) is always
