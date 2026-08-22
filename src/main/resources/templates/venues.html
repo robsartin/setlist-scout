@@ -8,74 +8,78 @@
        plain full-page POST-redirect-GET needs no autofocus/sr-status handling to stay accessible
        -- there is no swap to lose focus across. See VenueController's class javadoc. */-->
 <div th:fragment="content">
-    <!--/* #206 fix round 1 (Minor 4): this form used to carry its own <h1>Add a venue</h1>, giving
-           the page two <h1> elements -- an accessibility regression. artists.html's equivalent add
-           form uses its <label> alone with no section heading, and the page carries exactly one
-           <h1> (its list section, below). Match that: label-only here, single <h1> for the whole
-           page. */-->
+    <h1>Venues</h1>
+    <p class="page-sub">Places you follow for their own event calendars.</p>
+
     <!--/* #206 fix round 1 (Important 1): mirrors artists.html's uploadMessage convention -- a
            role="status" paragraph naming the outcome of the form directly below, so a rejected
            add (a calendar URL whose host can't be resolved) is a visible message, not a silently
            stored row that can only ever fail to scan. Absent on a plain/blank/successful submit. */-->
     <p th:if="${venueMessage}" th:text="${venueMessage}" role="status" class="upload-message"></p>
     <!--/* #175 lesson, applied from the start this time: the add form goes ABOVE the list, not
-           retrofitted later. */-->
-    <form id="add-venue" th:action="@{/venues}" method="post">
-        <div>
+           retrofitted later. VenuePageRenderTest#rendersAddFormAboveList asserts
+           id="add-venue" precedes id="venue-list" in document order -- keep it above. */-->
+    <form id="add-venue" class="scope-edit" th:action="@{/venues}" method="post">
+        <div class="field">
             <label for="venue-name">Venue name</label>
-            <input type="text" id="venue-name" name="name" placeholder="Venue name"/>
+            <input type="text" id="venue-name" name="name" placeholder="Venue name" size="22"/>
         </div>
-        <div>
+        <div class="field">
             <label for="venue-url">Calendar URL</label>
-            <input type="url" id="venue-url" name="url" placeholder="https://venue.example.com/events"/>
+            <input type="url" id="venue-url" name="url" placeholder="https://venue.example.com/events" size="28"/>
         </div>
-        <button type="submit">Add</button>
+        <button type="submit" class="btn-primary">Add</button>
     </form>
 
-    <h1>Followed venues</h1>
-    <!--/* lastScanned/showCount are load-bearing, not decoration (#206 brief): a venue whose
-           calendar silently stops parsing looks identical to a venue with no shows unless "never
-           scanned" reads differently from "scanned and found nothing" -- the #211 failure mode.
-           Kept as two distinct spans below rather than one combined string for exactly that
-           reason. */-->
-    <div id="venue-list" class="table-scroll">
-        <table>
-            <thead>
-            <tr>
-                <th>Name</th>
-                <th>Calendar URL</th>
-                <th>Last scanned</th>
-                <th>Shows contributed</th>
-                <th>Actions</th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr th:each="row : ${venues}">
-                <td th:text="${row.venue.name}">Name</td>
-                <td>
+    <!--/* #206 fix round 1 (Minor 4): this form used to carry its own <h1>Add a venue</h1>, giving
+           the page two <h1> elements -- an accessibility regression.
+           VenuePageRenderTest#rendersAddFormAboveList now pins exactly one <h1> on the whole page
+           (above); this list is the only one. */-->
+    <h2>Followed venues</h2>
+    <!--/* #235: the definition-list treatment in place of the date rail (issue: venues.html "is
+           not dated; use the definition-list treatment for each venue's health line ... rather
+           than the date rail"). lastScanned/showCount are load-bearing, not decoration (#206
+           brief): a venue whose calendar silently stops parsing looks identical to a venue with no
+           shows unless "never scanned" reads differently from "scanned and found nothing" -- the
+           #211 failure mode. Kept as two distinct dt/dd pairs for exactly that reason.
+           VenuePageRenderTest#showCountsAreNotConflatedAcrossVenues slices the page text between
+           consecutive venue names and expects each venue's own count within its own slice -- one
+           .row-listing per venue, name and stats together, satisfies that the same way the old
+           table row did. */-->
+    <div id="venue-list">
+        <div class="row-listing" th:each="row : ${venues}">
+            <div class="row-main">
+                <h3 class="row-name" th:text="${row.venue.name}">Name</h3>
+                <p class="row-sub">
                     <a th:href="${row.venue.calendarUrl}" th:text="${row.venue.calendarUrl}"
+                       th:aria-label="'Calendar for ' + ${row.venue.name}"
                        target="_blank" rel="noopener noreferrer">calendar</a>
-                </td>
-                <td>
-                    <span th:if="${row.lastScanned != null}"
-                          th:text="${#temporals.format(row.lastScanned, 'MMM d, yyyy h:mm a')}">date</span>
-                    <span th:unless="${row.lastScanned != null}" class="note">Never scanned yet</span>
-                </td>
-                <td th:text="${row.showCount} + ' show' + (${row.showCount} == 1 ? '' : 's')">0 shows</td>
-                <td>
-                    <!--/* #206 fix round 1 (Important 1): plain POST-redirect-GET, matching the
-                           rest of this page (no htmx here -- see the class javadoc), and
-                           artists.html's own per-row remove-button shape. */-->
-                    <form class="inline remove" th:action="@{'/venues/' + ${row.venue.id} + '/remove'}" method="post">
-                        <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${row.venue.name}">Remove</button>
-                    </form>
-                </td>
-            </tr>
-            <tr th:if="${#lists.isEmpty(venues)}">
-                <td colspan="5" class="note">No venues followed yet -- add one above.</td>
-            </tr>
-            </tbody>
-        </table>
+                </p>
+            </div>
+            <dl class="stats">
+                <div>
+                    <dt>Last scanned</dt>
+                    <dd>
+                        <span th:if="${row.lastScanned != null}"
+                              th:text="${#temporals.format(row.lastScanned, 'MMM d, yyyy h:mm a')}">date</span>
+                        <span th:unless="${row.lastScanned != null}" class="note">Never scanned yet</span>
+                    </dd>
+                </div>
+                <div>
+                    <dt>Shows contributed</dt>
+                    <dd th:text="${row.showCount} + ' show' + (${row.showCount} == 1 ? '' : 's')">0 shows</dd>
+                </div>
+            </dl>
+            <div class="acts">
+                <!--/* #206 fix round 1 (Important 1): plain POST-redirect-GET, matching the
+                       rest of this page (no htmx here -- see the class javadoc), and
+                       artists.html's own per-row remove-button shape. */-->
+                <form class="inline remove" th:action="@{'/venues/' + ${row.venue.id} + '/remove'}" method="post">
+                    <button type="submit" class="btn-sm btn-bad" th:aria-label="'Remove ' + ${row.venue.name}">Remove</button>
+                </form>
+            </div>
+        </div>
+        <p th:if="${#lists.isEmpty(venues)}" class="note">No venues followed yet -- add one above.</p>
     </div>
 </div>
 </body>

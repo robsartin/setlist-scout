@@ -13,7 +13,7 @@
         No new connections found yet. Add some active artists (or let expansion keep running) to build out the graph.
     </p>
 
-    <div th:unless="${#lists.isEmpty(discovered)}">
+    <div class="card" th:unless="${#lists.isEmpty(discovered)}">
         <p class="note" th:text="${#lists.size(discovered)} + ' artist' + (${#lists.size(discovered)} == 1 ? '' : 's') + ' found, not already in your catalog:'">0 found</p>
         <div class="table-scroll">
             <table>

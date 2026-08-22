@@ -102,12 +102,22 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(res).doesNotContain("<head").doesNotContain("topbar");
     }
 
+    /**
+     * #235: was checking for the literal substring "Near ZIP" -- the pre-redesign shows.html read
+     * as a settings sentence ("Near ZIP [____] within [__] miles..."). Issue #235 replaces that
+     * sentence with a labelled scope bar (a real {@code <dl>}: {@code <dt>Near</dt><dd>Austin, TX
+     * 78701</dd>}, matching the issue's own reference mockup), so "Near" and the resolved
+     * "78701" now render as two separate elements instead of one contiguous phrase. This is not a
+     * stale-test workaround: it re-points the assertion at the new (and, per the issue, intended)
+     * label, while still proving what the test always cared about -- that a first-visit default
+     * ZIP gets provisioned and rendered on the page.
+     */
     @Test
     void showsPageRendersZipLocationForm() throws Exception {
         // First visit provisions this user's settings with the default ZIP (78701).
         mockMvc.perform(get("/").with(oidcLogin().idToken(t -> t.claim("email", "render-shows@example.com"))))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("Near ZIP")))
+                .andExpect(content().string(containsString("<dt>Near</dt>")))
                 .andExpect(content().string(containsString("78701")));
     }
 

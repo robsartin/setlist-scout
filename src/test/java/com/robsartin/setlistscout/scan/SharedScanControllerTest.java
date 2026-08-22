@@ -182,9 +182,20 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         assertThat(service.settingsFor(scan).getMonthsAhead()).isEqualTo(3);
     }
 
+    /**
+     * #235: was "shows render in a semantic table with column headers", pinning a literal
+     * {@code <table>} with {@code <th scope="col">Date</th>}/{@code <th scope="col">Artist</th>}
+     * and {@code class="table-scroll"}. Issue #235 deliberately replaces that table with the same
+     * {@code .gig}/date-rail listing shows.html uses -- its own system description covers "the
+     * shows views" (plural), and shared.html shows exactly that: a chronological list of dated
+     * shows. The table markup this test used to pin no longer exists anywhere on the page; this is
+     * not a stale-test workaround, it is re-pointing the assertion at the new markup that replaced
+     * it, so the test still proves the thing it always cared about -- shows render as real
+     * structured, accessible markup, not a blob of text -- against the new shape.
+     */
     @Test
-    @DisplayName("shows render in a semantic table with column headers")
-    void showsRenderInASemanticTable() throws Exception {
+    @DisplayName("#235: shows render as accessible gig cards with a semantic time element")
+    void showsRenderAsAccessibleGigCards() throws Exception {
         Show show = new Show("Tom Petty", LocalDateTime.now().plusDays(10), "Metro", "Chicago",
                 new BigDecimal("42.50"), "ticketmaster", "https://example.test/tix", Show.Kind.MUSIC);
         show.setOwner(scan.getOwnerKey());
@@ -192,10 +203,11 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
 
         String body = pageAs(ADMIN);
 
-        assertThat(body).contains("<th scope=\"col\">Date</th>");
-        assertThat(body).contains("<th scope=\"col\">Artist</th>");
+        assertThat(body).contains("<time class=\"when\"");
+        assertThat(body).contains("class=\"act\"");
+        assertThat(body).contains("Tom Petty");
         assertThat(body).contains("Metro");
-        assertThat(body).contains("class=\"table-scroll\"");
+        assertThat(body).contains("class=\"month-rule\"");
     }
 
     @Test

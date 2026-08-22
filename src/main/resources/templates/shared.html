@@ -7,7 +7,9 @@
        shows.html's showsRegion -- an outerHTML swap destroys whatever was focused (here, the
        create form's submit button, which this response doesn't even render anymore), and focus
        would otherwise silently drop to <body>. Unset (falsy) on a plain GET, so a normal page
-       load doesn't steal focus. */-->
+       load doesn't steal focus. Attribute order (id, then tabindex, then th:autofocus) is
+       unchanged from pre-#235 -- SharedScanControllerTest pins autofocus appearing AFTER
+       id="shared-content" in the rendered tag. */-->
 <div th:fragment="content" id="shared-content" tabindex="-1" th:autofocus="${justCreated == true}">
     <h1>Shared Shows</h1>
 
@@ -16,36 +18,99 @@
             location you choose together.</p>
     </th:block>
 
+    <!--/* #235: same scope-bar-as-definition-list treatment as shows.html, with two additions the
+           issue calls for -- a "Sharing with" cell (this page's scope has a second party, unlike
+           shows.html's), and the pairing picker folded into the same collapsible-edit corner
+           (issue: "scope bar gains the pairing picker") instead of living in its own separate boxed
+           nav below. The picker's own content -- aria-label="Other shared scans", the <ul>/<li>/<a>
+           list, th:href/th:text -- is byte-for-byte unchanged from before #235, just relocated;
+           SharedScanControllerTest#pickerToOtherPairingIsALabelledControl pins that aria-label and
+           the linked pairing's id/label. */-->
     <th:block th:if="${scan != null}">
         <p class="page-sub">
             <span th:text="${scan.label}">Shared</span> &mdash; artists you and
             <span th:text="${otherParticipant}">someone</span> both follow.
         </p>
 
-        <!--/* #187: a user can be in more than one pairing, and every one of them must stay
-               reachable -- the bug this fixes was rendering an arbitrary scans.get(0) and leaving
-               any other pairing with no path to it at all. A labelled nav of plain links (no htmx):
-               each is a real, bookmarkable /shared/{id} URL that works with JS disabled, and
-               GET /shared/{id} resolves through SharedScanService#requireVisible exactly like the
-               settings/scan-now actions already do, so switching pairings can never be trusted off
-               an id that wasn't already proven visible to this caller. */-->
-        <nav th:if="${not #lists.isEmpty(otherScans)}" class="settings group-sidebar"
-             aria-label="Other shared scans">
-            <span>Also shared:</span>
-            <ul>
-                <li th:each="other : ${otherScans}">
-                    <a th:href="@{/shared/{id}(id=${other.id})}" th:text="${other.label}">Other pairing</a>
-                </li>
-            </ul>
-        </nav>
+        <dl class="scope">
+            <div>
+                <dt>Sharing with</dt>
+                <dd th:text="${otherParticipant}">someone</dd>
+            </div>
+            <div>
+                <dt>Near</dt>
+                <dd th:text="${settings.city != null ? settings.city + ', ' + settings.state + ' ' + settings.postalCode : settings.postalCode}">Chicago, IL 60601</dd>
+            </div>
+            <div>
+                <dt>Within</dt>
+                <dd th:text="${settings.radiusMiles} + ' mi'">25 mi</dd>
+            </div>
+            <div>
+                <dt>Next</dt>
+                <dd th:text="${settings.monthsAhead} + ' months'">3 months</dd>
+            </div>
+            <div>
+                <dt>Showing</dt>
+                <dd th:text="${#lists.size(shows)} + ' show' + (${#lists.size(shows)} == 1 ? '' : 's')">0 shows</dd>
+            </div>
+            <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript. #235: sits
+                   BESIDE the scope disclosure rather than inside it; an export is an action on the
+                   current view, not a scope edit. */-->
+            <div class="export">
+                <a th:href="@{'/shared/' + ${scan.id} + '.csv'}">Download CSV</a>
+            </div>
+            <div class="edit">
+                <!--/* #187: a user can be in more than one pairing, and every one of them must stay
+                       reachable -- the bug this fixes was rendering an arbitrary scans.get(0) and
+                       leaving any other pairing with no path to it at all. A labelled nav of plain
+                       links (no htmx): each is a real, bookmarkable /shared/{id} URL that works with
+                       JS disabled, and GET /shared/{id} resolves through
+                       SharedScanService#requireVisible exactly like the settings/scan-now actions
+                       already do, so switching pairings can never be trusted off an id that wasn't
+                       already proven visible to this caller. */-->
+                <details th:if="${not #lists.isEmpty(otherScans)}">
+                    <summary>Switch pairing</summary>
+                    <nav class="scope-edit group-sidebar" aria-label="Other shared scans">
+                        <ul>
+                            <li th:each="other : ${otherScans}">
+                                <a th:href="@{/shared/{id}(id=${other.id})}" th:text="${other.label}">Other pairing</a>
+                            </li>
+                        </ul>
+                    </nav>
+                </details>
+                <details>
+                    <summary>Change scope</summary>
+                    <div class="scope-edit">
+                        <form th:action="@{'/shared/' + ${scan.id} + '/settings'}" method="post">
+                            <div class="field">
+                                <label for="shared-zip">ZIP</label>
+                                <input id="shared-zip" type="text" name="postalCode" th:value="${settings.postalCode}" size="5" maxlength="5" pattern="[0-9]{5}" required/>
+                            </div>
+                            <div class="field">
+                                <label for="shared-radius">Radius (mi)</label>
+                                <input id="shared-radius" type="number" name="radiusMiles" th:value="${settings.radiusMiles}" min="1" max="500"/>
+                            </div>
+                            <div class="field">
+                                <label for="shared-months">Months ahead</label>
+                                <input id="shared-months" type="number" name="monthsAhead" th:value="${settings.monthsAhead}" min="1" max="24"/>
+                            </div>
+                            <button type="submit" class="btn-sm btn-primary">Save</button>
+                        </form>
+                        <form class="inline" th:action="@{'/shared/' + ${scan.id} + '/scan-now'}" method="post">
+                            <button type="submit" class="btn-sm">Scan now</button>
+                        </form>
+                    </div>
+                </details>
+            </div>
+        </dl>
     </th:block>
 
     <!--/* #229 Part B: creation is no longer capped at one pairing (the backend always supported
            many -- SharedScanService#visibleTo returns a list, populatePage computes otherScans,
-           the nav above already offers a picker), so this form must stay reachable even once
-           scan != null, not just on the very first, pairing-less visit. Placed above the settings/
-           shows-list below, matching the convention #175 established on /artists -- the create/add
-           action belongs above the list from the start, not retrofitted below it after the fact.
+           the picker above already offers a switcher), so this form must stay reachable even once
+           scan != null, not just on the very first, pairing-less visit. Placed above the shows list
+           below, matching the convention #175 established on /artists -- the create/add action
+           belongs above the list from the start, not retrofitted below it after the fact.
            Guarded only on having another allow-listed address left to offer: an empty dropdown is
            not submittable. The isAdmin gate this form used to carry is gone (#229 Part A) -- any
            signed-in, allow-listed user may create a pairing against any other allow-listed address,
@@ -64,7 +129,7 @@
                 <option th:each="email : ${otherOwnerEmails}" th:value="${email}"
                         th:text="${email}">user@example.com</option>
             </select>
-            <button type="submit">Create shared scan</button>
+            <button type="submit" class="btn-primary">Create shared scan</button>
         </form>
     </div>
     <!--/* Only reachable when there's neither a pairing to show NOR another address left to pair
@@ -73,30 +138,6 @@
     <p th:if="${scan == null and #lists.isEmpty(otherOwnerEmails)}">No shared scan has been set up yet.</p>
 
     <th:block th:if="${scan != null}">
-        <div class="settings">
-            <form th:action="@{'/shared/' + ${scan.id} + '/settings'}" method="post">
-                Near ZIP
-                <label class="visually-hidden" for="shared-zip">Postal code</label>
-                <input id="shared-zip" type="text" name="postalCode" th:value="${settings.postalCode}"
-                       size="5" maxlength="5" pattern="[0-9]{5}" required/>
-                within
-                <label class="visually-hidden" for="shared-radius">Radius in miles</label>
-                <input id="shared-radius" type="number" name="radiusMiles"
-                       th:value="${settings.radiusMiles}" min="1" max="500"/> miles, next
-                <label class="visually-hidden" for="shared-months">Months ahead</label>
-                <input id="shared-months" type="number" name="monthsAhead"
-                       th:value="${settings.monthsAhead}" min="1" max="24"/> months
-                <button type="submit">Save</button>
-                <span th:if="${settings.city != null}"
-                      th:text="'(' + ${settings.city} + ', ' + ${settings.state} + ')'">(Chicago, IL)</span>
-            </form>
-            <form class="inline" th:action="@{'/shared/' + ${scan.id} + '/scan-now'}" method="post">
-                <button type="submit">Scan now</button>
-            </form>
-            <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript. */-->
-            <a th:href="@{'/shared/' + ${scan.id} + '.csv'}">Download CSV</a>
-        </div>
-
         <!--/* Three distinct states, and they must stay distinct. "We can't search yet",
                "you two follow no one in common", and "we searched and found nothing" are
                different answers; collapsing them into one "no results" is the failure mode the
@@ -115,36 +156,37 @@
             scan runs in the background.
         </p>
 
-        <div class="table-scroll" th:if="${not #lists.isEmpty(shows)}">
-            <table>
-                <caption class="visually-hidden">Shows for artists both users follow</caption>
-                <thead>
-                <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Artist</th>
-                    <th scope="col">Venue</th>
-                    <th scope="col">City</th>
-                    <th scope="col">Price</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Tickets</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr th:each="show : ${shows}">
-                    <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
-                    <td th:text="${show.artistName}">Artist</td>
-                    <td th:text="${show.venueName}">Venue</td>
-                    <td th:text="${show.venueCity}">City</td>
-                    <td th:text="${show.price != null} ? '$' + ${show.price} : '—'">Price</td>
-                    <td th:text="${show.source}">Source</td>
-                    <td>
-                        <a th:if="${show.ticketUrl != null}" th:href="${show.ticketUrl}"
-                           th:aria-label="'Tickets for ' + ${show.artistName} + ' at ' + ${show.venueName}">Tickets</a>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
+        <!--/* #235: "same gig list" as shows.html -- the issue's own system description covers
+               "the shows views" (plural) for month rules + the date rail, and this page is exactly
+               that: a chronological list of dated shows, just filtered to what both participants
+               follow. No .acts/hover-actions here -- unlike shows.html, this read-only shared view
+               has never offered a per-row Hide, so there is nothing to put in that slot. */-->
+        <th:block th:if="${not #lists.isEmpty(shows)}">
+            <th:block th:each="show, showStat : ${shows}">
+                <div class="month-rule"
+                     th:if="${showStat.index == 0 or #temporals.format(show.eventDateTime, 'yyyy-MM') != #temporals.format(shows[showStat.index - 1].eventDateTime, 'yyyy-MM')}">
+                    <span th:text="${#temporals.format(show.eventDateTime, 'MMMM yyyy')}">Month Year</span>
+                </div>
+                <article class="gig">
+                    <time class="when" th:datetime="${#temporals.format(show.eventDateTime, 'yyyy-MM-dd')}">
+                        <span class="dow" th:text="${#temporals.format(show.eventDateTime, 'EEE')}">Sun</span>
+                        <span class="dnum" th:text="${#temporals.format(show.eventDateTime, 'd')}">23</span>
+                    </time>
+                    <div class="what">
+                        <h3 class="act" th:text="${show.artistName}">Artist</h3>
+                        <p class="where">
+                            <span th:text="${show.venueName}">Venue</span>
+                            <th:block th:if="${show.venueCity}"><span class="sep">·</span> <span th:text="${show.venueCity}">City</span></th:block>
+                            <th:block th:if="${show.ticketUrl != null}"><span class="sep">·</span> <a th:href="${show.ticketUrl}" target="_blank"
+                                    th:aria-label="'Tickets for ' + ${show.artistName} + ' at ' + ${show.venueName}">tickets</a></th:block>
+                        </p>
+                    </div>
+                    <div class="meta">
+                        <span th:if="${show.price != null}" class="note" th:text="'$' + ${show.price}">$25</span>
+                    </div>
+                </article>
+            </th:block>
+        </th:block>
     </th:block>
 </div>
 </body>
