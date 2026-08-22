@@ -524,4 +524,142 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         List<CSVRecord> records = parseCsv(body);
         assertThat(records.get(0).get("artist_name")).isEqualTo("Øystein Sevåg");
     }
+
+    // ---- issue #238: renaming a shared scan's label. Mirrors POST /shared/{id}/settings exactly
+    // -- resolves through requireVisible, redirects back to THIS pairing -- so a non-participant
+    // 404s the same way settings/scan-now already do, and acting on a non-default pairing doesn't
+    // bounce the page elsewhere.
+
+    @Test
+    @DisplayName("issue #238: either participant can rename the pairing")
+    void eitherParticipantCanRename() throws Exception {
+        mockMvc.perform(post("/shared/" + scan.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", OTHER)))
+                        .with(csrf())
+                        .param("label", "R&S"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/shared/" + scan.getId()));
+
+        assertThat(service.requireVisible(ADMIN, scan.getId()).getLabel()).isEqualTo("R&S");
+    }
+
+    @Test
+    @DisplayName("issue #238: a non-participant cannot rename another pairing's label, and it is unchanged")
+    void nonParticipantCannotRename() throws Exception {
+        mockMvc.perform(post("/shared/" + scan.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", STRANGER)))
+                        .with(csrf())
+                        .param("label", "Hijacked"))
+                .andExpect(status().isNotFound());
+
+        assertThat(service.requireVisible(ADMIN, scan.getId()).getLabel()).isEqualTo("Rob & David");
+    }
+
+    @Test
+    @DisplayName("issue #238: a blank or whitespace-only label is rejected, and it is unchanged")
+    void blankLabelIsRejectedAndUnchanged() throws Exception {
+        mockMvc.perform(post("/shared/" + scan.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "   "))
+                .andExpect(status().isBadRequest());
+
+        assertThat(service.requireVisible(ADMIN, scan.getId()).getLabel()).isEqualTo("Rob & David");
+    }
+
+    /**
+     * Issue #238's own highlighted risk: the real wanted names (R&amp;D, R&amp;S) contain a
+     * literal ampersand. Thymeleaf's th:text escapes it exactly ONCE when rendering: the raw
+     * stored label "R&D" becomes the response body "R&amp;D", which every browser decodes back to
+     * "R&D" on screen -- the same mechanism already proven for "Rob &amp; David" elsewhere in this
+     * class (see {@link #bothParticipantsSeeIt}). A careless implementation that ALSO
+     * HTML-escapes the label before persisting it (redundant "sanitizing" on the way in, on top
+     * of what Thymeleaf already does on the way out) makes it escape TWICE: the stored
+     * "R&amp;D" renders as "R&amp;amp;D" in the response, which a browser decodes only ONE level
+     * to the LITERAL VISIBLE TEXT "R&amp;D" on the page -- exactly the bug this issue calls out.
+     * Asserting the precise single-escaped substring catches both failure modes at once: it fails
+     * outright if escaping is skipped entirely (raw "R&D", no entity, substring absent) and fails
+     * to match inside "R&amp;amp;D" if doubled (proven explicitly by the doesNotContain below).
+     */
+    @Test
+    @DisplayName("issue #238: a renamed label containing '&' survives Thymeleaf's escaping exactly once")
+    void renamedLabelWithAmpersandSurvivesEscapingExactlyOnce() throws Exception {
+        mockMvc.perform(post("/shared/" + scan.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "R&D"))
+                .andExpect(status().is3xxRedirection());
+
+        String body = pageForId(scan.getId(), ADMIN);
+
+        assertThat(body).contains("R&amp;D");
+        assertThat(body).doesNotContain("R&amp;amp;D");
+    }
+
+    /**
+     * Proves the persisted rename shows up everywhere the label renders, not just in the stored
+     * value: on the renamed pairing's own page (the page-sub line under the h1 -- scan.label's
+     * only rendering there), AND from a DIFFERENT pairing's "Switch pairing" picker, which links
+     * to this one by id and renders its label fresh from the DB on every load.
+     */
+    @Test
+    @DisplayName("issue #238: a rename is reflected on the pairing's own page and in the picker from another pairing")
+    void renameUpdatesLabelEverywhereItRenders() throws Exception {
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        mockMvc.perform(post("/shared/" + scan.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "R&D"))
+                .andExpect(status().is3xxRedirection());
+
+        String ownPage = pageForId(scan.getId(), ADMIN);
+        assertThat(ownPage).contains("R&amp;D");
+
+        String otherPairingPage = pageForId(second.getId(), ADMIN);
+        assertThat(otherPairingPage).contains("aria-label=\"Other shared scans\"");
+        assertThat(otherPairingPage).contains("R&amp;D");
+        assertThat(otherPairingPage).contains("/shared/" + scan.getId());
+    }
+
+    @Test
+    @DisplayName("issue #238: the rename control is a labelled input, inside the scope details")
+    void renameControlIsALabelledControl() throws Exception {
+        String body = pageForId(scan.getId(), ADMIN);
+
+        assertThat(body).contains("<label for=\"shared-label\"");
+        assertThat(body).contains("id=\"shared-label\"");
+    }
+
+    @Test
+    @DisplayName("issue #238: renaming a non-default pairing keeps that same pairing in view after the redirect")
+    void renamingANonDefaultPairingStaysThere() throws Exception {
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        mockMvc.perform(post("/shared/" + second.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "R&S"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/shared/" + second.getId()));
+    }
+
+    /**
+     * Issue #155's invariant, re-proven for this new action (#238): 22 other tests already pin
+     * this app-wide. The rename POST redirects to a plain GET -- a full page render, same as
+     * every other non-htmx action on this page -- which carries NO autofocus at all;
+     * {@code justCreated} is only ever set true by {@code #create}'s htmx branch.
+     */
+    @Test
+    @DisplayName("issue #238: renaming does not disturb the single-autofocus-per-response invariant (#155)")
+    void renameKeepsTheAutofocusInvariant() throws Exception {
+        mockMvc.perform(post("/shared/" + scan.getId() + "/label")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "R&D"))
+                .andExpect(status().is3xxRedirection());
+
+        String body = pageForId(scan.getId(), ADMIN);
+        assertThat(countAutofocusElements(body)).isZero();
+    }
 }

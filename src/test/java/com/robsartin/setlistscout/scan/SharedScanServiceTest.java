@@ -38,6 +38,7 @@ class SharedScanServiceTest extends AbstractPostgresIntegrationTest {
 
     @Autowired private SharedScanService service;
     @Autowired private SharedScanRepository repository;
+    @Autowired private ScanJobRepository scanJobRepository;
 
     @BeforeEach
     void clean() {
@@ -143,5 +144,91 @@ class SharedScanServiceTest extends AbstractPostgresIntegrationTest {
         assertThatThrownBy(() -> service.create("Rob & Nobody", ROB, NOT_ALLOWED))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("400");
+    }
+
+    // ---- issue #238: a shared scan's label can be renamed after creation -- SharedScan had no
+    // setters at all, so with #229 letting one user have several pairings, a typo or placeholder
+    // label was permanent. Either participant may rename (requireVisible, exactly like
+    // updateSettings); ownerA/ownerB/ownerKey stay immutable -- only the display label is
+    // editable.
+
+    @Test
+    @DisplayName("issue #238: a participant can rename the pairing, and the new label is trimmed")
+    void renameTrimsAndUpdatesTheLabel() {
+        SharedScan scan = service.create("Rob & David", ROB, DAVID);
+
+        service.rename(scan, "  R&D  ");
+
+        assertThat(service.requireVisible(ROB, scan.getId()).getLabel()).isEqualTo("R&D");
+    }
+
+    @Test
+    @DisplayName("issue #238: renaming to blank or whitespace-only is rejected, and the label is unchanged")
+    void renameRejectsBlankOrWhitespaceOnly() {
+        SharedScan scan = service.create("Rob & David", ROB, DAVID);
+
+        assertThatThrownBy(() -> service.rename(scan, "   "))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("400");
+        assertThatThrownBy(() -> service.rename(scan, ""))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("400");
+
+        assertThat(service.requireVisible(ROB, scan.getId()).getLabel()).isEqualTo("Rob & David");
+    }
+
+    /**
+     * The column is {@code varchar(255)} (V18__create_shared_scan.sql) -- rejecting an over-cap
+     * label rather than silently truncating it is the issue's own explicit requirement, so this
+     * pins the boundary on both sides: 255 is fine, 256 is not.
+     */
+    @Test
+    @DisplayName("issue #238: a label over 255 characters is rejected rather than truncated; exactly 255 is fine")
+    void renameRejectsOverLengthLabelButAcceptsTheCapExactly() {
+        SharedScan scan = service.create("Rob & David", ROB, DAVID);
+        String atCap = "x".repeat(255);
+        String overCap = "x".repeat(256);
+
+        assertThatThrownBy(() -> service.rename(scan, overCap))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("400");
+        assertThat(service.requireVisible(ROB, scan.getId()).getLabel()).isEqualTo("Rob & David");
+
+        service.rename(scan, atCap);
+        assertThat(service.requireVisible(ROB, scan.getId()).getLabel()).isEqualTo(atCap);
+    }
+
+    @Test
+    @DisplayName("issue #238: renaming to match another pairing's label is allowed -- uniqueness is not required")
+    void renameDoesNotRequireUniqueness() {
+        SharedScan first = service.create("Rob & David", ROB, DAVID);
+        SharedScan second = service.create("Rob & Stranger", ROB, STRANGER);
+
+        service.rename(second, "Rob & David");
+
+        assertThat(service.requireVisible(ROB, first.getId()).getLabel()).isEqualTo("Rob & David");
+        assertThat(service.requireVisible(ROB, second.getId()).getLabel()).isEqualTo("Rob & David");
+    }
+
+    @Test
+    @DisplayName("issue #238: renaming touches only the label -- owner identity, settings and jobs are untouched")
+    void renameDoesNotTouchOwnerIdentitySettingsOrJobs() {
+        SharedScan scan = service.create("Rob & David", ROB, DAVID);
+        String ownerKeyBefore = scan.getOwnerKey();
+        String ownerABefore = scan.getOwnerA();
+        String ownerBBefore = scan.getOwnerB();
+        var settingsBefore = service.settingsFor(scan);
+        int jobCountBefore = scanJobRepository.findByOwner(scan.getOwnerKey()).size();
+
+        service.rename(scan, "R&D");
+
+        SharedScan reloaded = service.requireVisible(ROB, scan.getId());
+        assertThat(reloaded.getOwnerKey()).isEqualTo(ownerKeyBefore);
+        assertThat(reloaded.getOwnerA()).isEqualTo(ownerABefore);
+        assertThat(reloaded.getOwnerB()).isEqualTo(ownerBBefore);
+        assertThat(service.settingsFor(reloaded).getPostalCode()).isEqualTo(settingsBefore.getPostalCode());
+        assertThat(service.settingsFor(reloaded).getRadiusMiles()).isEqualTo(settingsBefore.getRadiusMiles());
+        assertThat(service.settingsFor(reloaded).getMonthsAhead()).isEqualTo(settingsBefore.getMonthsAhead());
+        assertThat(scanJobRepository.findByOwner(scan.getOwnerKey())).hasSize(jobCountBefore);
     }
 }

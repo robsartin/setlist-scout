@@ -191,6 +191,24 @@ public class SharedScanController {
     }
 
     /**
+     * Either participant may rename the shared scan's display label (#238) -- the only thing
+     * distinguishing multiple pairings (#229) in the picker. Its own endpoint/form, not folded
+     * into {@link #updateSettings}'s: the two validate independently -- a bad ZIP must not block a
+     * valid rename, and a blank/too-long label must not block a valid settings save -- and
+     * renaming is rare (this page's own UI guidance), so it does not belong sharing a submit
+     * button with the location fields. Mirrors {@link #updateSettings} exactly: resolves through
+     * {@code requireVisible} (a non-participant 404s, never 403 -- see that method's own javadoc
+     * for why), and redirects back to THIS pairing rather than the bare default, so renaming a
+     * non-default pairing doesn't bounce the page to a different one.
+     */
+    @PostMapping("/shared/{id}/label")
+    public String rename(@PathVariable Long id, @RequestParam String label) {
+        SharedScan scan = sharedScanService.requireVisible(currentUser.email(), id);
+        sharedScanService.rename(scan, label);
+        return "redirect:/shared/" + id;
+    }
+
+    /**
      * Re-check the intersection and mark this shared scan's jobs due now. There is no synchronous
      * scan to wait on -- the paced poller drains them -- so this queues and returns, exactly like
      * the Shows page's own "Scan now". Redirects back to THIS pairing, same reasoning as {@link

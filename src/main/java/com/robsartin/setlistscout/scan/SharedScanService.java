@@ -168,4 +168,34 @@ public class SharedScanService {
     public SearchSettings updateSettings(SharedScan scan, String postalCode, int radiusMiles, int monthsAhead) {
         return settingsService.updateSettings(scan.getOwnerKey(), postalCode, radiusMiles, monthsAhead);
     }
+
+    /**
+     * Rename the shared scan's display label (#238) -- the only thing distinguishing multiple
+     * pairings (#229) in the picker, and previously fixed forever at creation (SharedScan had no
+     * setters at all). Either participant may call this; callers resolve {@code scan} through
+     * {@link #requireVisible} first, exactly like {@link #updateSettings}. Trims surrounding
+     * whitespace and REJECTS -- rather than silently truncates -- a blank/whitespace-only value or
+     * one over the {@code varchar(255)} column cap (V18__create_shared_scan.sql). Deliberately no
+     * uniqueness check: two pairings sharing a label is the caller's business, not this method's,
+     * and the picker already shows the other participant alongside it.
+     * <p>
+     * Whatever the caller passes is stored verbatim after trimming -- no HTML-escaping here.
+     * Escaping happens exactly once, at render time, via the template's own th:text/th:value; a
+     * label containing '&amp;' (the exact case #238 exists for -- "R&amp;D", "R&amp;S") must
+     * round-trip through that single escaping pass, not be pre-escaped here and escaped again on
+     * the way out.
+     *
+     * @throws ResponseStatusException 400 if the trimmed label is blank or longer than 255 characters.
+     */
+    public SharedScan rename(SharedScan scan, String label) {
+        String trimmed = label == null ? "" : label.trim();
+        if (trimmed.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "label must not be blank");
+        }
+        if (trimmed.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "label must be 255 characters or fewer");
+        }
+        scan.setLabel(trimmed);
+        return sharedScanRepository.save(scan);
+    }
 }

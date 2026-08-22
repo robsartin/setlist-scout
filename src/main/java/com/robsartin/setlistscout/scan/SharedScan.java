@@ -59,6 +59,9 @@ public class SharedScan {
     public String getLabel() { return label; }
     public Instant getCreatedAt() { return createdAt; }
 
+    /** Display name is the only mutable field (#238) -- ownerA/ownerB/ownerKey stay fixed at creation. */
+    public void setLabel(String label) { this.label = label; }
+
     /** True if {@code email} is one of the two participants. Case-insensitive: OIDC casing must not decide access. */
     public boolean includes(String email) {
         return email != null && (email.equalsIgnoreCase(ownerA) || email.equalsIgnoreCase(ownerB));

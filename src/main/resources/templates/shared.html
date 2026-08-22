@@ -81,6 +81,21 @@
                 <details>
                     <summary>Change scope</summary>
                     <div class="scope-edit">
+                        <!--/* #238: renaming is rare (this issue's own UI guidance), so it lives
+                               here inside the same collapsible panel as the location fields rather
+                               than as its own always-visible section. Own form/endpoint (POST
+                               /shared/{id}/label), not folded into the settings form below: the
+                               two validate independently -- a bad ZIP must not block a valid
+                               rename, and a blank/too-long label must not block a valid settings
+                               save. th:value seeds the field with the CURRENT label so opening
+                               this panel to fix a typo doesn't start from a blank box. */-->
+                        <form th:action="@{'/shared/' + ${scan.id} + '/label'}" method="post">
+                            <div class="field">
+                                <label for="shared-label">Name</label>
+                                <input id="shared-label" type="text" name="label" th:value="${scan.label}" maxlength="255" required/>
+                            </div>
+                            <button type="submit" class="btn-sm btn-primary">Rename</button>
+                        </form>
                         <form th:action="@{'/shared/' + ${scan.id} + '/settings'}" method="post">
                             <div class="field">
                                 <label for="shared-zip">ZIP</label>
