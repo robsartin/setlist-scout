@@ -3,10 +3,13 @@
       th:replace="~{fragments/layout :: page('Artists', 'artists', ~{::content})}">
 <body>
 <div th:fragment="content">
+    <h1>Artists</h1>
+    <p class="page-sub">Bands you follow, seed picks and approved expansions alike.</p>
+
     <form class="inline" th:action="@{/artists/log-level}" method="post">
         <span class="note">Log level:</span>
-        <button type="submit" name="level" value="INFO">INFO</button>
-        <button type="submit" name="level" value="DEBUG">DEBUG</button>
+        <button type="submit" name="level" value="INFO" class="btn-sm">INFO</button>
+        <button type="submit" name="level" value="DEBUG" class="btn-sm">DEBUG</button>
     </form>
 
     <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript and that's a hard
@@ -18,12 +21,14 @@
            page (adding an artist) the hardest one to reach. Moved above the list instead.
            Moving a form above its own swap target is fine, and follows shows.html's settings/
            "Scan now" forms, which already sit above #shows-region the same way. */-->
-    <form hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
+    <form class="scope-edit" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
           hx-on::after-request="this.reset()"
           th:action="@{/artists/seed}" method="post">
-        <label for="artist-name">Add a band to the seed list</label>
-        <input type="text" id="artist-name" name="name" placeholder="Add a band to the seed list"/>
-        <button type="submit">Add</button>
+        <div class="field">
+            <label for="artist-name">Add a band to the seed list</label>
+            <input type="text" id="artist-name" name="name" placeholder="Add a band to the seed list"/>
+        </div>
+        <button type="submit" class="btn-sm btn-primary">Add</button>
     </form>
 
     <!--/* uploadMessage and the import-progress display both describe the upload form directly
@@ -44,13 +49,15 @@
             <li th:each="f : ${importFailed}" th:text="${f.name}">Name</li>
         </ul>
     </div>
-    <form th:action="@{/artists/upload}" method="post" enctype="multipart/form-data">
-        <label for="artist-file">Or bulk-add from a text file (one band per line):</label>
-        <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>
-        <button type="submit">Upload</button>
+    <form class="scope-edit" th:action="@{/artists/upload}" method="post" enctype="multipart/form-data">
+        <div class="field">
+            <label for="artist-file">Or bulk-add from a text file (one band per line)</label>
+            <input type="file" id="artist-file" name="file" accept=".txt,text/plain"/>
+        </div>
+        <button type="submit" class="btn-sm">Upload</button>
     </form>
 
-    <h1>Active list (seed + approved)</h1>
+    <h2>Active list (seed + approved)</h2>
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload.
            Deliberately NO focus anchor here (no tabindex/autofocus), unlike shows.html's
            showsRegion or shared.html's shared-content: the add-artist form (issue #175) lives
@@ -73,44 +80,57 @@
         <p id="sr-status" hx-swap-oob="innerHTML" class="visually-hidden" th:if="${announceActivePage}">
             <span th:text="${activePage.positionSummary()}">Showing 20 artists, Alpha Band to Zulu Band.</span>
         </p>
-        <div class="table-scroll">
-            <table>
-                <thead><tr><th>Name</th><th>Source</th><th>Official site (scraped for tour dates)</th><th>Actions</th></tr></thead>
-                <tbody>
-                <tr th:each="a : ${active}">
-                    <td>
-                        <span th:text="${a.name}">Name</span>
-                        <span th:if="${a.source.name() == 'TRIBUTE_EXPANSION'}" class="chip tribute">Tribute</span>
-                        <a th:href="@{'/artists/' + ${a.id} + '/graph'}" class="note">graph</a>
-                    </td>
-                    <td th:text="${a.source}">Source</td>
-                    <td>
-                        <a th:if="${a.officialSiteUrl}" th:href="${a.officialSiteUrl}" th:text="${a.officialSiteUrl}"
+        <!--/* #235: row rhythm + hover-action pattern from shows.html/venues.html, minus the date
+               rail -- the issue's own words for this page ("a long list with pagination. The rail
+               does not apply; carry the type scale, the row rhythm, and the hover-action
+               pattern"). The name span keeps th:text as its ONLY content (nothing else inside that
+               one tag) so it renders as a bare ">Name<" -- ArtistPageRenderTest's ordering check
+               (indexOf(">APPLE<") etc.) depends on that exact shape, not just the class around it.
+               The official-site editor stays in .row-main, always visible rather than
+               hover-gated: unlike Remove, it is an inline EDIT field, and hiding an input behind
+               opacity:0 until :hover/:focus-within would be a strange interaction for something a
+               keyboard/mouse user might be mid-typing into. */-->
+        <div class="row-listing" th:each="a : ${active}">
+            <div class="row-main">
+                <h3 class="row-name">
+                    <span th:text="${a.name}">Name</span>
+                    <span th:if="${a.source.name() == 'TRIBUTE_EXPANSION'}" class="chip tribute">Tribute</span>
+                </h3>
+                <p class="row-sub">
+                    <span th:text="${a.source}">Source</span>
+                    <span class="sep">·</span>
+                    <a th:href="@{'/artists/' + ${a.id} + '/graph'}">graph</a>
+                    <th:block th:if="${a.officialSiteUrl}">
+                        <span class="sep">·</span>
+                        <a th:href="${a.officialSiteUrl}" th:text="${a.officialSiteUrl}"
+                           th:aria-label="'Official site for ' + ${a.name}"
                            target="_blank" rel="noopener noreferrer">site</a>
-                        <form class="inline" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
-                              th:action="@{'/artists/' + ${a.id} + '/site-url'}" method="post">
-                            <input type="url" name="url" th:value="${a.officialSiteUrl}" placeholder="official site URL" size="22"/>
-                            <button type="submit">Set</button>
-                        </form>
-                    </td>
-                    <td>
-                        <!--/* Remove = reject (APPROVED only): drops off the active list, stops scanning, reversible via Unreject.
-                               Plain redirect since it updates both the active and rejected sections. */-->
-                        <form class="inline remove" th:if="${a.status.name() == 'APPROVED'}"
-                              th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
-                            <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${a.name}">Remove</button>
-                        </form>
-                        <!--/* Remove from seed (SEED only): drops off the active list, stops scanning, terminal (no unreject).
-                               Plain redirect for consistency with Remove. */-->
-                        <form class="inline remove" th:if="${a.status.name() == 'SEED'}"
-                              th:action="@{'/artists/' + ${a.id} + '/remove-from-seed'}" method="post">
-                            <button type="submit" class="btn-bad" th:aria-label="'Remove ' + ${a.name} + ' from seed list'">Remove from seed list</button>
-                        </form>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
+                    </th:block>
+                </p>
+                <form class="inline" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
+                      th:action="@{'/artists/' + ${a.id} + '/site-url'}" method="post">
+                    <label class="visually-hidden" th:for="'site-url-' + ${a.id}" th:text="'Official site URL for ' + ${a.name}">Official site URL</label>
+                    <input type="url" th:id="'site-url-' + ${a.id}" name="url" th:value="${a.officialSiteUrl}"
+                           placeholder="official site URL" size="22"/>
+                    <button type="submit" class="btn-sm">Set</button>
+                </form>
+            </div>
+            <div class="acts">
+                <!--/* Remove = reject (APPROVED only): drops off the active list, stops scanning, reversible via Unreject.
+                       Plain redirect since it updates both the active and rejected sections. */-->
+                <form class="inline remove" th:if="${a.status.name() == 'APPROVED'}"
+                      th:action="@{'/artists/' + ${a.id} + '/remove'}" method="post">
+                    <button type="submit" class="btn-sm btn-bad" th:aria-label="'Remove ' + ${a.name}">Remove</button>
+                </form>
+                <!--/* Remove from seed (SEED only): drops off the active list, stops scanning, terminal (no unreject).
+                       Plain redirect for consistency with Remove. */-->
+                <form class="inline remove" th:if="${a.status.name() == 'SEED'}"
+                      th:action="@{'/artists/' + ${a.id} + '/remove-from-seed'}" method="post">
+                    <button type="submit" class="btn-sm btn-bad" th:aria-label="'Remove ' + ${a.name} + ' from seed list'">Remove from seed list</button>
+                </form>
+            </div>
         </div>
+        <p th:if="${#lists.isEmpty(active)}" class="note">No artists yet -- add one above.</p>
         <!--/* Issue #174: keyset pagination controls. Real th:href links (work with the non-JS
                fallback -- a full navigation to GET /artists?after=... or ?before=... renders the
                same page server-side) enhanced with th:hx-get (Thymeleaf only resolves expressions
