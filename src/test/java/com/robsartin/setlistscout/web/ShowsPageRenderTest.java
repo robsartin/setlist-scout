@@ -214,4 +214,22 @@ class ShowsPageRenderTest extends AbstractPostgresIntegrationTest {
         artist.setOwner(owner);
         artistRepository.save(artist);
     }
+    /**
+     * #240: the listing pages (shows/artists/shared) use a wider measure than the rest of the app.
+     * Both the content wrapper AND the header carry it -- they hold independent max-widths, so
+     * widening only one leaves the brand and nav visibly inset against rows running wider beneath
+     * them. Asserting both together is the point: the failure this guards against is them
+     * disagreeing, which no single-element assertion would catch.
+     */
+    @Test
+    @DisplayName("#240: the shows page widens both the content wrapper and the header")
+    void showsPageUsesTheWideMeasureOnBothWrapperAndHeader() throws Exception {
+        String body = mvc.perform(get("/").with(oidcLogin().idToken(t -> t.claim("email", OWNER))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("class=\"wrap wide\"");
+        assertThat(body).contains("class=\"topbar-inner wide\"");
+    }
+
 }

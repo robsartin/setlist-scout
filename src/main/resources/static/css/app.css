@@ -33,10 +33,20 @@
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font-family:var(--font); line-height:1.5; -webkit-font-smoothing:antialiased; }
 .wrap { max-width:940px; margin:0 auto; padding:0 1.25rem 4rem; }
+/* #240: the listing pages (.gig / .row-listing) earn a wider measure -- a row there is date rail +
+   artist + venue + chips + actions, and the extra width goes to the two columns that truncate
+   first. Bounded, not fluid-to-viewport: past roughly this width the date rail stops doing its job,
+   since you can no longer scan a left edge and take in the row in one movement. Applied to the
+   header too (.topbar-inner.wide, below) so the brand and nav stay aligned with the rows -- the two
+   carry independent max-widths, so widening only one visibly misaligns them. No @media breakpoint:
+   a max-width bump needs none, and this file's .candidates-layout comment records why breakpoints
+   are avoided here. */
+.wrap.wide { max-width:1240px; }
 
 /* Top nav */
 header.topbar { position:sticky; top:0; z-index:5; background:var(--surface); border-bottom:1px solid var(--border); }
 .topbar-inner { max-width:940px; margin:0 auto; padding:.7rem 1.25rem; display:flex; align-items:center; gap:1.25rem; flex-wrap:wrap; }
+.topbar-inner.wide { max-width:1240px; }
 .brand { display:flex; align-items:center; gap:.55rem; font-weight:700; letter-spacing:-.01em; }
 .brand .dot { width:12px; height:12px; border-radius:50%; background:var(--primary); box-shadow:0 0 0 4px var(--primary-soft); }
 nav.main { display:flex; gap:.25rem; flex-wrap:wrap; }
