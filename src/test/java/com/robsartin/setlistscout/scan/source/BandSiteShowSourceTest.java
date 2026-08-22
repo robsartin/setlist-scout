@@ -3,6 +3,7 @@ package com.robsartin.setlistscout.scan.source;
 import com.robsartin.setlistscout.scan.BandSiteScraperService;
 import com.robsartin.setlistscout.scan.Show;
 import com.robsartin.setlistscout.settings.GeocodingService;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -29,6 +30,12 @@ class BandSiteShowSourceTest {
 
     private Show showInCity(String city) {
         Show s = mock(Show.class);
+        // #218: BandSiteShowSource now applies the artist's configured default venue when a show's
+        // own venue NAME is blank/null. Stub a realistic non-blank name here so these pre-existing
+        // city-only tests (none of which configure a default) are unaffected by that new step --
+        // matching production reality, where every show reaching this filter already carried some
+        // venue name (the LLM extractor used to drop a blank-venue row outright, before #218).
+        when(s.getVenueName()).thenReturn("Some Venue");
         when(s.getVenueCity()).thenReturn(city);
         return s;
     }
@@ -116,5 +123,90 @@ class BandSiteShowSourceTest {
 
         assertThat(source.search(q)).isEmpty();
         verify(geocoder, never()).geocodeCity(any(), any());
+    }
+
+    // ---- #218: per-artist default venue -- ASO's own season-announcement page names no hall -----
+    // anywhere, so the extracted show has no venue of its own. Real (non-mocked) Show instances are
+    // used below, not the showInCity() mock helper, since applyDefaultVenue reconstructs a Show from
+    // every one of its fields (venueName/venueCity have no setters), and a realistic ExtractedShow
+    // from TourPageLlmService now hands BandSiteScraperService a BLANK ("", trimmed), not null,
+    // venue string when the page states none -- see TourPageLlmServiceTest#blankVenueLineIsNotDropped.
+
+    private static final String ASO_URL = "https://austinsymphony.org/season-announcement/";
+
+    @Test
+    @DisplayName("a show with no venue of its own takes the artist's default venue NAME and CITY (#218)")
+    void showWithNoVenueTakesTheArtistDefault() {
+        Show noVenue = new Show("Austin Symphony Orchestra", start.plusDays(10), "", "",
+                null, "band-site:austinsymphony.org", ASO_URL, Show.Kind.MUSIC);
+        when(scraper.scrapeShows("Austin Symphony Orchestra", ASO_URL, start, end)).thenReturn(List.of(noVenue));
+        // city=null isolates the defaulting step from withinRange's distance filter (covered
+        // end-to-end, on purpose, by defaultedShowSurvivesTheRealDistanceFilter below).
+        ScanQuery q = new ScanQuery("Austin Symphony Orchestra", ASO_URL,
+                "Long Center for the Performing Arts", "Austin",
+                "78701", OWNER_LAT, OWNER_LON, 50, null, "TX", start, end);
+
+        List<Show> result = source.search(q);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getVenueName()).isEqualTo("Long Center for the Performing Arts");
+        assertThat(result.get(0).getVenueCity()).isEqualTo("Austin");
+    }
+
+    @Test
+    @DisplayName("a show whose page states its own venue keeps it -- the artist's default never "
+            + "overrides (#218)")
+    void showWithItsOwnVenueIsNeverOverridden() {
+        // A DIFFERENT city than the configured default, deliberately: if the code wrongly applied
+        // the default this assertion would catch it (a same-city default could pass by coincidence).
+        Show ownVenue = new Show("Austin Symphony Orchestra", start.plusDays(10), "Moody Center", "Round Rock",
+                null, "band-site:austinsymphony.org", ASO_URL, Show.Kind.MUSIC);
+        when(scraper.scrapeShows("Austin Symphony Orchestra", ASO_URL, start, end)).thenReturn(List.of(ownVenue));
+        ScanQuery q = new ScanQuery("Austin Symphony Orchestra", ASO_URL,
+                "Long Center for the Performing Arts", "Austin",
+                "78701", OWNER_LAT, OWNER_LON, 50, null, "TX", start, end);
+
+        List<Show> result = source.search(q);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getVenueName()).isEqualTo("Moody Center");
+        assertThat(result.get(0).getVenueCity()).isEqualTo("Round Rock");
+    }
+
+    @Test
+    @DisplayName("an artist with no configured default and a show with no venue behaves exactly as "
+            + "today -- dropped, no crash, no invented venue (#218)")
+    void noVenueAndNoDefaultBehavesAsToday() {
+        Show noVenue = new Show("Some Band", start.plusDays(10), "", "",
+                null, "band-site:someband.com", "https://someband.com", Show.Kind.MUSIC);
+        when(scraper.scrapeShows("Some Band", "https://someband.com", start, end)).thenReturn(List.of(noVenue));
+        // 10-arg convenience constructor -- no default configured, same as every artist today.
+        ScanQuery q = new ScanQuery("Some Band", "https://someband.com", "78701", OWNER_LAT, OWNER_LON, 50,
+                null, "TX", start, end);
+
+        assertThat(source.search(q)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("end-to-end: a show defaulted to the artist's venue survives withinRange's REAL "
+            + "distance filter (#218) -- the regression this feature exists to guard against. A "
+            + "default that supplied only a venue NAME would leave venueCity null, and withinRange "
+            + "drops a null-city show via the same fallback comparison that's also false for null -- "
+            + "so the show would extract successfully and then silently vanish here, exactly like "
+            + "#211: green scan, zero output.")
+    void defaultedShowSurvivesTheRealDistanceFilter() {
+        Show noVenue = new Show("Austin Symphony Orchestra", start.plusDays(10), "", "",
+                null, "band-site:austinsymphony.org", ASO_URL, Show.Kind.MUSIC);
+        when(scraper.scrapeShows("Austin Symphony Orchestra", ASO_URL, start, end)).thenReturn(List.of(noVenue));
+        when(geocoder.geocodeCity("Austin", "TX"))
+                .thenReturn(Optional.of(new GeocodingService.GeoResult(OWNER_LAT, OWNER_LON, "Austin", "TX")));
+        ScanQuery q = new ScanQuery("Austin Symphony Orchestra", ASO_URL,
+                "Long Center for the Performing Arts", "Austin",
+                "78701", OWNER_LAT, OWNER_LON, 50, "Austin", "TX", start, end);
+
+        List<Show> result = source.search(q);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getVenueCity()).isEqualTo("Austin");
     }
 }

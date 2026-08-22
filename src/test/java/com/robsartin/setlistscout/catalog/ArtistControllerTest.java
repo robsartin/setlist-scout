@@ -268,6 +268,19 @@ class ArtistControllerTest {
     }
 
     @Test
+    @DisplayName("setDefaultVenue stores the default venue name and city on the owner's artist (#218)")
+    void setDefaultVenueStoresNameAndCity() {
+        Artist a = pending("Austin Symphony Orchestra", ArtistSource.SIMILAR_EXPANSION);
+        when(artistRepository.findByIdAndOwner(7L, OWNER)).thenReturn(java.util.Optional.of(a));
+
+        controller.setDefaultVenue(7L, "Long Center for the Performing Arts", "Austin", null, new ConcurrentModel());
+
+        assertThat(a.getDefaultVenueName()).isEqualTo("Long Center for the Performing Arts");
+        assertThat(a.getDefaultVenueCity()).isEqualTo("Austin");
+        verify(artistRepository).save(a);
+    }
+
+    @Test
     @DisplayName("addSeed returns the active-section fragment for an htmx request")
     void addSeedReturnsFragmentForHtmx() {
         stubNewSeedInsert("Wilco");
