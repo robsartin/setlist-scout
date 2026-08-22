@@ -75,6 +75,25 @@ class ShowsPageRenderTest extends AbstractPostgresIntegrationTest {
                 .andExpect(content().string(containsString("/settings")));              // settings form preserved
     }
 
+    /**
+     * Issue #236: {@code Settings} was never its own page -- it linked to {@code @{/#settings}},
+     * an in-page anchor into this very page's own scope summary, presented in the nav as a peer
+     * of nine other links. Dropped from the nav; the anchor target it pointed at is NOT -- #235's
+     * own comment on {@code shows.html}'s {@code <dl id="settings">} says that id moved there
+     * deliberately, and removing the link must not orphan it (a bookmark, or anyone else's link,
+     * to {@code /#settings} would land on nothing).
+     */
+    @Test
+    @DisplayName("the Settings nav link is gone, but the id=\"settings\" anchor target it pointed at still exists")
+    void navNoLongerLinksToSettingsButTheAnchorTargetSurvives() throws Exception {
+        String body = mvc.perform(get("/").with(oidcLogin().idToken(t -> t.claim("email", OWNER))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("id=\"settings\"");
+        assertThat(body).doesNotContain("/#settings");
+    }
+
     @Test
     void scanNowHtmxReturnsBareShowsRegionFragment() throws Exception {
         var res = mvc.perform(post("/scan-now").header("HX-Request", "true")
