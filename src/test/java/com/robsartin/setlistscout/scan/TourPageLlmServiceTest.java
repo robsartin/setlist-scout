@@ -15,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -244,5 +245,82 @@ class TourPageLlmServiceTest {
         RecordedRequest request = server.takeRequest();
         JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
         assertThat(body.path("thinking").path("type").asText()).isEqualTo("disabled");
+    }
+
+    // ---- #218: ASO season-announcement page -- year resolution + blank-venue passthrough --------
+    //
+    // The ASO page (austinsymphony.org/season-announcement/) states a season ("2026-27 Season") and
+    // then lists bare month/day headers with no year and no venue anywhere on the page. The actual
+    // year-resolution reasoning happens inside the model, which these stubbed-response tests cannot
+    // exercise -- what they CAN and must prove is that the prompt we send actually carries the
+    // instructions that make correct resolution possible, and that a compliant "I can't tell, and a
+    // blank venue" response is not silently discarded by our own parsing before it ever reaches the
+    // artist-default substitution downstream (BandSiteShowSource, #218).
+
+    @Test
+    @DisplayName("prompt instructs resolving a month-only date against a season stated on the page, "
+            + "and to omit rather than guess a date it can't confidently resolve -- a wrong year is "
+            + "worse than a missing show (#218)")
+    void promptInstructsSeasonAnchoredYearResolution() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": ""}]}
+                """));
+
+        service.extractShows("Austin Symphony Orchestra", "2026-27 Season\nOCTOBER Friday 23");
+
+        String prompt = capturedPromptText();
+        assertThat(prompt).contains("resolve each date's year against the stated season");
+        assertThat(prompt).contains("omit that show entirely rather than guessing its year");
+        assertThat(prompt).contains("a wrong date is worse than a missing show");
+    }
+
+    @Test
+    @DisplayName("prompt instructs that one heading naming more than one date is more than one show, "
+            + "e.g. \"Friday 11 & Sunday 13\" under a single month header (#218)")
+    void promptInstructsMultipleDatesUnderOneHeadingAreSeparateShows() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": ""}]}
+                """));
+
+        service.extractShows("Austin Symphony Orchestra", "Friday 11 & Sunday 13");
+
+        String prompt = capturedPromptText();
+        assertThat(prompt).contains("describes more than one show");
+        assertThat(prompt).contains("emit one line per date, never one line for the pair");
+    }
+
+    @Test
+    @DisplayName("prompt instructs leaving the venue field blank rather than guessing one when the "
+            + "page doesn't state a venue (#218)")
+    void promptInstructsBlankVenueOverGuessing() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": ""}]}
+                """));
+
+        service.extractShows("Austin Symphony Orchestra", "irrelevant page text");
+
+        String prompt = capturedPromptText();
+        assertThat(prompt).contains("leave the Venue name field blank rather than guessing one");
+    }
+
+    @Test
+    @DisplayName("a line with a blank venue field is not dropped -- it survives as a show with a "
+            + "blank venue, so an artist's default venue can be applied downstream (#218). Before "
+            + "this change a `!venue.isBlank()` guard discarded the whole line, which is exactly how "
+            + "a page like ASO's (names no hall anywhere) would extract nothing while the scan still "
+            + "logged success -- the #211 failure shape")
+    void blankVenueLineIsNotDropped() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": "2026-09-11 |  |  | Austin Symphony Orchestra | MUSIC"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("Austin Symphony Orchestra", "irrelevant page text");
+
+        assertThat(result).hasSize(1);
+        TourPageLlmService.ExtractedShow show = result.get(0);
+        assertThat(show.date()).isEqualTo(LocalDate.of(2026, 9, 11));
+        assertThat(show.venue()).isBlank();
+        assertThat(show.city()).isBlank();
     }
 }

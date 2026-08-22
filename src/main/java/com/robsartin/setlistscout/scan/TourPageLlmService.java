@@ -85,6 +85,20 @@ public class TourPageLlmService {
                 + "Performer is the name of the act actually performing that date -- for a band's own"
                 + " tour page that is \"" + artistName + "\" itself; for a venue calendar it is whoever"
                 + " is booked that date, not the venue. Classify each show as MUSIC or COMEDY.\n"
+                + "Some pages give only a month and day for each show, anchored to a season named"
+                + " elsewhere on the page (e.g. \"2026-27 Season\"). When that's the case, resolve"
+                + " each date's year against the stated season: a month from the season's start"
+                + " (roughly autumn) through December takes the season's first year, and a month from"
+                + " January through the season's end (roughly summer) takes its second year -- prefer"
+                + " an explicit year stated on the page over this inference wherever the two would"
+                + " disagree. If you cannot confidently resolve a show's full date this way, omit that"
+                + " show entirely rather than guessing its year -- a wrong date is worse than a missing"
+                + " show.\n"
+                + "A single heading that names more than one date (e.g. a month followed by two day"
+                + " numbers, or \"Friday 11 & Sunday 13\") describes more than one show -- emit one"
+                + " line per date, never one line for the pair.\n"
+                + "If the page does not state a venue for a show, leave the Venue name field blank"
+                + " rather than guessing one.\n"
                 + "One show per line, no header, no commentary. If there are no shows, return nothing.\n\n"
                 + text;
 
@@ -140,9 +154,12 @@ public class TourPageLlmService {
                 String performer = performerRaw.isBlank() ? null : performerRaw;
                 String kindRaw = parts.length > 4 ? parts[4].trim() : "";
                 Show.Kind kind = kindRaw.equalsIgnoreCase("COMEDY") ? Show.Kind.COMEDY : Show.Kind.MUSIC;
-                if (!venue.isBlank()) {
-                    result.add(new ExtractedShow(date, venue, city, performer, kind));
-                }
+                // #218: a blank venue is kept, not dropped -- some pages (e.g. ASO's own season
+                // page) name no venue anywhere, and the prompt above now tells the model to leave
+                // this field blank rather than guess one. Dropping the row here would silently
+                // discard every such show before BandSiteShowSource ever gets a chance to apply the
+                // artist's configured default venue name/city.
+                result.add(new ExtractedShow(date, venue, city, performer, kind));
             } catch (Exception e) {
                 // skip lines that aren't a well-formed "date | venue | city"; one bad line among
                 // possibly many good ones, not a whole-request failure, so DEBUG rather than WARN.

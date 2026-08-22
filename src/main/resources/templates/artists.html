@@ -114,6 +114,22 @@
                            placeholder="official site URL" size="22"/>
                     <button type="submit" class="btn-sm">Set</button>
                 </form>
+                <!--/* #218: fallback venue name+city for the band-site scan path, applied only when a
+                       scraped show has no venue of its own (e.g. ASO's own season page names no hall
+                       anywhere). Both fields in one form -- BandSiteShowSource treats them as a pair,
+                       not independently defaultable, so setting them together here matches what the
+                       feature actually does with them. Same inline-edit pattern as the site-url form
+                       above, not hover-gated for the same reason. */-->
+                <form class="inline" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
+                      th:action="@{'/artists/' + ${a.id} + '/default-venue'}" method="post">
+                    <label class="visually-hidden" th:for="'default-venue-name-' + ${a.id}" th:text="'Default venue name for ' + ${a.name}">Default venue name</label>
+                    <input type="text" th:id="'default-venue-name-' + ${a.id}" name="name" th:value="${a.defaultVenueName}"
+                           placeholder="default venue name" size="18"/>
+                    <label class="visually-hidden" th:for="'default-venue-city-' + ${a.id}" th:text="'Default venue city for ' + ${a.name}">Default venue city</label>
+                    <input type="text" th:id="'default-venue-city-' + ${a.id}" name="city" th:value="${a.defaultVenueCity}"
+                           placeholder="city" size="12"/>
+                    <button type="submit" class="btn-sm">Set venue</button>
+                </form>
             </div>
             <div class="acts">
                 <!--/* Remove = reject (APPROVED only): drops off the active list, stops scanning, reversible via Unreject.
