@@ -59,6 +59,17 @@ public class Artist {
     /** The artist's official site URL (from MusicBrainz, or user-edited); scraped for tour dates. Nullable. */
     private String officialSiteUrl;
 
+    /**
+     * Fallback venue name/city for the band-site scan path (issue #218), applied by {@code
+     * BandSiteShowSource} only when a scraped show has no venue of its own -- e.g. Austin Symphony
+     * Orchestra's own season page names no hall anywhere. Both nullable, and meant to travel
+     * together: a name with no city would leave a defaulted show's city null, which
+     * {@code BandSiteShowSource#withinRange} treats as "no match" and drops (issue #211's shape).
+     * User-edited from the artists page, the same way {@link #officialSiteUrl} is.
+     */
+    private String defaultVenueName;
+    private String defaultVenueCity;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -92,5 +103,9 @@ public class Artist {
     public String getNote() { return note; }
     public String getOfficialSiteUrl() { return officialSiteUrl; }
     public void setOfficialSiteUrl(String officialSiteUrl) { this.officialSiteUrl = officialSiteUrl; }
+    public String getDefaultVenueName() { return defaultVenueName; }
+    public void setDefaultVenueName(String defaultVenueName) { this.defaultVenueName = defaultVenueName; }
+    public String getDefaultVenueCity() { return defaultVenueCity; }
+    public void setDefaultVenueCity(String defaultVenueCity) { this.defaultVenueCity = defaultVenueCity; }
     public Instant getCreatedAt() { return createdAt; }
 }

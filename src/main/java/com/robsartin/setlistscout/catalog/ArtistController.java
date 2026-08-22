@@ -160,6 +160,33 @@ public class ArtistController {
     }
 
     /**
+     * Set or clear an artist's default venue name/city (issue #218): the band-site scan path
+     * ({@code BandSiteShowSource}) applies this only when a scraped show has no venue of its own --
+     * e.g. Austin Symphony Orchestra's own season page names no hall anywhere. Both fields travel
+     * together and are blanked together; a name with no city would leave a defaulted show's city
+     * null, which the distance filter treats as "no match" and drops (issue #211's shape). Owner-scoped.
+     */
+    @PostMapping("/{id}/default-venue")
+    public String setDefaultVenue(@PathVariable Long id,
+                             @RequestParam String name,
+                             @RequestParam String city,
+                             @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
+                             Model model) {
+        String owner = currentUser.email();
+        artistRepository.findByIdAndOwner(id, owner).ifPresent(a -> {
+            a.setDefaultVenueName(name.isBlank() ? null : name.trim());
+            a.setDefaultVenueCity(city.isBlank() ? null : city.trim());
+            artistRepository.save(a);
+        });
+        if (hxRequest != null) {
+            // Issue #174: first page, same reasoning as addSeed's comment above.
+            populateActive(model, owner, null, null, true);
+            return ACTIVE_SECTION_FRAGMENT;
+        }
+        return "redirect:/artists";
+    }
+
+    /**
      * Take a hand-curated {@code SEED} artist off the owner's active list (issue #117). Distinct
      * from {@code ReviewController.remove}'s {@code REJECTED} transition -- see the design
      * decision at the top of {@code docs/superpowers/plans/2026-08-14-remove-from-seed-list.md}

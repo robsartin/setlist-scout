@@ -9,6 +9,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -52,12 +53,38 @@ public class BandSiteShowSource implements ShowSource {
         if (q.officialSiteUrl() == null) {
             return List.of();
         }
-        List<Show> shows = scraper.scrapeShows(q.artistName(), q.officialSiteUrl(),
+        List<Show> scraped = scraper.scrapeShows(q.artistName(), q.officialSiteUrl(),
                 q.windowStart(), q.windowEnd());
+        List<Show> shows = scraped.stream().map(s -> applyDefaultVenue(s, q)).filter(Objects::nonNull).toList();
         if (q.city() == null) {
             return shows;
         }
         return shows.stream().filter(s -> withinRange(s, q)).toList();
+    }
+
+    /**
+     * #218: some band-site pages (e.g. ASO's own season-announcement page) name no venue anywhere,
+     * so the extractor hands back a show with a blank venue name -- see {@link
+     * com.robsartin.setlistscout.scan.TourPageLlmService}'s prompt and its {@code !venue.isBlank()}
+     * removal. Substitute the artist's configured default venue name AND city as a pair when that
+     * happens; a venue the page actually stated is never overridden (checked here, before any
+     * distance filtering, so a defaulted city is available for {@link #withinRange} same as a real
+     * one). {@code Show} has no setters for venueName/venueCity, so a new instance carries the rest
+     * of the original show's fields through unchanged.
+     * <p>
+     * Returns {@code null} (filtered out by the caller) when the show has no venue of its own AND
+     * the artist has no default configured -- exactly today's behaviour (the show never makes it
+     * this far to begin with, pre-#218): no crash, no invented placeholder venue.
+     */
+    private Show applyDefaultVenue(Show s, ScanQuery q) {
+        if (s.getVenueName() != null && !s.getVenueName().isBlank()) {
+            return s;
+        }
+        if (q.defaultVenueName() == null || q.defaultVenueName().isBlank()) {
+            return null;
+        }
+        return new Show(s.getArtistName(), s.getEventDateTime(), q.defaultVenueName(), q.defaultVenueCity(),
+                s.getPrice(), s.getSource(), s.getTicketUrl(), s.getKind());
     }
 
     private boolean withinRange(Show s, ScanQuery q) {
