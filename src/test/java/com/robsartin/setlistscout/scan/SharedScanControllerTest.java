@@ -135,6 +135,26 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         assertThat(body).doesNotContain("No shared scan has been set up yet.");
     }
 
+    /**
+     * Issue #229, Part A.1. Uses STRANGER (no pairing of their own in setUp -- scan == null for
+     * them) rather than OTHER, so the only variable in play is the dropdown's email-exclusion
+     * rule, not also Part B's separate "form renders when scan != null" fix. The precise
+     * {@code <option value="...">...</option>} pattern matters: ADMIN's bare address legitimately
+     * appears elsewhere on other callers' pages (e.g. the "otherParticipant" text), so a loose
+     * {@code contains(ADMIN)} would prove nothing -- anchoring to the actual option tag is what
+     * makes this a real assertion about the dropdown's contents. {@code NavModelAdviceTest} is the
+     * isolated, unit-level proof of the same rule; this is the end-to-end confirmation through the
+     * rendered page.
+     */
+    @Test
+    @DisplayName("issue #229: the dropdown offered to a user excludes themselves and includes the admin")
+    void dropdownExcludesCallerIncludesAdmin() throws Exception {
+        String body = pageAs(STRANGER);
+
+        assertThat(body).contains("<option value=\"" + ADMIN + "\">" + ADMIN + "</option>");
+        assertThat(body).doesNotContain("<option value=\"" + STRANGER + "\">");
+    }
+
     @Test
     @DisplayName("a non-participant cannot change another pairing's settings")
     void nonParticipantCannotEditSettings() throws Exception {
