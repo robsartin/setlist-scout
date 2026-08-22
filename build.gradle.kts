@@ -71,6 +71,14 @@ dependencies {
     // UUIDv7 (time-ordered) correlation ids; Java's built-in UUID is v4 only.
     implementation("com.fasterxml.uuid:java-uuid-generator:5.1.0")
 
+    // RFC 4180 CSV writing for the shows/artists/shared-shows downloads (#228). A single small,
+    // dependency-free, widely used jar built around exactly this problem -- quoting a field that
+    // contains a comma/quote/CR/LF, doubling an embedded quote -- which is safer than hand-rolled
+    // string concatenation for it: the issue brief calls out that a string-match test can pass on
+    // output no real parser could read, which is precisely the risk a hand-rolled writer carries
+    // and a battle-tested one does not.
+    implementation("org.apache.commons:commons-csv:1.14.1")
+
     // Modular-monolith structure + boundary verification + application events (see spec).
     implementation("org.springframework.modulith:spring-modulith-starter-core")
     // Durable event-publication registry (JPA-backed); inert until Phase B adds publishers/listeners.

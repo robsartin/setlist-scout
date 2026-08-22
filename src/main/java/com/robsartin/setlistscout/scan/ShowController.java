@@ -9,7 +9,9 @@ import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.AdminGuard;
+import com.robsartin.setlistscout.shared.CsvResponses;
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -72,6 +74,36 @@ public class ShowController {
         String owner = currentUser.email();
         populateShows(model, owner, sort, showHidden, null);
         return "shows";
+    }
+
+    /**
+     * CSV download of the shows page (issue #228). {@code /shows.csv}, not nested under {@code /}
+     * (the shows page's own route) -- there is no path to hang a sibling off of, since {@code /}
+     * has no further segment, so this is the sane top-level name the issue brief asked for.
+     * <p>
+     * Exports EXACTLY the rows a page load with the same {@code showHidden} would render: {@link
+     * #queryShows} for the window/hidden-toggle semantics, then {@link #visibleToOwner} for the
+     * venue-follow filter -- the SAME private helpers {@link #populateShows} calls, not a second
+     * query or a reimplemented rule. That reuse is the whole point of #220 extracting {@code
+     * visibleToOwner} in the first place: a raw {@code findByOwner} dump here would silently
+     * include the 172 Cap City Comedy Club rows the page withholds for an unfollowed performer.
+     * <p>
+     * No {@code sort} parameter -- the underlying queries are already ordered by event date/time
+     * ascending, which is a perfectly sensible default for a spreadsheet export, and the issue
+     * doesn't ask for a sortable download.
+     */
+    @GetMapping("/shows.csv")
+    public ResponseEntity<byte[]> showsCsv(@RequestParam(defaultValue = "false") boolean showHidden) {
+        String owner = currentUser.email();
+        SearchSettings settings = settingsService.getOrCreateSettings(owner);
+        LocalDateTime start = LocalDateTime.now();
+        LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
+
+        List<Show> shows = queryShows(owner, showHidden, start, end);
+        shows = visibleToOwner(shows, activeArtistNames(owner));
+
+        List<List<String>> rows = shows.stream().map(ShowCsv::row).toList();
+        return CsvResponses.download("shows.csv", ShowCsv.HEADER, rows);
     }
 
     /** Loads the owner's shows (sorted, hidden-filtered per {@code showHidden}) plus their settings into the model. */
