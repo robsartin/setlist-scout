@@ -4,44 +4,93 @@
 <body>
 <div th:fragment="content">
     <h1>Upcoming Shows</h1>
+    <p class="page-sub">Artists you follow, playing near you.</p>
 
-    <div class="settings" id="settings">
-        <form th:action="@{/settings}" method="post">
-            Near ZIP
-            <input type="text" name="postalCode" th:value="${settings.postalCode}" size="5" maxlength="5" pattern="[0-9]{5}" required/>
-            within <input type="number" name="radiusMiles" th:value="${settings.radiusMiles}"/> miles,
-            next <input type="number" name="monthsAhead" th:value="${settings.monthsAhead}"/> months
-            <button type="submit">Save</button>
-            <span th:if="${settings.city != null}"
-                  th:text="'(' + ${settings.city} + ', ' + ${settings.state} + ')'">(Austin, TX)</span>
-        </form>
-        <form class="inline" th:action="@{/scan-now}" method="post"
-              th:hx-post="@{/scan-now}" hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
-            <input type="hidden" name="sort" th:value="${currentSort}"/>
-            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
-            <button type="submit">Scan now</button>
-        </form>
+    <!--/* #235: the scope bar replaces the old settings-sentence + button row with a labelled,
+           scannable definition list (issue's item 3). id="settings" is preserved here (not one of
+           the issue's pinned ids, but fragments/layout.html's nav "Settings" link still jumps to
+           @{/#settings}, and this is the element that anchor should land on) -- it moved from the
+           old form wrapper onto this dl, its natural successor. "Showing" reflects whatever's
+           actually rendered below (respects the showHidden toggle already, since ${shows} does). */-->
+    <dl class="scope" id="settings">
+        <div>
+            <dt>Near</dt>
+            <dd th:text="${settings.city != null ? settings.city + ', ' + settings.state + ' ' + settings.postalCode : settings.postalCode}">Austin, TX 78701</dd>
+        </div>
+        <div>
+            <dt>Within</dt>
+            <dd th:text="${settings.radiusMiles} + ' mi'">50 mi</dd>
+        </div>
+        <div>
+            <dt>Next</dt>
+            <dd th:text="${settings.monthsAhead} + ' months'">6 months</dd>
+        </div>
+        <div>
+            <dt>Showing</dt>
+            <dd th:text="${#lists.size(shows)} + ' show' + (${#lists.size(shows)} == 1 ? '' : 's')">22 shows</dd>
+        </div>
+        <!--/* Editing collapses behind a native <details> -- no JavaScript (project rule). The
+               actual edit fields/actions live INSIDE the <details> as its expandable content
+               (below), not as an always-visible sibling -- unlike the reference mockup, which left
+               them permanently visible next to an inert <details> for its own static-demo
+               purposes. A working disclosure needs the real content inside it. */-->
         <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript and that's a
-               hard rule. Carries the current showHidden state so the download matches whatever
-               the page is showing right now (ShowController#showsCsv respects it the same way
-               populateShows does). */-->
-        <a th:href="@{/shows.csv(showHidden=${showHidden})}">Download CSV</a>
-        <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
-               and only when there's another allow-listed user to pick -- see NavModelAdvice. The
-               server re-checks admin-ness itself (ShowController#requireAdmin); this th:if is a UI
-               convenience, not the access control. */-->
-        <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
-              th:action="@{/admin/scan-now}" method="post"
-              th:hx-post="@{/admin/scan-now}" hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
-            <input type="hidden" name="sort" th:value="${currentSort}"/>
-            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
-            <label for="admin-scan-target">Admin: scan for</label>
-            <select id="admin-scan-target" name="targetOwner">
-                <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
-            </select>
-            <button type="submit">Scan now for user</button>
-        </form>
-    </div>
+               hard rule. Carries the current showHidden state so the download matches whatever the
+               page is showing right now (ShowController#showsCsv respects it the same way
+               populateShows does). #235: sits BESIDE the "Change scope" disclosure, not inside it --
+               this is an action on the current view, not a scope edit, and burying an export behind
+               a disclosure labelled "Change scope" would hide it. */-->
+        <div class="export">
+            <a th:href="@{/shows.csv(showHidden=${showHidden})}">Download CSV</a>
+        </div>
+        <div class="edit">
+            <details>
+                <summary>Change scope</summary>
+                <div class="scope-edit">
+                    <form th:action="@{/settings}" method="post">
+                        <div class="field">
+                            <label for="postalCode">ZIP</label>
+                            <input type="text" id="postalCode" name="postalCode" th:value="${settings.postalCode}" size="5" maxlength="5" pattern="[0-9]{5}" required/>
+                        </div>
+                        <div class="field">
+                            <label for="radiusMiles">Radius (mi)</label>
+                            <input type="number" id="radiusMiles" name="radiusMiles" th:value="${settings.radiusMiles}"/>
+                        </div>
+                        <div class="field">
+                            <label for="monthsAhead">Months ahead</label>
+                            <input type="number" id="monthsAhead" name="monthsAhead" th:value="${settings.monthsAhead}"/>
+                        </div>
+                        <button type="submit" class="btn-sm btn-primary">Save</button>
+                    </form>
+                    <form class="inline" th:action="@{/scan-now}" method="post"
+                          th:hx-post="@{/scan-now}" hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                        <input type="hidden" name="sort" th:value="${currentSort}"/>
+                        <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                        <button type="submit" class="btn-sm">Scan now</button>
+                    </form>
+                    <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured
+                           admin, and only when there's another allow-listed user to pick -- see
+                           NavModelAdvice. The server re-checks admin-ness itself
+                           (ShowController#requireAdmin); this th:if is a UI convenience, not the
+                           access control. id="admin-scan-target" isn't one of #235's pinned ids, but
+                           AdminCrossAccountActionsTest asserts on it directly -- preserved verbatim. */-->
+                    <form class="inline" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}"
+                          th:action="@{/admin/scan-now}" method="post"
+                          th:hx-post="@{/admin/scan-now}" hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                        <input type="hidden" name="sort" th:value="${currentSort}"/>
+                        <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                        <div class="field">
+                            <label for="admin-scan-target">Admin: scan for</label>
+                            <select id="admin-scan-target" name="targetOwner">
+                                <option th:each="email : ${otherOwnerEmails}" th:value="${email}" th:text="${email}">user@example.com</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn-sm">Scan now for user</button>
+                    </form>
+                </div>
+            </details>
+        </div>
+    </dl>
 
     <!--/*
       showsRegion is the htmx swap target for every action on this page (Scan now, admin Scan now,
@@ -80,105 +129,114 @@
         </p>
 
         <!--/* "show hidden" toggle (issue #166): a plain link + full navigation, like the sort
-               headers below, not an htmx action -- revealing/hiding the hidden rows is a VIEW
+               headers used to be, not an htmx action -- revealing/hiding the hidden rows is a VIEW
                change, not a mutation, so there's nothing to announce and no focus to manage; a
                normal <a> is already fully keyboard-operable for that. Carries the current sort so
                toggling doesn't reset it. The count only shows while there's something to reveal
                that isn't already on screen -- once the toggle is on, the hidden rows are right
-               there in the table, so repeating the count would be redundant. */-->
+               there in the list, so repeating the count would be redundant. */-->
         <p class="note">
             <a th:if="${not showHidden}" th:href="@{/(sort=${currentSort}, showHidden=true)}">Show hidden<span
                     th:if="${hiddenCount > 0}" class="count" th:text="' (' + ${hiddenCount} + ')'"> (0)</span></a>
             <a th:if="${showHidden}" th:href="@{/(sort=${currentSort}, showHidden=false)}">Hide hidden shows</a>
         </p>
 
-        <div class="table-scroll">
-            <table>
-                <thead>
-                <tr>
-                    <th><a th:href="@{/(sort='artist', showHidden=${showHidden})}">Band</a></th>
-                    <th><a th:href="@{/(sort='eventDate', showHidden=${showHidden})}">Date / Time</a></th>
-                    <th><a th:href="@{/(sort='venue', showHidden=${showHidden})}">Venue</a></th>
-                    <th><a th:href="@{/(sort='price', showHidden=${showHidden})}">Price</a></th>
-                    <th><a th:href="@{/(sort='discoveredAt', showHidden=${showHidden})}">Found</a></th>
-                    <th>Actions</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr th:each="show : ${shows}">
-                    <td>
-                        <span th:text="${show.artistName}">Band</span>
-                        <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
-                              class="chip tribute">Tribute</span>
-                        <!--/* #202: comedy is the minority case, so it's the one that gets a chip --
-                               a music show (the common case) stays unlabeled, same as a non-tribute
-                               artist gets no Tribute chip above. No kind filter control in v1 (the
-                               issue explicitly left it optional): with only Ticketmaster able to
-                               return comedy at all and most tracked artists still musicians, a
-                               filter is low-value clutter until real comedy-artist usage says
-                               otherwise -- the chip alone gives "at a glance" distinguishability. */-->
-                        <span th:if="${show.kind != null and show.kind.name() == 'COMEDY'}"
-                              class="chip comedy">Comedy</span>
-                        <span th:if="${show.hidden}" class="note">(hidden)</span>
-                    </td>
-                    <td th:text="${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Date</td>
-                    <td>
+        <!--/* #235: month rules replace the old sortable table headers -- chronological is the only
+               order "what can I go see" needs, so there's no more artist/venue/price/discoveredAt
+               sort UI (the controller's `sort` param/comparatorFor still exist server-side and
+               default to eventDate; the hidden `sort` input on every action form below just keeps
+               threading that default through, same as before). A month-rule div opens a new month
+               whenever this row's yyyy-MM differs from the previous row's -- string comparison via
+               the same #temporals.format already proven elsewhere in this file, not the untested
+               #temporals.month()/year() accessors. */-->
+        <th:block th:each="show, showStat : ${shows}">
+            <div class="month-rule"
+                 th:if="${showStat.index == 0 or #temporals.format(show.eventDateTime, 'yyyy-MM') != #temporals.format(shows[showStat.index - 1].eventDateTime, 'yyyy-MM')}">
+                <span th:text="${#temporals.format(show.eventDateTime, 'MMMM yyyy')}">Month Year</span>
+            </div>
+            <article class="gig">
+                <time class="when" th:datetime="${#temporals.format(show.eventDateTime, 'yyyy-MM-dd')}">
+                    <span class="dow" th:text="${#temporals.format(show.eventDateTime, 'EEE')}">Sun</span>
+                    <span class="dnum" th:text="${#temporals.format(show.eventDateTime, 'd')}">23</span>
+                </time>
+                <div class="what">
+                    <h3 class="act" th:text="${show.artistName}">Band</h3>
+                    <p class="where">
                         <span th:text="${show.venueName}">Venue</span>
-                        <span th:if="${show.venueCity}" th:text="' (' + ${show.venueCity} + ')'"></span>
-                        <a th:if="${show.ticketUrl}" th:href="${show.ticketUrl}" target="_blank">tickets</a>
-                    </td>
-                    <td th:text="${show.price != null ? '$' + show.price : '?'}">Price</td>
-                    <td th:text="${#temporals.format(show.discoveredAt, 'MMM d')}">Found</td>
-                    <td>
-                        <!--/* Owner-scoped server-side (ShowController#toggleHidden/#hideAndCancel via
-                               findByIdAndOwner); sort/showHidden hidden inputs carry the current
-                               view state through the swap, same technique as candidates.html's
-                               group-action forms carrying `via`/`type`/`decision`.
+                        <th:block th:if="${show.venueCity}"><span class="sep">·</span> <span th:text="${show.venueCity}">City</span></th:block>
+                        <th:block th:if="${show.ticketUrl}"><span class="sep">·</span> <a th:href="${show.ticketUrl}" target="_blank">tickets</a></th:block>
+                    </p>
+                </div>
+                <div class="meta">
+                    <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
+                          class="chip tribute">Tribute</span>
+                    <!--/* #202: comedy is the minority case, so it's the one that gets a chip -- a
+                           music show (the common case) stays unlabeled, same as a non-tribute
+                           artist gets no Tribute chip above. Preserved as-is from before #235: this
+                           is a content decision from #202, not something the visual redesign
+                           revisits, even though the reference mockup's demo rows happen to show a
+                           "Music" chip too -- see the judgment call noted in the PR description. */-->
+                    <span th:if="${show.kind != null and show.kind.name() == 'COMEDY'}"
+                          class="chip comedy">Comedy</span>
+                    <span th:if="${show.price != null}" class="note" th:text="'$' + ${show.price}">$25</span>
+                    <span th:if="${show.hidden}" class="note">(hidden)</span>
+                </div>
+                <div class="acts">
+                    <!--/* Owner-scoped server-side (ShowController#toggleHidden/#hideAndCancel via
+                           findByIdAndOwner); sort/showHidden hidden inputs carry the current view
+                           state through the swap, same technique as candidates.html's group-action
+                           forms carrying `via`/`type`/`decision`.
 
-                               Issue #223: a non-hidden row now carries TWO buttons, so each
-                               th:autofocus check names its OWN action ('hide' / 'hide-and-cancel'),
-                               not just the row id -- otherwise an outcome targeting this row would
-                               make both satisfy autofocus at once. */-->
-                        <form th:if="${not show.hidden}" class="inline" method="post"
-                              th:action="@{/shows/{id}/hide(id=${show.id})}"
-                              th:hx-post="@{/shows/{id}/hide(id=${show.id})}"
-                              hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
-                            <input type="hidden" name="sort" th:value="${currentSort}"/>
-                            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
-                            <button type="submit" class="btn-sm"
-                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'hide')}"
-                                    th:aria-label="'Hide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide</button>
-                        </form>
-                        <!--/* #223: hides the show AND transitions the artist behind it (SEED ->
-                               REMOVED; PENDING_REVIEW/APPROVED -> REJECTED) in one request. Renders
-                               unconditionally alongside Hide, even when show.artistId is null --
-                               ShowController#hideAndCancel just hides in that case, same as plain
-                               Hide, so the button always does at least as much as Hide does. */-->
-                        <form th:if="${not show.hidden}" class="inline" method="post"
-                              th:action="@{/shows/{id}/hide-and-cancel(id=${show.id})}"
-                              th:hx-post="@{/shows/{id}/hide-and-cancel(id=${show.id})}"
-                              hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
-                            <input type="hidden" name="sort" th:value="${currentSort}"/>
-                            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
-                            <button type="submit" class="btn-sm"
-                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'hide-and-cancel')}"
-                                    th:aria-label="'Hide ' + ${show.artistName} + ' and stop following the artist, at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide &amp; Stop Following</button>
-                        </form>
-                        <form th:if="${show.hidden}" class="inline" method="post"
-                              th:action="@{/shows/{id}/unhide(id=${show.id})}"
-                              th:hx-post="@{/shows/{id}/unhide(id=${show.id})}"
-                              hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
-                            <input type="hidden" name="sort" th:value="${currentSort}"/>
-                            <input type="hidden" name="showHidden" th:value="${showHidden}"/>
-                            <button type="submit" class="btn-sm"
-                                    th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'unhide')}"
-                                    th:aria-label="'Unhide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Unhide</button>
-                        </form>
-                    </td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
+                           Issue #223: a non-hidden row now carries TWO buttons, so each
+                           th:autofocus check names its OWN action ('hide' / 'hide-and-cancel'), not
+                           just the row id -- otherwise an outcome targeting this row would make
+                           both satisfy autofocus at once.
+
+                           th:autofocus is deliberately declared BEFORE th:aria-label on every
+                           button below, unchanged from pre-#235 -- ShowHideActionsTest pins
+                           aria-label appearing before autofocus in the RENDERED tag
+                           (containsPattern("aria-label=\"Hide Wilco[^\"]*\"[^>]*autofocus")), which
+                           this exact source order already produces; don't reorder them. */-->
+                    <form th:if="${not show.hidden}" class="inline" method="post"
+                          th:action="@{/shows/{id}/hide(id=${show.id})}"
+                          th:hx-post="@{/shows/{id}/hide(id=${show.id})}"
+                          hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                        <input type="hidden" name="sort" th:value="${currentSort}"/>
+                        <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                        <button type="submit" class="btn-sm"
+                                th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'hide')}"
+                                th:aria-label="'Hide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide</button>
+                    </form>
+                    <!--/* #223: hides the show AND transitions the artist behind it (SEED ->
+                           REMOVED; PENDING_REVIEW/APPROVED -> REJECTED) in one request. Renders
+                           unconditionally alongside Hide, even when show.artistId is null --
+                           ShowController#hideAndCancel just hides in that case, same as plain Hide,
+                           so the button always does at least as much as Hide does. btn-bad matches
+                           this app's existing convention for a destructive-ish action (same class
+                           venues.html/artists.html's Remove buttons use). */-->
+                    <form th:if="${not show.hidden}" class="inline" method="post"
+                          th:action="@{/shows/{id}/hide-and-cancel(id=${show.id})}"
+                          th:hx-post="@{/shows/{id}/hide-and-cancel(id=${show.id})}"
+                          hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                        <input type="hidden" name="sort" th:value="${currentSort}"/>
+                        <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                        <button type="submit" class="btn-sm btn-bad"
+                                th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'hide-and-cancel')}"
+                                th:aria-label="'Hide ' + ${show.artistName} + ' and stop following the artist, at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Hide &amp; Stop Following</button>
+                    </form>
+                    <form th:if="${show.hidden}" class="inline" method="post"
+                          th:action="@{/shows/{id}/unhide(id=${show.id})}"
+                          th:hx-post="@{/shows/{id}/unhide(id=${show.id})}"
+                          hx-target="#shows-region" hx-swap="outerHTML" hx-disabled-elt="find button">
+                        <input type="hidden" name="sort" th:value="${currentSort}"/>
+                        <input type="hidden" name="showHidden" th:value="${showHidden}"/>
+                        <button type="submit" class="btn-sm"
+                                th:autofocus="${outcome != null and outcome.focusesRow(show.id, 'unhide')}"
+                                th:aria-label="'Unhide ' + ${show.artistName} + ' at ' + ${show.venueName} + ' on ' + ${#temporals.format(show.eventDateTime, 'EEE, MMM d yyyy h:mm a')}">Unhide</button>
+                    </form>
+                </div>
+            </article>
+        </th:block>
         <!--/* Empty-state text depends on WHY the list is empty (issue #166): plain "no shows" is
                only true when nothing's hidden either, otherwise it would mislead someone who has
                shows but hid all of them into thinking a scan is what they need. */-->
