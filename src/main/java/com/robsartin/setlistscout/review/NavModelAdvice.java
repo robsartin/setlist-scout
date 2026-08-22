@@ -48,14 +48,25 @@ public class NavModelAdvice {
     }
 
     /**
-     * The other allow-listed emails (excluding the admin's own), for the admin's target-owner
-     * dropdown (#136). Empty for everyone, including the admin, if no other user is configured yet.
+     * The other allow-listed emails, excluding the CALLER's own address. Two consumers:
+     * the admin's cross-account target-owner dropdown (#136, {@code shows.html}/{@code
+     * candidates.html}), and the shared-scan create form's "Shared with" picker (#229, {@code
+     * shared.html}).
+     * <p>
+     * Excluding the ADMIN's address unconditionally -- the pre-#229 behaviour -- was correct only
+     * while the admin was the sole possible caller (creating a shared scan was admin-only). Once
+     * any allow-listed user can create one, that would offer a non-admin "pair with yourself" in
+     * the dropdown and never offer the admin at all. Excluding the CALLER's own address instead
+     * is correct for both consumers: {@code shows.html}/{@code candidates.html} gate their
+     * dropdown's container on {@code isAdmin}, so the caller there is always the admin, and for an
+     * admin caller the two rules produce the identical list -- {@code NavModelAdviceTest} pins
+     * that. Empty for everyone if no other user is configured yet.
      */
     @ModelAttribute("otherOwnerEmails")
     public List<String> otherOwnerEmails() {
-        String admin = appProperties.auth().adminEmail();
+        String self = currentUser.email();
         return appProperties.auth().allowedEmails().stream()
-                .filter(email -> !email.equalsIgnoreCase(admin))
+                .filter(email -> !email.equalsIgnoreCase(self))
                 .toList();
     }
 }

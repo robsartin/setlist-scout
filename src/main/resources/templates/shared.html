@@ -11,30 +11,9 @@
 <div th:fragment="content" id="shared-content" tabindex="-1" th:autofocus="${justCreated == true}">
     <h1>Shared Shows</h1>
 
-    <!--/* No pairing yet. Only the admin can create one, so everyone else gets an explanation
-           rather than a form they cannot submit. */-->
     <th:block th:if="${scan == null}">
         <p class="page-sub">A shared scan tracks the artists you and another user both follow, at a
             location you choose together.</p>
-
-        <div class="settings" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}">
-            <!--/* th:hx-post/hx-target/hx-disabled-elt: same double-submit protection as shows.html's
-                   "Scan now" and candidates.html's action forms -- disables the submit button for
-                   the round trip so a double-click can't fire this twice (SharedScanController#create
-                   returns this same "shared :: content" fragment for the htmx branch). */-->
-            <form th:action="@{/shared}" th:hx-post="@{/shared}" hx-target="#shared-content"
-                  hx-swap="outerHTML" hx-disabled-elt="find button" method="post">
-                <label for="shared-create-label">Name</label>
-                <input id="shared-create-label" type="text" name="label" value="Shared" required/>
-                <label for="shared-create-target">Shared with</label>
-                <select id="shared-create-target" name="ownerB" required>
-                    <option th:each="email : ${otherOwnerEmails}" th:value="${email}"
-                            th:text="${email}">user@example.com</option>
-                </select>
-                <button type="submit">Create shared scan</button>
-            </form>
-        </div>
-        <p th:unless="${isAdmin}">No shared scan has been set up yet.</p>
     </th:block>
 
     <th:block th:if="${scan != null}">
@@ -59,7 +38,41 @@
                 </li>
             </ul>
         </nav>
+    </th:block>
 
+    <!--/* #229 Part B: creation is no longer capped at one pairing (the backend always supported
+           many -- SharedScanService#visibleTo returns a list, populatePage computes otherScans,
+           the nav above already offers a picker), so this form must stay reachable even once
+           scan != null, not just on the very first, pairing-less visit. Placed above the settings/
+           shows-list below, matching the convention #175 established on /artists -- the create/add
+           action belongs above the list from the start, not retrofitted below it after the fact.
+           Guarded only on having another allow-listed address left to offer: an empty dropdown is
+           not submittable. The isAdmin gate this form used to carry is gone (#229 Part A) -- any
+           signed-in, allow-listed user may create a pairing against any other allow-listed address,
+           with no consent step (decision recorded on #229). */-->
+    <div class="settings" th:if="${not #lists.isEmpty(otherOwnerEmails)}">
+        <!--/* th:hx-post/hx-target/hx-disabled-elt: same double-submit protection as shows.html's
+               "Scan now" and candidates.html's action forms -- disables the submit button for
+               the round trip so a double-click can't fire this twice (SharedScanController#create
+               returns this same "shared :: content" fragment for the htmx branch). */-->
+        <form th:action="@{/shared}" th:hx-post="@{/shared}" hx-target="#shared-content"
+              hx-swap="outerHTML" hx-disabled-elt="find button" method="post">
+            <label for="shared-create-label">Name</label>
+            <input id="shared-create-label" type="text" name="label" value="Shared" required/>
+            <label for="shared-create-target">Shared with</label>
+            <select id="shared-create-target" name="ownerB" required>
+                <option th:each="email : ${otherOwnerEmails}" th:value="${email}"
+                        th:text="${email}">user@example.com</option>
+            </select>
+            <button type="submit">Create shared scan</button>
+        </form>
+    </div>
+    <!--/* Only reachable when there's neither a pairing to show NOR another address left to pair
+           with -- otherwise the form above (or an existing scan's own content below) is always
+           the more useful thing on the page. */-->
+    <p th:if="${scan == null and #lists.isEmpty(otherOwnerEmails)}">No shared scan has been set up yet.</p>
+
+    <th:block th:if="${scan != null}">
         <div class="settings">
             <form th:action="@{'/shared/' + ${scan.id} + '/settings'}" method="post">
                 Near ZIP

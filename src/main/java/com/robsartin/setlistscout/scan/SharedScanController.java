@@ -1,6 +1,5 @@
 package com.robsartin.setlistscout.scan;
 
-import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CurrentUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -17,10 +16,11 @@ import java.util.List;
  * The shared-shows page (#163): shows for the artists two users both follow, at a location neither
  * of them has saved.
  * <p>
- * Viewing is participant-based, not admin-only -- these are shows both people would want. Creating
- * a pairing is the admin action. Every handler resolves the scan through
- * {@code SharedScanService#requireVisible}, so a non-participant gets a 404 rather than another
- * pairing's data.
+ * Both viewing AND creating are participant/allow-list based, not admin-only (#229) -- these are
+ * shows both people would want, and any signed-in, allow-listed user may propose a pairing with
+ * another. Every handler resolves the scan through {@code SharedScanService#requireVisible}, so a
+ * non-participant gets a 404 rather than another pairing's data. There is deliberately no
+ * consent/invite step before a new pairing is visible to both sides -- see {@link #create}.
  * <p>
  * #187: a user can be in more than one pairing. {@code GET /shared} shows the default -- the
  * first (oldest) of {@code SharedScanService#visibleTo}'s now-explicitly-ordered list, stable
@@ -41,18 +41,15 @@ public class SharedScanController {
     private final SharedScanReconciler reconciler;
     private final ScanJobRepository scanJobRepository;
     private final CurrentUser currentUser;
-    private final AdminGuard adminGuard;
 
     public SharedScanController(SharedScanService sharedScanService,
                                  SharedScanReconciler reconciler,
                                  ScanJobRepository scanJobRepository,
-                                 CurrentUser currentUser,
-                                 AdminGuard adminGuard) {
+                                 CurrentUser currentUser) {
         this.sharedScanService = sharedScanService;
         this.reconciler = reconciler;
         this.scanJobRepository = scanJobRepository;
         this.currentUser = currentUser;
-        this.adminGuard = adminGuard;
     }
 
     /** The caller's default pairing -- oldest, per {@code visibleTo}'s explicit order, stable across loads. */
@@ -116,7 +113,12 @@ public class SharedScanController {
     }
 
     /**
-     * Admin-only: create the pairing. The other participant comes from the allow-list dropdown.
+     * Create the pairing (#229: open to any signed-in, allow-listed user, not admin-only). The
+     * other participant comes from the allow-list dropdown; {@code SharedScanService#create}
+     * rejects a non-allow-listed {@code ownerB}, a self-pairing, or a duplicate of an existing
+     * pairing (either direction) before any row is written -- see its {@code validateNewPairing}.
+     * There is deliberately no consent step: the other participant learns of the pairing by it
+     * simply appearing on their own {@code /shared} page, per the decision recorded on #229.
      * htmx request -&gt; the {@code content} fragment, re-populated with the new pairing (also
      * what gives the create form's {@code hx-disabled-elt="find button"} something to swap into,
      * so a double-click's second submit lands on a form that's already gone). Non-JS fallback ->
@@ -138,7 +140,6 @@ public class SharedScanController {
     public String create(@RequestParam String label, @RequestParam String ownerB,
                           @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                           Model model) {
-        adminGuard.require();
         SharedScan created = sharedScanService.create(label, currentUser.email(), ownerB);
         if (hxRequest != null) {
             populatePage(model, currentUser.email(), created.getId());
