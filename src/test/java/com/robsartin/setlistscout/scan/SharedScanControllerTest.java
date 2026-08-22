@@ -195,7 +195,7 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("the user picker is a labelled select, for the admin's create form")
+    @DisplayName("the user picker is a labelled select, for the create form")
     void createFormPickerIsLabelled() throws Exception {
         sharedScanRepository.deleteAll();
         String body = pageAs(ADMIN);
@@ -211,6 +211,51 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
         String body = pageAs(ADMIN);
 
         assertThat(body).contains("hx-disabled-elt=\"find button\"");
+    }
+
+    /**
+     * Issue #229, Part B's regression test. {@code shared.html} used to wrap the ENTIRE create
+     * form in {@code th:if="${scan == null}"} -- so once a caller had even one pairing, the form
+     * vanished with no way to create a second. ADMIN already has a pairing from {@code setUp}
+     * (scan != null for them), so this fails today for exactly that reason, independent of Parts A
+     * and A.1: it's a GET-rendering assertion, not a POST, so it isn't sensitive to whether the
+     * controller's admin gate is gone -- only to whether the template still nests the form inside
+     * the scan-null block.
+     */
+    @Test
+    @DisplayName("issue #229 Part B: the create form still renders once the caller already has a pairing")
+    void createFormRendersWhenCallerAlreadyHasAPairing() throws Exception {
+        String body = pageAs(ADMIN);
+
+        assertThat(body).contains("id=\"shared-create-target\"");
+        assertThat(body).contains("Create shared scan");
+    }
+
+    /**
+     * Issue #229, Part B follow-up. The dropdown does not filter out addresses the caller is
+     * already paired with (deliberately -- see the commit message / PR description: filtering it
+     * would need a page-local model attribute distinct from the shared {@code otherOwnerEmails},
+     * since that same attribute also drives the unrelated admin cross-account dropdowns on
+     * shows.html/candidates.html). So now that the form stays visible once scan != null (this
+     * commit), a user CAN select an already-paired address and submit. This proves that path is
+     * already safe: SharedScanService#validateNewPairing (in place since #187/PR#188, independent
+     * of this change) rejects it with 400 and writes no row -- already covered at the service
+     * layer by SharedScanServiceTest#duplicatePairingIsRejectedInEitherDirection; this is the same
+     * protection re-proven through the now-more-reachable controller path.
+     */
+    @Test
+    @DisplayName("issue #229 Part B: selecting an already-paired address from the form is "
+            + "rejected, not silently duplicated")
+    void creatingADuplicatePairingViaTheFormIsRejected() throws Exception {
+        long before = sharedScanRepository.count();
+
+        mockMvc.perform(post("/shared")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "Rob & David Again").param("ownerB", OTHER))
+                .andExpect(status().isBadRequest());
+
+        assertThat(sharedScanRepository.count()).isEqualTo(before);
     }
 
     @Test
