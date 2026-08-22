@@ -63,11 +63,15 @@ nav.main a:not(.nav-review) + a.nav-review { margin-left:.75rem; padding-left:.7
    OOB swap after a bulk approve/reject. Fixed min-width + right-aligned, tabular-nums digits
    (.count, below) give the badge a stable footprint across the 1-4 digit range production
    actually sees (~1,960 pending at time of writing) so it repaints in place instead of shifting
+   -- 4.2ch, not a narrower floor: min-width only stops the box SHRINKING, so any value narrower
+   than the widest realistic count still lets a digit-count change reflow the links to its right.
+   At 1,960 pending the live range is four digits, so the floor has to cover four digits or the
+   shift it exists to prevent simply happens later, on the way down past 1,000.
    Rejected/Connections/Admin. Scoped to nav.main so the rest of .count's usages (e.g. the
    candidates page's own group counts) are untouched -- and scoped by DESCENDANT selector, not a
    new class, so candidates.html's out-of-band companion span (id="nav-candidates-badge", #154)
    picks this up for free after an outerHTML swap without needing its own class edited to match. */
-nav.main .count { display:inline-block; min-width:2.4ch; text-align:right; }
+nav.main .count { display:inline-block; min-width:4.2ch; text-align:right; }
 
 /* Typography helpers */
 h1 { font-size:1.5rem; letter-spacing:-.02em; margin:2rem 0 .3rem; text-wrap:balance; }
