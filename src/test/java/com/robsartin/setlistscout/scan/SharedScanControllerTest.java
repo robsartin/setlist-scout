@@ -15,6 +15,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -661,5 +664,102 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
 
         String body = pageForId(scan.getId(), ADMIN);
         assertThat(countAutofocusElements(body)).isZero();
+    }
+
+    /**
+     * Issue #241. The create form used to sit always-visible above the shows list, directly under
+     * the pairing's own description -- so the page showed two "Name" inputs and the more prominent
+     * one created a NEW pairing rather than renaming the current one. It now lives in a third
+     * {@code <details>} beside "Switch pairing" and "Change scope".
+     *
+     * <p>Asserted structurally rather than by string position: {@code contains("<details>")}
+     * would pass on a page where the form sits nowhere near a disclosure, and a substring-index
+     * comparison would silently start passing for the wrong reason the moment the markup moves.
+     * {@code closest("details")} asks the question the issue actually asks -- is this control
+     * behind a disclosure -- and cannot be satisfied by accident.
+     */
+    @Test
+    @DisplayName("issue #241: with a pairing selected, the create form is inside a disclosure")
+    void createFormIsBehindADisclosureWhenCallerHasAPairing() throws Exception {
+        Document doc = Jsoup.parse(pageForId(scan.getId(), ADMIN));
+
+        Element target = doc.getElementById("shared-create-target");
+        assertThat(target).as("create form must still be in the DOM (#229), not removed").isNotNull();
+        assertThat(target.closest("details"))
+                .as("create form must be behind a disclosure, not always-visible")
+                .isNotNull();
+    }
+
+    /**
+     * Issue #241's explicit counter-case. #229 exists because this form was once gated on
+     * {@code scan == null} and vanished once you had a pairing; the fix for #241 must not
+     * reintroduce that by burying it. And with no pairing at all it is the ONLY action on the
+     * page, so collapsing it there would be worse than the bug being fixed.
+     */
+    @Test
+    @DisplayName("issue #241: with no pairing, the create form is not buried in a disclosure")
+    void createFormStaysProminentWhenThereIsNoPairing() throws Exception {
+        sharedScanRepository.deleteAll();
+        Document doc = Jsoup.parse(pageAs(ADMIN));
+
+        Element target = doc.getElementById("shared-create-target");
+        assertThat(target).isNotNull();
+        assertThat(target.closest("details"))
+                .as("the only action on a pairing-less page must not be collapsed")
+                .isNull();
+    }
+
+    /**
+     * Issue #241: the new disclosure is a sibling of the two the scope bar already carries, not a
+     * separate section elsewhere on the page -- that co-location is the whole point of the move.
+     */
+    @Test
+    @DisplayName("issue #241: the new-pairing disclosure sits beside the other scope disclosures")
+    void newPairingDisclosureSitsInTheScopeEditCorner() throws Exception {
+        Document doc = Jsoup.parse(pageForId(scan.getId(), ADMIN));
+
+        // "Switch pairing" is deliberately absent: it renders only when otherScans is non-empty,
+        // and ADMIN has a single pairing here. The two asserted below always render together.
+        assertThat(doc.select(".edit > details > summary"))
+                .extracting(Element::text)
+                .contains("Change scope", "New pairing");
+    }
+
+    /**
+     * Issue #241's headline symptom, pinned directly: the page must not offer an always-visible
+     * "Name" box while a pairing is selected. The only editable label field is the rename input
+     * inside "Change scope" (#238) and the create input inside "New pairing" -- both behind
+     * disclosures. The current pairing's name appears as text, not as an input.
+     */
+    @Test
+    @DisplayName("issue #241: no editable name field sits outside a disclosure when a pairing is selected")
+    void noNameInputOutsideADisclosureWhenAPairingIsSelected() throws Exception {
+        Document doc = Jsoup.parse(pageForId(scan.getId(), ADMIN));
+
+        assertThat(doc.select("input[name=label]").stream()
+                .filter(input -> input.closest("details") == null)
+                .toList())
+                .as("every name input must be behind a disclosure; the current name shows as text")
+                .isEmpty();
+        assertThat(doc.text()).contains(scan.getLabel());
+    }
+
+    /**
+     * Issue #241 guards the ids the create flow is pinned on. Relocating the form must not rename
+     * anything -- {@code SharedScanControllerTest}'s existing create tests assert these same ids
+     * unedited, and this is the one place that says WHY they must not move.
+     */
+    @Test
+    @DisplayName("issue #241: relocating the create form keeps its ids, action and htmx guards")
+    void relocatedCreateFormKeepsItsContract() throws Exception {
+        Document doc = Jsoup.parse(pageForId(scan.getId(), ADMIN));
+
+        Element form = doc.getElementById("shared-create-target").closest("form");
+        assertThat(form).isNotNull();
+        assertThat(form.attr("action")).isEqualTo("/shared");
+        assertThat(form.attr("method")).isEqualToIgnoringCase("post");
+        assertThat(form.attr("hx-disabled-elt")).isEqualTo("find button");
+        assertThat(form.select("label[for=shared-create-label]")).isNotEmpty();
+        assertThat(form.select("label[for=shared-create-target]")).isNotEmpty();
     }
 }

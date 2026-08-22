@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<!--/* #241: the create-a-pairing form, defined once and inserted in exactly ONE of two places
+       per render -- inside the "New pairing" disclosure when a pairing is selected, and
+       always-visible when there is none. The two call sites in shared.html are guarded on
+       `scan != null` / `scan == null`, which are mutually exclusive, so `shared-create-label`
+       and `shared-create-target` can never appear twice in one document.
+
+       It lives in its own file rather than inline in shared.html because a `th:fragment`
+       renders in place as well as wherever it is inserted; inlining it would emit the form
+       twice, duplicating those ids. Copy-pasting the markup into both call sites instead would
+       be the other way to get here, and is worse: SharedScanControllerTest pins these ids, the
+       action, and the htmx guards, and two copies drift.
+
+       th:hx-post/hx-target/hx-disabled-elt: the same double-submit protection as shows.html's
+       "Scan now" and candidates.html's action forms -- disables the submit button for the round
+       trip so a double-click can't fire this twice (SharedScanController#create returns this
+       same "shared :: content" fragment for the htmx branch). */-->
+<form th:fragment="createForm" th:action="@{/shared}" th:hx-post="@{/shared}" hx-target="#shared-content"
+      hx-swap="outerHTML" hx-disabled-elt="find button" method="post">
+    <label for="shared-create-label">Name</label>
+    <input id="shared-create-label" type="text" name="label" value="Shared" required/>
+    <label for="shared-create-target">Shared with</label>
+    <select id="shared-create-target" name="ownerB" required>
+        <option th:each="email : ${otherOwnerEmails}" th:value="${email}"
+                th:text="${email}">user@example.com</option>
+    </select>
+    <button type="submit" class="btn-primary">Create shared scan</button>
+</form>
+</body>
+</html>
