@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.shared.CsvResponses;
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -68,6 +70,30 @@ public class SharedScanController {
     public String pageFor(@PathVariable Long id, Model model) {
         populatePage(model, currentUser.email(), id);
         return "shared";
+    }
+
+    /**
+     * CSV download of one pairing's shows (issue #228), same nine columns as {@code
+     * ShowController#showsCsv}. Resolved through {@link SharedScanService#requireVisible} exactly
+     * like {@link #pageFor} -- a non-participant 404s here exactly as they do for the page itself,
+     * never a quieter fallback (see {@code requireVisible}'s own javadoc for why). {@link
+     * SharedScanService#showsFor} is the SAME method {@link #populatePage} calls for the page's
+     * own {@code shows} model attribute, so this export is guaranteed to match the page with no
+     * second query to drift out of step.
+     * <p>
+     * No venue-follow filter to reapply here, unlike {@code ShowController#showsCsv}: a shared
+     * scan's synthetic owner key can never accumulate a venue-sourced show in the first place --
+     * venue jobs are only ever enqueued against a real signed-in user's own email ({@code
+     * VenueService#addVenue} via {@code CurrentUser}), and a generated {@code shared:<uuid>} key
+     * can never sign in to reach that path. {@code showsFor} is already the single rule this page
+     * runs on.
+     */
+    @GetMapping("/shared/{id}.csv")
+    public ResponseEntity<byte[]> csv(@PathVariable Long id) {
+        SharedScan scan = sharedScanService.requireVisible(currentUser.email(), id);
+        List<Show> shows = sharedScanService.showsFor(scan);
+        List<List<String>> rows = shows.stream().map(ShowCsv::row).toList();
+        return CsvResponses.download("shared-" + id + ".csv", ShowCsv.HEADER, rows);
     }
 
     /**

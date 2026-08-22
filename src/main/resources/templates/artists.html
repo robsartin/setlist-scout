@@ -9,6 +9,10 @@
         <button type="submit" name="level" value="DEBUG">DEBUG</button>
     </form>
 
+    <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript and that's a hard
+           rule. Exports every artist (any status), not just the active list below. */-->
+    <p class="note"><a th:href="@{/artists.csv}">Download CSV</a></p>
+
     <!--/* Issue #175: the add-artist form and the upload controls used to sit BELOW the active
            list, which can run to 1,500+ rows -- making the single most frequent action on this
            page (adding an artist) the hardest one to reach. Moved above the list instead.

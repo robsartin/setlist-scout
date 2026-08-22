@@ -10,9 +10,11 @@ import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.apache.commons.csv.CSVRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
 
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.robsartin.setlistscout.support.CsvTestSupport.parseCsv;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -514,5 +517,171 @@ class ShowControllerTest {
         verify(showRepository).save(target);
         assertThat(target.getHiddenAt()).isNotNull();
         verify(activationService, never()).changeStatus(any(), any(), any());
+    }
+
+    // ---- issue #228: GET /shows.csv --------------------------------------------------------
+    //
+    // showsCsv MUST reuse queryShows/visibleToOwner/activeArtistNames -- the exact same private
+    // helpers populateShows uses -- rather than issuing its own query. Every test below stubs
+    // ONLY the repository methods those helpers call, the same way the #220 hiddenCount tests
+    // above do; if a future edit made showsCsv bypass them (e.g. a raw findByOwner dump), these
+    // stubs would return Mockito's default empty list and the regression-guard tests below would
+    // fail loudly rather than silently passing.
+
+    @Test
+    @DisplayName("issue #228: showsCsv returns text/csv with an attachment filename")
+    void showsCsvReturnsTextCsvWithAttachmentFilename() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+
+        ResponseEntity<byte[]> response = controller.showsCsv(false);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getHeaders().getContentType()).isNotNull();
+        assertThat(response.getHeaders().getContentType().toString()).startsWith("text/csv");
+        assertThat(response.getHeaders().getFirst("Content-Disposition"))
+                .isEqualTo("attachment; filename=\"shows.csv\"");
+    }
+
+    @Test
+    @DisplayName("issue #228: showsCsv is owner-scoped -- queries the signed-in user's own shows and settings")
+    void showsCsvIsOwnerScoped() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+
+        controller.showsCsv(false);
+
+        verify(settingsService).getOrCreateSettings(OWNER);
+        verify(showRepository).findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                eq(OWNER), any(), any());
+    }
+
+    @Test
+    @DisplayName("issue #228: showsCsv(showHidden=false) uses the hidden-excluding query, matching the page's default view")
+    void showsCsvDefaultExcludesHidden() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+
+        controller.showsCsv(false);
+
+        verify(showRepository, never())
+                .findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("issue #228: showsCsv(showHidden=true) uses the query that includes hidden shows, matching the page's toggle")
+    void showsCsvHiddenTrueIncludesHidden() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+
+        controller.showsCsv(true);
+
+        verify(showRepository, never())
+                .findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(anyString(), any(), any());
+    }
+
+    /**
+     * THE regression guard the whole issue exists for: a venue-sourced show for a performer the
+     * owner doesn't actively follow must not appear in the export, exactly as it doesn't appear
+     * on the page -- production has 172 such Cap City Comedy Club rows the page withholds.
+     */
+    @Test
+    @DisplayName("issue #228 regression guard: showsCsv excludes a venue show for an unfollowed performer")
+    void showsCsvExcludesVenueShowForUnfollowedPerformer() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show unfollowedVenueShow = show("Unfollowed Act", "venue:www.capcitycomedy.com");
+        Show control = show("Wilco", "ticketmaster");
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any()))
+                .thenReturn(new java.util.ArrayList<>(List.of(unfollowedVenueShow, control)));
+        // No active artists stubbed -- findByOwnerAndStatusIn defaults to empty (Mockito), so
+        // "Unfollowed Act" has nothing to match against, same setup as #220's identical guard.
+
+        ResponseEntity<byte[]> response = controller.showsCsv(false);
+
+        List<CSVRecord> records = parseCsv(response.getBody());
+        assertThat(records).extracting(r -> r.get("artist_name")).containsExactly("Wilco");
+    }
+
+    /**
+     * The regression guard's companion, named explicitly in the issue brief: a blanket filter
+     * (rather than one gated on the {@code venue:} source prefix) would drop this row too, and
+     * with it all 47 of the owner's other Ticketmaster shows.
+     */
+    @Test
+    @DisplayName("issue #228 regression guard: showsCsv includes a Ticketmaster row whose artist_name is an event title")
+    void showsCsvIncludesTicketmasterEventTitleRow() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show eventTitleShow = show("A Very Merry Symphony ft. Austin Symphony Orchestra", "ticketmaster");
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(eventTitleShow)));
+        // No active artists stubbed -- this event-title string would never match a catalog name
+        // anyway, which is exactly the point: it must appear regardless of activeArtistNames.
+
+        ResponseEntity<byte[]> response = controller.showsCsv(false);
+
+        List<CSVRecord> records = parseCsv(response.getBody());
+        assertThat(records).extracting(r -> r.get("artist_name"))
+                .containsExactly("A Very Merry Symphony ft. Austin Symphony Orchestra");
+    }
+
+    @Test
+    @DisplayName("issue #228: showsCsv includes a venue show whose performer IS an active artist")
+    void showsCsvIncludesVenueShowForActivePerformer() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show followedVenueShow = show("Nick Mullen", "venue:www.capcitycomedy.com");
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(followedVenueShow)));
+        Artist active = artistWithId(1L, "Nick Mullen", ArtistSource.VENUE_EXPANSION, ArtistStatus.APPROVED);
+        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+                .thenReturn(List.of(active));
+
+        ResponseEntity<byte[]> response = controller.showsCsv(false);
+
+        List<CSVRecord> records = parseCsv(response.getBody());
+        assertThat(records).extracting(r -> r.get("artist_name")).containsExactly("Nick Mullen");
+    }
+
+    @Test
+    @DisplayName("issue #228: an artist name with a comma AND a double quote round-trips through the real endpoint")
+    void showsCsvFieldWithCommaAndQuoteRoundTrips() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        String tricky = "The \"Legends\", Vol. 2";
+        Show trickyShow = show(tricky, "ticketmaster");
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(trickyShow)));
+
+        ResponseEntity<byte[]> response = controller.showsCsv(false);
+
+        List<CSVRecord> records = parseCsv(response.getBody());
+        assertThat(records.get(0).get("artist_name")).isEqualTo(tricky);
+    }
+
+    @Test
+    @DisplayName("issue #228: a non-ASCII artist name round-trips through the real endpoint")
+    void showsCsvNonAsciiNameRoundTrips() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        String name = "Antonio Sánchez"; // one of production's 76 non-ASCII active-artist names
+        Show s = show(name, "ticketmaster");
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(s)));
+
+        ResponseEntity<byte[]> response = controller.showsCsv(false);
+
+        List<CSVRecord> records = parseCsv(response.getBody());
+        assertThat(records.get(0).get("artist_name")).isEqualTo(name);
     }
 }

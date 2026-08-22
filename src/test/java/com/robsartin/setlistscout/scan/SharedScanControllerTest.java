@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.settings.GeocodingService;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
+import org.apache.commons.csv.CSVRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -20,8 +22,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
+import static com.robsartin.setlistscout.support.CsvTestSupport.parseCsv;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -425,5 +429,87 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isBadRequest());
 
         assertThat(sharedScanRepository.count()).isEqualTo(before);
+    }
+
+    // ---- issue #228: GET /shared/{id}.csv ---------------------------------------------------
+
+    @Test
+    @DisplayName("issue #228: the shared-scan CSV returns text/csv with an attachment filename")
+    void csvReturnsTextCsvWithAttachmentFilename() throws Exception {
+        MockHttpServletResponse response = mockMvc.perform(get("/shared/" + scan.getId() + ".csv")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse();
+
+        assertThat(response.getContentType()).startsWith("text/csv");
+        assertThat(response.getHeader("Content-Disposition"))
+                .isEqualTo("attachment; filename=\"shared-" + scan.getId() + ".csv\"");
+    }
+
+    @Test
+    @DisplayName("issue #228: a non-participant gets 404 on the shared-scan CSV, exactly as they do for the page "
+            + "(reuses SharedScanService#requireVisible, not a second access check)")
+    void nonParticipantGets404ForSharedCsv() throws Exception {
+        mockMvc.perform(get("/shared/" + scan.getId() + ".csv")
+                        .with(oidcLogin().idToken(t -> t.claim("email", STRANGER))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("issue #228: a non-participant gets 404 on a shared CSV for an id that belongs to a "
+            + "DIFFERENT pairing they're not in either")
+    void nonParticipantGets404ForASpecificPairingCsv() throws Exception {
+        SharedScan second = service.create("Rob & Spencer", ADMIN, SECOND_PARTNER);
+
+        mockMvc.perform(get("/shared/" + second.getId() + ".csv")
+                        .with(oidcLogin().idToken(t -> t.claim("email", STRANGER))))
+                .andExpect(status().isNotFound());
+    }
+
+    /**
+     * Owner isolation, asserted by PARSING the CSV body rather than a raw string
+     * {@code contains}/{@code doesNotContain} -- the brief's own cautionary tale is a test like
+     * that passing vacuously (an HTML-escaped apostrophe made a literal-string assertion never
+     * match either way, whether or not scoping actually worked). Parsing the artist_name column
+     * and asserting the exact set leaves no such gap: the personal-account show can only be
+     * absent if the query really is scoped to {@code scan.getOwnerKey()}.
+     */
+    @Test
+    @DisplayName("issue #228: the shared-scan CSV contains exactly the pairing's own shows -- a show on "
+            + "a participant's PERSONAL account (not the shared synthetic owner key) does not leak in")
+    void csvContainsOnlySharedShowsNotAParticipantsPersonalOnes() throws Exception {
+        Show sharedShow = new Show("The \"Legends\", Vol. 2", LocalDateTime.now().plusDays(5), "Metro", "Chicago",
+                new BigDecimal("42.50"), "ticketmaster", "https://tix.example/1", Show.Kind.MUSIC);
+        sharedShow.setOwner(scan.getOwnerKey());
+        showRepository.save(sharedShow);
+        Show personalShow = new Show("Solo Artist", LocalDateTime.now().plusDays(5), "Solo Venue", "Austin",
+                null, "ticketmaster", null, Show.Kind.MUSIC);
+        personalShow.setOwner(ADMIN);
+        showRepository.save(personalShow);
+
+        byte[] body = mockMvc.perform(get("/shared/" + scan.getId() + ".csv")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        List<CSVRecord> records = parseCsv(body);
+        assertThat(records).extracting(r -> r.get("artist_name")).containsExactly("The \"Legends\", Vol. 2");
+    }
+
+    @Test
+    @DisplayName("issue #228: a non-ASCII artist name in a shared show round-trips through the real endpoint")
+    void csvNonAsciiNameRoundTrips() throws Exception {
+        Show s = new Show("Øystein Sevåg", LocalDateTime.now().plusDays(5), "Metro", "Chicago",
+                null, "ticketmaster", null, Show.Kind.MUSIC);
+        s.setOwner(scan.getOwnerKey());
+        showRepository.save(s);
+
+        byte[] body = mockMvc.perform(get("/shared/" + scan.getId() + ".csv")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        List<CSVRecord> records = parseCsv(body);
+        assertThat(records.get(0).get("artist_name")).isEqualTo("Øystein Sevåg");
     }
 }

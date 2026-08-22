@@ -21,6 +21,11 @@
             <input type="hidden" name="showHidden" th:value="${showHidden}"/>
             <button type="submit">Scan now</button>
         </form>
+        <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript and that's a
+               hard rule. Carries the current showHidden state so the download matches whatever
+               the page is showing right now (ShowController#showsCsv respects it the same way
+               populateShows does). */-->
+        <a th:href="@{/shows.csv(showHidden=${showHidden})}">Download CSV</a>
         <!--/* Admin-only cross-account escape hatch (#136): visible only to the configured admin,
                and only when there's another allow-listed user to pick -- see NavModelAdvice. The
                server re-checks admin-ness itself (ShowController#requireAdmin); this th:if is a UI

@@ -93,6 +93,8 @@
             <form class="inline" th:action="@{'/shared/' + ${scan.id} + '/scan-now'}" method="post">
                 <button type="submit">Scan now</button>
             </form>
+            <!--/* Issue #228: a plain link, no JS -- the app ships no custom JavaScript. */-->
+            <a th:href="@{'/shared/' + ${scan.id} + '.csv'}">Download CSV</a>
         </div>
 
         <!--/* Three distinct states, and they must stay distinct. "We can't search yet",
