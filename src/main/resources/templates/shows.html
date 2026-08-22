@@ -164,7 +164,8 @@
                     <p class="where">
                         <span th:text="${show.venueName}">Venue</span>
                         <th:block th:if="${show.venueCity}"><span class="sep">·</span> <span th:text="${show.venueCity}">City</span></th:block>
-                        <th:block th:if="${show.ticketUrl}"><span class="sep">·</span> <a th:href="${show.ticketUrl}" target="_blank">tickets</a></th:block>
+                        <th:block th:if="${show.ticketUrl}"><span class="sep">·</span> <a th:href="${show.ticketUrl}" target="_blank"
+                                th:aria-label="'Tickets for ' + ${show.artistName} + ' at ' + ${show.venueName}">tickets</a></th:block>
                     </p>
                 </div>
                 <div class="meta">
