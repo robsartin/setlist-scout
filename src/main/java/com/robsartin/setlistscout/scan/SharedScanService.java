@@ -20,8 +20,10 @@ import java.util.Optional;
  * Which shared scans a user may see, and their contents (#163).
  * <p>
  * Access is participant-based, not admin-based: a shared scan is shows that two people would both
- * want, so both of them can see it. {@code AdminGuard} still gates CREATING one -- that is the
- * admin action -- but viewing is not admin-only.
+ * want, so both of them can see it. Creating one is no longer admin-gated either (#229) -- any
+ * signed-in, allow-listed user may create a pairing against any other allow-listed address, with
+ * no consent step. {@link #validateNewPairing} still rejects a duplicate (either direction), a
+ * self-pairing, and a non-allow-listed {@code ownerB}.
  */
 @Service
 public class SharedScanService {
@@ -134,11 +136,11 @@ public class SharedScanService {
      *   per pair ({@link SharedScan}'s own class doc). A second one for the same two people is not
      *   a visibly broken page -- it is an identical, silently doubled Ticketmaster/Bandsintown scan
      *   cadence for as long as both rows exist, which with no delete endpoint is forever.</li>
-     *   <li><b>Self-pairing.</b> {@code ownerA} is always the creating admin ({@code
-     *   SharedScanController#create}), so pairing them with themselves intersects their own active
-     *   artists with themselves -- for the admin account in production, on the order of a thousand
-     *   artists -- and enqueues scan jobs for every one of them under a synthetic key, with no page
-     *   that would ever show this happened.</li>
+     *   <li><b>Self-pairing.</b> {@code ownerA} is always the creating user ({@code
+     *   SharedScanController#create}, open to anyone allow-listed since #229) -- so pairing them
+     *   with themselves intersects their own active artists with themselves -- for the admin
+     *   account specifically, on the order of a thousand artists -- and enqueues scan jobs for
+     *   every one of them under a synthetic key, with no page that would ever show this happened.</li>
      *   <li><b>Non-allow-listed {@code ownerB}.</b> The create form's dropdown is populated from
      *   {@code appProperties.auth().allowedEmails()} ({@code NavModelAdvice#otherOwnerEmails}), so
      *   a value outside that list can only reach here via a stale or tampered request. A shared

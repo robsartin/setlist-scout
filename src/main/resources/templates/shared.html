@@ -11,13 +11,15 @@
 <div th:fragment="content" id="shared-content" tabindex="-1" th:autofocus="${justCreated == true}">
     <h1>Shared Shows</h1>
 
-    <!--/* No pairing yet. Only the admin can create one, so everyone else gets an explanation
-           rather than a form they cannot submit. */-->
+    <!--/* No pairing yet. #229: creating one is open to any signed-in, allow-listed user, not
+           just the admin -- the isAdmin gate that used to wrap the form below is gone. The
+           empty-list guard stays: a <select> with no options is not a submittable form, so if
+           there's no other allow-listed address to offer, show the explanatory message instead. */-->
     <th:block th:if="${scan == null}">
         <p class="page-sub">A shared scan tracks the artists you and another user both follow, at a
             location you choose together.</p>
 
-        <div class="settings" th:if="${isAdmin and not #lists.isEmpty(otherOwnerEmails)}">
+        <div class="settings" th:if="${not #lists.isEmpty(otherOwnerEmails)}">
             <!--/* th:hx-post/hx-target/hx-disabled-elt: same double-submit protection as shows.html's
                    "Scan now" and candidates.html's action forms -- disables the submit button for
                    the round trip so a double-click can't fire this twice (SharedScanController#create
@@ -34,7 +36,7 @@
                 <button type="submit">Create shared scan</button>
             </form>
         </div>
-        <p th:unless="${isAdmin}">No shared scan has been set up yet.</p>
+        <p th:if="${#lists.isEmpty(otherOwnerEmails)}">No shared scan has been set up yet.</p>
     </th:block>
 
     <th:block th:if="${scan != null}">

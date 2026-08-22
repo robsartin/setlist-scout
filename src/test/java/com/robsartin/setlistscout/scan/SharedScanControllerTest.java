@@ -13,6 +13,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -105,13 +106,33 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("only the admin may create a shared scan")
-    void onlyAdminCanCreate() throws Exception {
-        mockMvc.perform(post("/shared")
+    @DisplayName("issue #229: a non-admin can create a shared scan; it redirects there and both "
+            + "participants see it via visibleTo -- even though OTHER already has a pairing (from "
+            + "setUp), proving creation is no longer capped at one")
+    void nonAdminCanCreateASharedScanAndBothParticipantsSeeIt() throws Exception {
+        MvcResult result = mockMvc.perform(post("/shared")
                         .with(oidcLogin().idToken(t -> t.claim("email", OTHER)))
                         .with(csrf())
-                        .param("label", "Sneaky").param("ownerB", STRANGER))
-                .andExpect(status().isForbidden());
+                        .param("label", "David & Spencer").param("ownerB", SECOND_PARTNER))
+                .andExpect(status().is3xxRedirection())
+                .andReturn();
+
+        String location = result.getResponse().getRedirectedUrl();
+        assertThat(location).isNotNull().startsWith("/shared/");
+        Long newId = Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
+
+        assertThat(service.visibleTo(OTHER)).extracting(SharedScan::getId).contains(newId);
+        assertThat(service.visibleTo(SECOND_PARTNER)).extracting(SharedScan::getId).contains(newId);
+    }
+
+    @Test
+    @DisplayName("issue #229: a non-admin with no pairing yet sees the create form, not just "
+            + "an explanatory message")
+    void nonAdminSeesCreateFormWhenTheyHaveNoPairing() throws Exception {
+        String body = pageAs(STRANGER);
+
+        assertThat(body).contains("id=\"shared-create-target\"");
+        assertThat(body).doesNotContain("No shared scan has been set up yet.");
     }
 
     @Test
@@ -302,5 +323,42 @@ class SharedScanControllerTest extends AbstractPostgresIntegrationTest {
                         .param("postalCode", "60601").param("radiusMiles", "25").param("monthsAhead", "3"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/shared/" + second.getId()));
+    }
+
+    // ---- #229: removing the admin gate makes POST /shared reachable by every allow-listed user,
+    // not just one trusted account -- so it is worth proving, AT THIS HTTP BOUNDARY, that a
+    // crafted ownerB still cannot create a pairing against a non-existent/non-allow-listed address
+    // or against the caller's own address. The actual guard is SharedScanService#validateNewPairing
+    // (case-insensitive allow-list check + self-pairing check), already in place since #187/PR#188
+    // -- SharedScanServiceTest#nonAllowListedOwnerBIsRejected and #selfPairingIsRejected already
+    // cover it at the service layer. These two are the same protection re-proven through the
+    // controller, specifically because the reachability of this endpoint is what #229 changes.
+
+    @Test
+    @DisplayName("issue #229: ownerB outside the allow-list is rejected and creates no row")
+    void createRejectsOwnerBOutsideTheAllowlist() throws Exception {
+        long before = sharedScanRepository.count();
+
+        mockMvc.perform(post("/shared")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "Rob & Nobody").param("ownerB", "nobody@example.com"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(sharedScanRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("issue #229: pairing yourself as ownerB is rejected and creates no row")
+    void createRejectsSelfPairing() throws Exception {
+        long before = sharedScanRepository.count();
+
+        mockMvc.perform(post("/shared")
+                        .with(oidcLogin().idToken(t -> t.claim("email", ADMIN)))
+                        .with(csrf())
+                        .param("label", "Solo").param("ownerB", ADMIN))
+                .andExpect(status().isBadRequest());
+
+        assertThat(sharedScanRepository.count()).isEqualTo(before);
     }
 }
