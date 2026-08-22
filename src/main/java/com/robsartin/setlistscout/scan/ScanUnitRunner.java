@@ -136,21 +136,42 @@ public class ScanUnitRunner {
      * self-heal within one scan cycle instead of staying null for up to six months (until the
      * show's own event date passes) -- see the {@code V27} Java backfill migration for the
      * one-time historical repair this complements.
+     * <p>
+     * <b>Issue #230:</b> the insert itself goes through {@link ShowRepository#insertIfAbsent}, an
+     * atomic {@code INSERT ... ON CONFLICT (owner, artist_name, event_date_time, venue_name) DO
+     * NOTHING} against the real unique constraint -- never {@code existsBy}/{@code findBy} +
+     * {@code save}, per CLAUDE.md's idempotent-write rule ({@code VenueScanRunner#persist} already
+     * did this; this method predated that rule). The old read-then-write pattern raced: {@code
+     * ScanPoller} runs each claimed job with no ambient transaction around {@code
+     * ScanUnitRunner#run} (slow adapter calls would otherwise tie up a connection for nothing), so
+     * each repository call commits independently, and two concurrent runs discovering the same
+     * natural key could both see "not found" before either committed -- the loser's {@code save()}
+     * then threw a genuine constraint violation, which propagated out of this loop and killed every
+     * show after the colliding one in the batch. {@code insertIfAbsent} can never throw on that
+     * collision; it just reports 0 rows inserted, so one colliding show never takes the rest of the
+     * batch down with it (see {@code ScanUnitRunnerTest
+     * #aConstraintViolationOnOneShowDoesNotAbortTheRestOfTheBatch}). When it returns 0 the row
+     * already existed (written by this call or a concurrent one), so the self-heal check below still
+     * runs against it exactly as before.
      */
     int persistNew(String owner, Long artistId, List<Show> shows) {
         int saved = 0;
         for (Show show : shows) {
             if (show.getEventDateTime() == null) continue;
-            Optional<Show> existing = showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
-                    owner, show.getArtistName(), show.getEventDateTime(), show.getVenueName());
-            if (existing.isEmpty()) {
-                show.setOwner(owner);
-                show.setArtistId(artistId);
-                showRepository.save(show);
+            show.setOwner(owner);
+            show.setArtistId(artistId);
+            int inserted = showRepository.insertIfAbsent(owner, show.getArtistName(), show.getEventDateTime(),
+                    show.getVenueName(), show.getVenueCity(), show.getPrice(), show.getSource(),
+                    show.getTicketUrl(), show.getKind().name(), show.getDiscoveredAt(), artistId);
+            if (inserted == 1) {
                 saved++;
-            } else if (existing.get().getArtistId() == null) {
-                existing.get().setArtistId(artistId);
-                showRepository.save(existing.get());
+            } else {
+                Optional<Show> existing = showRepository.findByOwnerAndArtistNameAndEventDateTimeAndVenueName(
+                        owner, show.getArtistName(), show.getEventDateTime(), show.getVenueName());
+                if (existing.isPresent() && existing.get().getArtistId() == null) {
+                    existing.get().setArtistId(artistId);
+                    showRepository.save(existing.get());
+                }
             }
         }
         return saved;
