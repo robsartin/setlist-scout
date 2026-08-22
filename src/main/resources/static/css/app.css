@@ -144,7 +144,10 @@ form.inline { display:inline; }
 
 .cand-list { display:flex; flex-direction:column; gap:.5rem; }
 .cand { display:flex; align-items:center; gap:.6rem; padding:.5rem .6rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap; }
-.cand .cand-name { font-weight:600; }
+/* #235 "lightest touch" pass on candidates.html: font-weight only, to match the row-name/act
+   weight the rest of the redesign uses (shows.html/venues.html/artists.html) -- no structural or
+   id/hx-*/autofocus change on this highest-regression-risk page. */
+.cand .cand-name { font-weight:650; }
 .cand .note { flex:1 1 auto; }
 
 .connection-paths { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.3rem; }
