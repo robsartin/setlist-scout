@@ -15,7 +15,12 @@
        and only its contents change. Ships empty on every page load. */-->
 <p id="sr-status" role="status" aria-live="polite" class="visually-hidden"></p>
 <header class="topbar">
-    <div class="topbar-inner">
+    <!--/* #240: the listing pages (shows/artists/shared) get a wider measure. The HEADER has to
+           widen with the content, not just <main> -- .topbar-inner carries its own
+           max-width, so widening only .wrap would leave the brand and nav visibly inset
+           against rows running wider beneath them. Same condition on both, driven by the
+           navActive the fragment already receives. */-->
+    <div class="topbar-inner" th:classappend="${navActive == 'shows' or navActive == 'artists' or navActive == 'shared'} ? 'wide' : ''">
         <span class="brand"><span class="dot" aria-hidden="true"></span> Setlist Scout</span>
         <nav class="main" aria-label="Primary">
             <a th:href="@{/}" th:attr="aria-current=${navActive == 'shows'} ? 'page' : null">Shows</a>
@@ -53,7 +58,7 @@
         </nav>
     </div>
 </header>
-<main class="wrap">
+<main class="wrap" th:classappend="${navActive == 'shows' or navActive == 'artists' or navActive == 'shared'} ? 'wide' : ''">
     <div th:replace="${content}">content</div>
 </main>
 </body>

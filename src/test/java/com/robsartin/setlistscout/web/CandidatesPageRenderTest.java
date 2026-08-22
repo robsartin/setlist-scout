@@ -5,6 +5,7 @@ import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.support.AbstractPostgresIntegrationTest;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -556,4 +557,26 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         artist.setOwner(owner);
         return artist;
     }
+    /**
+     * #240: only the listing pages (shows/artists/shared) take the wider measure. Candidates has its
+     * own two-column .candidates-layout (sidebar + focused group) tuned to the standard width, so
+     * widening it would work against that layout rather than help it.
+     * <p>
+     * The negative half of the assertion matters as much as the positive one: the modifier is
+     * applied by a condition on navActive in the shared layout fragment, so a broadened condition
+     * would silently widen every page in the app, and nothing else in the suite would notice.
+     */
+    @Test
+    @DisplayName("#240: the candidates page does NOT take the wide measure")
+    void candidatesPageDoesNotUseTheWideMeasure() throws Exception {
+        String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", "wide-negative@example.com"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("class=\"wrap\"");
+        assertThat(body).doesNotContain("wrap wide");
+        assertThat(body).doesNotContain("topbar-inner wide");
+    }
+
 }
