@@ -14,9 +14,11 @@ import org.apache.commons.csv.CSVRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -27,6 +29,7 @@ import java.util.Set;
 
 import static com.robsartin.setlistscout.support.CsvTestSupport.parseCsv;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -107,6 +110,32 @@ class ShowControllerTest {
 
         verify(scanJobRepository).redueAll(eq(OWNER), any(Instant.class));
         assertThat(view).isEqualTo("redirect:/");
+    }
+
+    @Test
+    @DisplayName("issue #246: scanNowForArtist re-dues only the named (owned) artist's jobs and redirects")
+    void scanNowForArtistReduesTheOwnedArtistAndRedirects() {
+        Artist owned = new Artist("Wilco", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null);
+        owned.setOwner(OWNER);
+        when(artistRepository.findByIdAndOwner(7L, OWNER)).thenReturn(Optional.of(owned));
+
+        String view = controller.scanNowForArtist(7L);
+
+        verify(scanJobRepository).redueForArtist(eq(OWNER), eq(7L), any(Instant.class));
+        assertThat(view).isEqualTo("redirect:/artists");
+    }
+
+    @Test
+    @DisplayName("issue #246: scanNowForArtist 404s on a foreign or unknown id and never touches scan jobs")
+    void scanNowForArtistThrowsNotFoundAndTouchesNothingForAForeignOrUnknownId() {
+        when(artistRepository.findByIdAndOwner(7L, OWNER)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> controller.scanNowForArtist(7L))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        verify(scanJobRepository, never()).redueForArtist(any(), any(), any());
     }
 
     @Test

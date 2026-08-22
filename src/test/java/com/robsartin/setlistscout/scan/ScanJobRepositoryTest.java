@@ -196,6 +196,115 @@ class ScanJobRepositoryTest extends AbstractPostgresIntegrationTest {
         assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
     }
 
+    // #246: redueForArtist -- the same version-safe redue contract as redueAll above, scoped to
+    // one artist so a config-change verification (or this button) doesn't re-queue the other
+    // ~6,400 jobs an owner has. Mirrors redueAll's test coverage (reset+version,
+    // self-transactional) plus the scoping checks that are the actual point of the narrower query.
+
+    @Test
+    @DisplayName("redueForArtist (#246) resets the named artist's job (FAILED -> SCHEDULED, attempts "
+            + "reset, claimed_at cleared) and bumps version -- same contract as redueAll, scoped to "
+            + "one artist")
+    @Transactional
+    void redueForArtistResetsNamedArtistJobAndBumpsVersion() {
+        ScanJob job = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 4,
+                Instant.now().plus(java.time.Duration.ofDays(14)));
+        job.setOwner(OWNER);
+        job.setClaimedAt(Instant.now());
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+        long v0 = scanJobRepository.findById(id).orElseThrow().getVersion();
+
+        Instant now = Instant.now();
+        int updated = scanJobRepository.redueForArtist(OWNER, 1L, now);
+        assertThat(updated).isEqualTo(1);
+
+        entityManager.clear();
+        ScanJob after = scanJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getClaimedAt()).isNull();
+        assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
+        assertThat(after.getVersion()).isEqualTo(v0 + 1);
+    }
+
+    @Test
+    @DisplayName("redueForArtist (#246) leaves a DIFFERENT artist's job for the SAME owner completely "
+            + "untouched -- the scoping bug a missing artist_id predicate would hide behind a passing "
+            + "single-artist assertion; this is issue #246's explicitly called-out risk")
+    void redueForArtistDoesNotTouchAnotherArtistsJob() {
+        ScanJob target = new ScanJob(1L, "ticketmaster", JobStatus.FAILED, 4,
+                Instant.now().plus(java.time.Duration.ofDays(14)));
+        target.setOwner(OWNER);
+        Long targetId = scanJobRepository.saveAndFlush(target).getId();
+
+        ScanJob other = new ScanJob(2L, "ticketmaster", JobStatus.FAILED, 4,
+                Instant.now().plus(java.time.Duration.ofDays(14)));
+        other.setOwner(OWNER);
+        Long otherId = scanJobRepository.saveAndFlush(other).getId();
+        // Re-fetch rather than use the in-memory Instant directly: Postgres timestamp columns are
+        // microsecond precision while a JVM Instant.now() can carry nanosecond precision (same fix
+        // as AdminCrossAccountActionsTest's identical comment) -- both sides of the "unchanged"
+        // comparison below must come from the DB.
+        ScanJob otherBefore = scanJobRepository.findById(otherId).orElseThrow();
+        Instant otherOriginalNextDueAt = otherBefore.getNextDueAt();
+        long otherOriginalVersion = otherBefore.getVersion();
+
+        int updated = scanJobRepository.redueForArtist(OWNER, 1L, Instant.now());
+        assertThat(updated).isEqualTo(1);
+
+        ScanJob otherAfter = scanJobRepository.findById(otherId).orElseThrow();
+        assertThat(otherAfter.getNextDueAt()).isEqualTo(otherOriginalNextDueAt);
+        assertThat(otherAfter.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(otherAfter.getAttempts()).isEqualTo(4);
+        assertThat(otherAfter.getVersion()).isEqualTo(otherOriginalVersion);
+
+        ScanJob targetAfter = scanJobRepository.findById(targetId).orElseThrow();
+        assertThat(targetAfter.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(targetAfter.getAttempts()).isZero();
+    }
+
+    @Test
+    @DisplayName("redueForArtist (#246) leaves another owner's job for the same artist id untouched "
+            + "-- guards the reverse scoping mistake, an owner predicate dropped instead of kept")
+    void redueForArtistDoesNotTouchAnotherOwnersJobForTheSameArtistId() {
+        ScanJob mine = new ScanJob(9L, "ticketmaster", JobStatus.FAILED, 2,
+                Instant.now().plus(java.time.Duration.ofDays(14)));
+        mine.setOwner(OWNER);
+        scanJobRepository.saveAndFlush(mine);
+
+        ScanJob someoneElses = new ScanJob(9L, "bandsintown", JobStatus.FAILED, 2,
+                Instant.now().plus(java.time.Duration.ofDays(14)));
+        someoneElses.setOwner("someone-else@example.com");
+        Long otherId = scanJobRepository.saveAndFlush(someoneElses).getId();
+        Instant originalNextDueAt = scanJobRepository.findById(otherId).orElseThrow().getNextDueAt();
+
+        scanJobRepository.redueForArtist(OWNER, 9L, Instant.now());
+
+        ScanJob after = scanJobRepository.findById(otherId).orElseThrow();
+        assertThat(after.getNextDueAt()).isEqualTo(originalNextDueAt);
+        assertThat(after.getStatus()).isEqualTo(JobStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("redueForArtist (#246) commits even with no ambient transaction, proving it is "
+            + "self-transactional -- same requirement as redueAll, for a plain @PostMapping caller "
+            + "(ShowController#scanNowForArtist)")
+    void redueForArtistCommitsWithoutAmbientTransaction() {
+        ScanJob job = new ScanJob(3L, "bandsintown", JobStatus.FAILED, 3,
+                Instant.now().plus(java.time.Duration.ofDays(7)));
+        job.setOwner(OWNER);
+        Long id = scanJobRepository.saveAndFlush(job).getId();
+
+        Instant now = Instant.now();
+        int updated = scanJobRepository.redueForArtist(OWNER, 3L, now);
+        assertThat(updated).isEqualTo(1);
+
+        ScanJob after = scanJobRepository.findById(id).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(JobStatus.SCHEDULED);
+        assertThat(after.getAttempts()).isZero();
+        assertThat(after.getNextDueAt()).isCloseTo(now, within(1, java.time.temporal.ChronoUnit.SECONDS));
+    }
+
     @Test
     @DisplayName("claimDue claims due, unclaimed rows: sets claimed_at + status RUNNING, and returns them")
     void claimDueClaimsDueUnclaimedRows() {

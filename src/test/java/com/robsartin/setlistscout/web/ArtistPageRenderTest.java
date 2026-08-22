@@ -50,10 +50,10 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private ArtistRepository artistRepository;
 
-    private void saveActive(String owner, String name, ArtistStatus status) {
+    private Artist saveActive(String owner, String name, ArtistStatus status) {
         Artist artist = new Artist(name, ArtistSource.SEED_LIST, status, null, null);
         artist.setOwner(owner);
-        artistRepository.save(artist);
+        return artistRepository.save(artist);
     }
 
     private void savePending(String owner, String name, ArtistSource source, String discoveredVia, String note) {
@@ -165,6 +165,26 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains("/remove\"");
         // Must NOT also render the SEED-only "Remove from seed list" button.
         assertThat(body).doesNotContain("Remove from seed list");
+        // Issue #246: Rescan is not status-gated like Remove/Remove-from-seed -- it renders on
+        // every active row, APPROVED included.
+        assertThat(body).contains("aria-label=\"Rescan Approved Artist\"");
+    }
+
+    @Test
+    @DisplayName("issue #246: the active list offers a per-row Rescan button that re-dues only "
+            + "that artist's own scan jobs -- distinct from the whole-fleet /scan-now on the Shows "
+            + "page -- naming the artist in its accessible label")
+    void activeRowShowsRescanButtonNamingTheArtist() throws Exception {
+        String owner = "render-rescan-button@example.com";
+        Artist artist = saveActive(owner, "Dawes", ArtistStatus.SEED);
+
+        String body = mockMvc.perform(get("/artists").with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains(">Rescan<");
+        assertThat(body).contains("action=\"/artists/" + artist.getId() + "/scan-now\"");
+        assertThat(body).contains("aria-label=\"Rescan Dawes\"");
     }
 
     @Test
