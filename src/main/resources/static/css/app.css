@@ -196,9 +196,15 @@ form.inline { display:inline; }
 .scope .edit:has(details[open]) { flex:1 0 100%; order:99; }
 .scope-edit { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2);
   padding:.9rem; display:flex; gap:.7rem; align-items:end; flex-wrap:wrap; margin-top:.6rem; }
-.scope-edit .field { display:flex; flex-direction:column; gap:.2rem; }
-.scope-edit .field label { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--muted); }
-.scope-edit input[type=text], .scope-edit input[type=number] { width:6rem; }
+/* Bare (sizeless) number inputs -- ZIP/venue-name/calendar-URL fields all carry their own [size]
+   HTML attribute instead, since one blanket width would either crush a venue name or leave a
+   3-digit "months ahead" field oddly wide; [size] lets each field ask for what it actually needs. */
+.scope-edit input[type=number] { width:5rem; }
+
+/* .field: a labelled-input group, standalone (not scoped to .scope-edit) so any form on any page
+   can use the same small-caps label + tight stack -- e.g. venues.html's add-venue form. */
+.field { display:flex; flex-direction:column; gap:.2rem; }
+.field label { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--muted); }
 
 /* Month rules: replace sortable table headers on the shows views. Chronological is the only order
    that matters for "what can I go see" -- see .gig below for the row-level date rail. */
