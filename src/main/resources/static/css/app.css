@@ -43,6 +43,31 @@ nav.main { display:flex; gap:.25rem; flex-wrap:wrap; }
 nav.main a { text-decoration:none; color:var(--muted); font-weight:550; font-size:.93rem; padding:.38rem .7rem; border-radius:8px; }
 nav.main a:hover { color:var(--text); background:var(--surface-2); }
 nav.main a[aria-current="page"] { color:var(--primary); background:var(--primary-soft); }
+/* #236: Candidates/Rejected/Connections are the review queue -- workflow, not destinations --
+   demoted by WEIGHT (smaller, lighter font) so the eye separates them from the "what's on" /
+   "what you follow" links above without hiding anything behind a disclosure. Font-size/weight
+   only, no opacity: opacity blends color toward the background (see the button:disabled comment
+   below for why that's an AA trap this file already avoids), and these links already render in
+   the same --muted token as every other resting nav link, so shrinking size/weight can't regress
+   contrast the way dimming would. The active one still gets the SAME [aria-current="page"] look
+   as any other link (that rule, above, is untouched and already wins on specificity). */
+nav.main a.nav-review { font-size:.85rem; font-weight:450; }
+/* The visual gap/divider before the group's first link (Candidates) -- a sibling combinator, not
+   a wrapper element, so nav.main's own flex-wrap still reflows one link at a time, same as every
+   other link here (see the .candidates-layout comment further down for why this file avoids
+   width breakpoints and leans on flex-wrap instead). Matches only Candidates: the only
+   .nav-review link immediately preceded by a non-.nav-review sibling. */
+nav.main a:not(.nav-review) + a.nav-review { margin-left:.75rem; padding-left:.75rem; border-left:1px solid var(--border); }
+/* #236: the candidates count used to sit inline in the link text ("Candidates 1960"), so its own
+   width changed with its digit-count and reflowed every link to its right -- most visible on the
+   OOB swap after a bulk approve/reject. Fixed min-width + right-aligned, tabular-nums digits
+   (.count, below) give the badge a stable footprint across the 1-4 digit range production
+   actually sees (~1,960 pending at time of writing) so it repaints in place instead of shifting
+   Rejected/Connections/Admin. Scoped to nav.main so the rest of .count's usages (e.g. the
+   candidates page's own group counts) are untouched -- and scoped by DESCENDANT selector, not a
+   new class, so candidates.html's out-of-band companion span (id="nav-candidates-badge", #154)
+   picks this up for free after an outerHTML swap without needing its own class edited to match. */
+nav.main .count { display:inline-block; min-width:2.4ch; text-align:right; }
 
 /* Typography helpers */
 h1 { font-size:1.5rem; letter-spacing:-.02em; margin:2rem 0 .3rem; text-wrap:balance; }

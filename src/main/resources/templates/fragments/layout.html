@@ -26,16 +26,25 @@
                    follow" that this owner configures, ahead of the review-workflow links
                    (Candidates/Rejected/Connections) that both artists and venues feed. */-->
             <a th:href="@{/venues}" th:attr="aria-current=${navActive == 'venues'} ? 'page' : null">Venues</a>
-            <a th:href="@{/artists/candidates}" th:attr="aria-current=${navActive == 'candidates'} ? 'page' : null">
+            <!--/* #236: Candidates/Rejected/Connections are the review queue -- workflow, not
+                   destinations -- so they're demoted by WEIGHT (nav-review, styled in app.css)
+                   rather than nested behind a disclosure: every link stays one click away, and
+                   the eye still separates "what you follow" (above) from "review queue" (below).
+                   No wrapper element around the group -- that would change how nav.main's own
+                   flex-wrap reflows (one flex item per link, same as every link here); app.css's
+                   sibling-combinator rule adds the visual gap/divider before Candidates instead.
+                   Settings (formerly here, linking to @{/#settings}) is gone -- it was never a
+                   page, just an anchor into the Shows page's own scope summary; id="settings"
+                   still lives there (shows.html), unchanged. */-->
+            <a th:href="@{/artists/candidates}" class="nav-review" th:attr="aria-current=${navActive == 'candidates'} ? 'page' : null">
                 <!--/* id (issue #154): a stable out-of-band swap target. This span sits OUTSIDE
                        #candidates-app (the id below), so no htmx action on the Candidates page can
                        ever reach it via a normal swap -- see candidates.html's OOB companion span,
                        gated on ${oobNavBadge}, for the fix. */-->
                 Candidates <span id="nav-candidates-badge" class="count" th:if="${pendingCount != null and pendingCount > 0}" th:text="${pendingCount}">0</span>
             </a>
-            <a th:href="@{/artists/rejected}" th:attr="aria-current=${navActive == 'rejected'} ? 'page' : null">Rejected</a>
-            <a th:href="@{/artists/connections}" th:attr="aria-current=${navActive == 'connections'} ? 'page' : null">Connections</a>
-            <a th:href="@{/#settings}" th:attr="aria-current=${navActive == 'settings'} ? 'page' : null">Settings</a>
+            <a th:href="@{/artists/rejected}" class="nav-review" th:attr="aria-current=${navActive == 'rejected'} ? 'page' : null">Rejected</a>
+            <a th:href="@{/artists/connections}" class="nav-review" th:attr="aria-current=${navActive == 'connections'} ? 'page' : null">Connections</a>
             <!--/* Admin-only (#201): the queues page's link. th:if is a UI convenience -- the page
                    itself re-checks AdminGuard#require() server-side, since a hidden link is not
                    access control. */-->
