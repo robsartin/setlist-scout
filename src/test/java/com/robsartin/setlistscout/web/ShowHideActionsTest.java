@@ -57,6 +57,14 @@ class ShowHideActionsTest extends AbstractPostgresIntegrationTest {
         return repo.save(show).getId();
     }
 
+    /** Same shape, explicit source (issue #220's venue-filter fixtures) -- never hidden by construction. */
+    private static Long saveShow(ShowRepository repo, String owner, String artistName,
+                                  LocalDateTime eventDateTime, String venueName, String source) {
+        Show show = new Show(artistName, eventDateTime, venueName, "Austin", null, source, null, Show.Kind.MUSIC);
+        show.setOwner(owner);
+        return repo.save(show).getId();
+    }
+
     @Test
     void hidingAShowRemovesItFromTheDefaultListButItReappearsWithTheToggleOn() throws Exception {
         String owner = "hide-basic@example.com";
@@ -200,6 +208,38 @@ class ShowHideActionsTest extends AbstractPostgresIntegrationTest {
         String owner = "hide-successor@example.com";
         LocalDateTime when = LocalDateTime.now().plusDays(10).truncatedTo(ChronoUnit.SECONDS);
         Long first = saveShow(showRepository, owner, "Radiohead", when, "Moody Center");
+        saveShow(showRepository, owner, "Wilco", when.plusDays(1), "ACL Live");
+
+        String body = mockMvc.perform(post("/shows/{id}/hide", first)
+                        .header("HX-Request", "true")
+                        .with(csrf())
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(countAutofocusElements(body)).isEqualTo(1);
+        assertThat(body).containsPattern("aria-label=\"Hide Wilco[^\"]*\"[^>]*autofocus");
+    }
+
+    /**
+     * Issue #220 Finding 2: {@code resolveVisibleShows} must apply the same venue-follow filter as
+     * the display list, so it never offers a filtered-out row as the focus successor. Without the
+     * fix, {@code focusable} still catches the bad pick and downgrades to the region anchor (no
+     * keyboard trap -- see the issue) -- so this test's failure mode BEFORE the fix is "autofocus
+     * lands on #shows-region instead of Wilco's Hide button," not a crash or a lost focus.
+     * <p>
+     * The middle row's performer is deliberately unfollowed (no artist seeded for this owner at
+     * all), so it is excluded from every rendered list already, by #206's existing display filter --
+     * this test is purely about which row {@code resolveVisibleShows} offers as Radiohead's
+     * successor BEFORE that row is mutated out, not about display filtering itself (covered
+     * elsewhere).
+     */
+    @Test
+    void hidingARowSkipsAFilteredOutVenueSuccessorAndFocusesTheNextVisibleRow() throws Exception {
+        String owner = "hide-successor-filtered@example.com";
+        LocalDateTime when = LocalDateTime.now().plusDays(10).truncatedTo(ChronoUnit.SECONDS);
+        Long first = saveShow(showRepository, owner, "Radiohead", when, "Moody Center");
+        saveShow(showRepository, owner, "Unfollowed Act", when.plusHours(1), "Some Club", "venue:example.com");
         saveShow(showRepository, owner, "Wilco", when.plusDays(1), "ACL Live");
 
         String body = mockMvc.perform(post("/shows/{id}/hide", first)

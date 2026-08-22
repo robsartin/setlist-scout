@@ -97,24 +97,16 @@ public class ShowController {
                 .map(a -> a.getName().toLowerCase(Locale.ROOT))
                 .collect(Collectors.toSet());
 
-        // #206: TicketmasterService stores the EVENT TITLE, not a catalog artist name, in
-        // artist_name (label is the event name; it falls back to the artist name only when
-        // blank) -- e.g. "A Very Merry Symphony ft. Austin Symphony Orchestra" for a real show
-        // the owner has today, a string that is not, and never will be, in the catalog. So this
-        // active-artist check applies ONLY to venue:-sourced rows (Task 3's per-venue scan);
-        // a blanket filter would hide every Ticketmaster/Bandsintown show the owner has.
-        Set<String> activeArtistNames = artistRepository
-                .findByOwnerAndStatusIn(owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED))
-                .stream()
-                .map(a -> ArtistNameNormalizer.normalize(a.getName()))
-                .collect(Collectors.toSet());
+        Set<String> activeArtistNames = activeArtistNames(owner);
+        shows = visibleToOwner(shows, activeArtistNames);
 
-        shows = shows.stream()
-                .filter(s -> !s.getSource().startsWith("venue:")
-                        || activeArtistNames.contains(ArtistNameNormalizer.normalize(s.getArtistName())))
-                .toList();
-
-        long hiddenCount = showRepository.countByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(owner, start, end);
+        // #220 (owner decision recorded in the brief): hiddenCount means "shows you hid that you
+        // could still see" -- the same venue-follow filter as `shows` above, applied to the hidden
+        // rows, so the "show hidden" toggle always reveals exactly the number it promised. Needs
+        // the actual rows, not a database COUNT, because the filter is an in-memory
+        // normalized-name comparison -- see visibleToOwner's Javadoc.
+        List<Show> hiddenShows = showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(owner, start, end);
+        long hiddenCount = visibleToOwner(hiddenShows, activeArtistNames).size();
 
         model.addAttribute("shows", shows);
         model.addAttribute("currentSort", sort);
@@ -134,6 +126,44 @@ public class ShowController {
         return showHidden
                 ? showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(owner, start, end)
                 : showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(owner, start, end);
+    }
+
+    /**
+     * The owner's active ({@code SEED} or {@code APPROVED}) artist names, normalized -- the set
+     * {@link #visibleToOwner} tests a {@code venue:}-sourced show's performer against. Issued as
+     * its own narrow, status-filtered query every place it's needed (currently {@link
+     * #populateShows} and {@link #resolveVisibleShows}) rather than threading one instance
+     * through both call paths -- matches the two-narrow-queries rule documented on {@code
+     * populateShows}'s {@code tributeArtistNames}/{@code activeArtistNames} block: never widen
+     * this to a plain {@code findByOwner}.
+     */
+    private Set<String> activeArtistNames(String owner) {
+        return artistRepository.findByOwnerAndStatusIn(owner, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED))
+                .stream()
+                .map(a -> ArtistNameNormalizer.normalize(a.getName()))
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * The venue-follow filter (#206, extracted for #220): drops a {@code venue:}-sourced show
+     * whose performer isn't among {@code activeArtistNames}. Applies ONLY to venue:-prefixed
+     * sources -- {@code TicketmasterService} stores the EVENT TITLE, not a catalog artist name,
+     * in {@code artistName} (label is the event name; it falls back to the artist name only when
+     * blank) -- e.g. "A Very Merry Symphony ft. Austin Symphony Orchestra" for a real show the
+     * owner has today, a string that is not, and never will be, in the catalog. A blanket filter
+     * would hide every Ticketmaster/Bandsintown show the owner has.
+     * <p>
+     * One method for every place this rule applies -- the display list, {@code hiddenCount}
+     * (both in {@link #populateShows}), and {@link #resolveVisibleShows}'s focus-successor search
+     * -- so they can't drift apart on it again. That drift is #220's whole reason for existing:
+     * #206 introduced this filter in exactly one of the three places, and nothing caught the
+     * other two.
+     */
+    private static List<Show> visibleToOwner(List<Show> shows, Set<String> activeArtistNames) {
+        return shows.stream()
+                .filter(s -> !s.getSource().startsWith("venue:")
+                        || activeArtistNames.contains(ArtistNameNormalizer.normalize(s.getArtistName())))
+                .toList();
     }
 
     private static Comparator<Show> comparatorFor(String sort) {
@@ -315,14 +345,21 @@ public class ShowController {
         return ArtistStatus.REJECTED;
     }
 
-    /** The default (non-hidden) list in current render order -- used to resolve the post-hide focus successor before the acted-on row is mutated out of it. */
+    /**
+     * The default (non-hidden) list in current render order -- used to resolve the post-hide focus
+     * successor before the acted-on row is mutated out of it. Applies the same venue-follow filter
+     * as {@link #populateShows} (issue #220 Finding 2) via {@link #visibleToOwner}, so a row the
+     * filter would remove from the rendered page is never offered as the successor -- before this
+     * fix, {@link #focusable} still caught the bad pick and degraded to the region anchor (no
+     * keyboard trap), but that discarded a real, visible successor further down the list.
+     */
     private List<Show> resolveVisibleShows(String owner, String sort) {
         SearchSettings settings = settingsService.getOrCreateSettings(owner);
         LocalDateTime start = LocalDateTime.now();
         LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
         List<Show> shows = showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(owner, start, end);
         shows.sort(comparatorFor(sort));
-        return shows;
+        return visibleToOwner(shows, activeArtistNames(owner));
     }
 
     private static String describeShow(Show show) {

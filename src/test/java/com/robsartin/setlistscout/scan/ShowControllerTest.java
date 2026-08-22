@@ -68,8 +68,13 @@ class ShowControllerTest {
     // directly. Real generated-id behavior is covered by the Testcontainers-backed
     // web.ShowHideActionsTest and scan.HiddenShowSurvivesRescanTest.
     private static Show show(String artistName) {
+        return show(artistName, "ticketmaster");
+    }
+
+    /** Same as {@link #show(String)}, but with an explicit source -- for #220's venue-filter fixtures. */
+    private static Show show(String artistName, String source) {
         Show show = new Show(artistName, LocalDateTime.now().plusDays(5), "Moody Center", "Austin",
-                BigDecimal.TEN, "ticketmaster", null, Show.Kind.MUSIC);
+                BigDecimal.TEN, source, null, Show.Kind.MUSIC);
         show.setOwner(OWNER);
         return show;
     }
@@ -171,6 +176,138 @@ class ShowControllerTest {
         assertThat(model.getAttribute("showHidden")).isEqualTo(true);
         verify(showRepository, never())
                 .findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(anyString(), any(), any());
+    }
+
+    // ---- issue #220: hiddenCount respects the venue-follow filter --------------------------
+    //
+    // Owner decision recorded in the brief: hiddenCount means "shows you hid that you could
+    // still see" -- it applies the SAME venue-follow filter #206 gave the display list, so the
+    // "show hidden" toggle always reveals exactly the number it promised.
+    //
+    // Each test below asserts a NON-ZERO expected count. That's deliberate, not incidental: an
+    // unstubbed findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull would make hiddenCount
+    // silently read as 0 under Mockito's default List answer, which would make an "excludes ->
+    // expect 0" test pass vacuously whether or not the fix landed -- exactly the false-green shape
+    // CLAUDE.md warns about elsewhere in this suite. Pairing every "should be excluded" row with a
+    // control row that must still be counted keeps every assertion here non-zero, so a controller
+    // that hasn't been taught to call the new repository method at all fails loudly (0 vs. an
+    // expected count > 0), not silently.
+
+    @Test
+    @DisplayName("issue #220: hiddenCount excludes a hidden venue show whose performer is not an active artist")
+    void hiddenCountExcludesVenueShowForInactivePerformer() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Show hiddenInactiveVenueShow = show("Unfollowed Act", "venue:www.capcitycomedy.com");
+        hiddenInactiveVenueShow.setHiddenAt(Instant.now());
+        // Control row: unrelated to the venue filter (ticketmaster source), must always count --
+        // its presence is what makes "hiddenCount == 1" (not 0) prove exclusion actually happened.
+        Show hiddenControl = show("Wilco");
+        hiddenControl.setHiddenAt(Instant.now());
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(
+                anyString(), any(), any())).thenReturn(
+                        new java.util.ArrayList<>(List.of(hiddenInactiveVenueShow, hiddenControl)));
+        // No active artists stubbed -- findByOwnerAndStatusIn defaults to empty (Mockito), so
+        // "Unfollowed Act" has nothing to match against.
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        assertThat(model.getAttribute("hiddenCount")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("issue #220: hiddenCount includes a hidden venue show whose performer is an active artist")
+    void hiddenCountIncludesVenueShowForActivePerformer() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Show hiddenActiveVenueShow = show("Nick Mullen", "venue:www.capcitycomedy.com");
+        hiddenActiveVenueShow.setHiddenAt(Instant.now());
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(hiddenActiveVenueShow)));
+        Artist active = artistWithId(1L, "Nick Mullen", ArtistSource.VENUE_EXPANSION, ArtistStatus.APPROVED);
+        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+                .thenReturn(List.of(active));
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        assertThat(model.getAttribute("hiddenCount")).isEqualTo(1L);
+    }
+
+    /**
+     * The regression guard named in #220's brief: {@code TicketmasterService} stores the EVENT
+     * TITLE, not a catalog artist name, in {@code artistName} (see {@code
+     * ShowController#populateShows}'s own comment) -- "A Very Merry Symphony ft. Austin Symphony
+     * Orchestra" is a real hidden-able show in production, and that string is not, and never will
+     * be, a catalog artist name. If the venue-follow filter were ever applied broadly instead of
+     * gated on the {@code venue:} source prefix, this row -- and all 47 of the owner's other
+     * Ticketmaster shows -- would silently stop being counted as hidden.
+     */
+    @Test
+    @DisplayName("issue #220 regression guard: hiddenCount includes a hidden Ticketmaster show whose artist_name is an event title")
+    void hiddenCountIncludesTicketmasterEventTitleShow() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+        Show hiddenTicketmasterShow = show("A Very Merry Symphony ft. Austin Symphony Orchestra", "ticketmaster");
+        hiddenTicketmasterShow.setHiddenAt(Instant.now());
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(hiddenTicketmasterShow)));
+        // No active artists stubbed -- this event-title string would never match a catalog name
+        // anyway, which is exactly the point: it must count regardless of activeArtistNames.
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        assertThat(model.getAttribute("hiddenCount")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("issue #220: with showHidden=true, the extra rows revealed equal hiddenCount from the toggle-off render")
+    void hiddenCountMatchesExtraRowsRevealedByToggle() {
+        SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
+        when(settingsService.getOrCreateSettings(OWNER)).thenReturn(settings);
+        Show visible = show("Wilco", "ticketmaster");
+        Show hiddenTicketmaster = show("A Very Merry Symphony ft. Austin Symphony Orchestra", "ticketmaster");
+        hiddenTicketmaster.setHiddenAt(Instant.now());
+        Show hiddenActiveVenue = show("Nick Mullen", "venue:www.capcitycomedy.com");
+        hiddenActiveVenue.setHiddenAt(Instant.now());
+        Show hiddenInactiveVenue = show("Unfollowed Act", "venue:www.capcitycomedy.com");
+        hiddenInactiveVenue.setHiddenAt(Instant.now());
+
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(visible)));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNotNull(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(
+                        List.of(hiddenTicketmaster, hiddenActiveVenue, hiddenInactiveVenue)));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(
+                        List.of(visible, hiddenTicketmaster, hiddenActiveVenue, hiddenInactiveVenue)));
+        Artist active = artistWithId(1L, "Nick Mullen", ArtistSource.VENUE_EXPANSION, ArtistStatus.APPROVED);
+        when(artistRepository.findByOwnerAndStatusIn(OWNER, List.of(ArtistStatus.SEED, ArtistStatus.APPROVED)))
+                .thenReturn(List.of(active));
+
+        Model toggleOffModel = new ExtendedModelMap();
+        controller.shows("eventDate", false, toggleOffModel);
+        long hiddenCount = (long) toggleOffModel.getAttribute("hiddenCount");
+        int toggleOffRowCount = ((List<?>) toggleOffModel.getAttribute("shows")).size();
+
+        Model toggleOnModel = new ExtendedModelMap();
+        controller.shows("eventDate", true, toggleOnModel);
+        int toggleOnRowCount = ((List<?>) toggleOnModel.getAttribute("shows")).size();
+
+        // hiddenInactiveVenue must count in neither number -- it's the same trap as the regression
+        // guard above, just checked from the "toggle can't reveal what the count promised" angle.
+        assertThat(hiddenCount).isEqualTo(2L);
+        assertThat(toggleOnRowCount - toggleOffRowCount)
+                .as("the extra rows the toggle reveals must equal hiddenCount from the toggle-off render")
+                .isEqualTo((int) hiddenCount);
     }
 
     @Test
