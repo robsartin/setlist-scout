@@ -132,6 +132,16 @@
                 </form>
             </div>
             <div class="acts">
+                <!--/* Rescan (issue #246): re-dues just THIS artist's scan_job rows instead of the
+                       owner's entire ~6,400-job queue (the whole-fleet /scan-now on shows.html) --
+                       the only way to see a configuration change (site URL, default venue, a name
+                       fix) take effect without waiting up to two weeks. Renders for every active
+                       row regardless of status, unlike Remove/Remove from seed below, which are
+                       mutually-exclusive alternates gated on status. Plain POST + redirect, same
+                       as Remove -- no hx-* attributes, matching "the app ships no custom JS". */-->
+                <form class="inline" th:action="@{'/artists/' + ${a.id} + '/scan-now'}" method="post">
+                    <button type="submit" class="btn-sm" th:aria-label="'Rescan ' + ${a.name}">Rescan</button>
+                </form>
                 <!--/* Remove = reject (APPROVED only): drops off the active list, stops scanning, reversible via Unreject.
                        Plain redirect since it updates both the active and rejected sections. */-->
                 <form class="inline remove" th:if="${a.status.name() == 'APPROVED'}"

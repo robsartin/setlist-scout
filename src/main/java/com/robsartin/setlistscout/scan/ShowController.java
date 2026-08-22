@@ -11,10 +11,12 @@ import com.robsartin.setlistscout.settings.SettingsService;
 import com.robsartin.setlistscout.shared.AdminGuard;
 import com.robsartin.setlistscout.shared.CsvResponses;
 import com.robsartin.setlistscout.shared.CurrentUser;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -253,6 +255,47 @@ public class ShowController {
             return "shows :: showsRegion";
         }
         return "redirect:/";
+    }
+
+    /**
+     * Re-due only ONE artist's own {@code scan_job} rows (issue #246). {@link #scanNow} above
+     * re-dues the owner's ENTIRE job set (~6,400 for the primary owner today), so there was
+     * previously no way to see the effect of a configuration change -- a site URL, a default
+     * venue, a name fix -- on a single artist without re-queuing everything or waiting up to two
+     * weeks for that artist's natural cadence (issue #218 surfaced exactly this).
+     * <p>
+     * Lives here, not on {@code catalog.ArtistController} where the triggering button actually
+     * renders (in {@code artists.html}'s {@code .acts} hover-action group, beside Remove):
+     * {@code scan} already depends on {@code catalog} throughout this class ({@link
+     * #artistRepository} below), and giving {@code ArtistController} a dependency back on {@link
+     * ScanJobRepository} would create a {@code catalog}<->{@code scan} module cycle that {@code
+     * ModularityTests} rejects (ADR-0021/0022: cross-module writes go through the owning module's
+     * own API or an event, never a reach-in). Thymeleaf's {@code th:action} doesn't care which
+     * controller class answers a URL, so the route still reads {@code /artists/{id}/scan-now}
+     * either way -- this is the one {@code /artists/{id}/*} action that doesn't live on {@code
+     * ArtistController}, for that reason; {@code review.ReviewController#remove}/{@code #unreject}
+     * are the existing precedent for a sibling module owning one of these routes.
+     * <p>
+     * {@code findByIdAndOwner} then a 404 on empty -- the same resolve-or-404 shape as {@code
+     * ArtistController#graph} -- rather than the silent no-op {@code ifPresent} some sibling
+     * per-artist actions use: those no-op into "nothing changed", which reads identically to
+     * success; this action has no per-row state to show a no-op INTO, so a 404 is the only way to
+     * signal "that wasn't yours" at all. {@link ScanJobRepository#redueForArtist} mirrors {@link
+     * ScanJobRepository#redueAll}'s version-bump/{@code SCHEDULED}-reset exactly -- see its
+     * Javadoc for why each part is load-bearing.
+     * <p>
+     * Plain {@code POST} + redirect, no {@code HX-Request} branch -- matching the neighbouring
+     * Remove / Remove-from-seed / unreject forms in {@code artists.html}'s {@code .acts} group
+     * (none of those are htmx-wired either, unlike the site-url/default-venue forms above them).
+     * The app ships no custom JavaScript (CLAUDE.md); this needs none.
+     */
+    @PostMapping("/artists/{id}/scan-now")
+    public String scanNowForArtist(@PathVariable Long id) {
+        String owner = currentUser.email();
+        artistRepository.findByIdAndOwner(id, owner)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        scanJobRepository.redueForArtist(owner, id, Instant.now());
+        return "redirect:/artists";
     }
 
     /**

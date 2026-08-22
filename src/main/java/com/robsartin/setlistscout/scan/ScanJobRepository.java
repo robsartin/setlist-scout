@@ -80,4 +80,41 @@ public interface ScanJobRepository extends JobRepository<ScanJob> {
             """, nativeQuery = true)
     int redueAll(@Param("owner") String owner,
                   @Param("now") Instant now);
+
+    /**
+     * Version-safe redue of a single artist's scan jobs (#246): the same contract as {@link
+     * #redueAll} above -- {@code SCHEDULED}/{@code attempts = 0}/{@code claimed_at = NULL} so a
+     * {@code FAILED} job becomes claimable again ({@code claimDue} hard-filters on {@code status =
+     * 'SCHEDULED'}), and {@code version = version + 1} so a poller holding one of these rows
+     * in-flight conflicts on its next {@code save()} ({@code ScanPoller} catches that
+     * {@code OptimisticLockingFailureException} and skips its stale reschedule) instead of
+     * silently overwriting this redue -- issued while a scan is running is exactly when someone
+     * would click this button. Scoped to {@code (owner, artist_id)} instead of the whole owner, so
+     * re-scanning one artist after a configuration change (site URL, default venue, a name fix)
+     * doesn't touch the other ~6,400 jobs an owner may have. A narrow sibling to {@code redueAll}
+     * rather than an optional {@code artistId} parameter on it -- two explicit queries read better
+     * than one with a conditional predicate, and it keeps {@code redueAll}'s own SQL untouched.
+     * <p>
+     * {@code @Transactional} for the same reason as {@code redueAll}: the caller
+     * ({@code ShowController#scanNowForArtist}) is a plain {@code @PostMapping} handler with no
+     * ambient transaction, and this {@code @Modifying} bulk query needs one to execute.
+     * <p>
+     * Verified against real Postgres in {@code ScanJobRepositoryTest} to actually scope by BOTH
+     * columns, not just one: a query missing the {@code artist_id} predicate would re-due every
+     * job the owner has and still satisfy a single-artist "it worked" assertion (caught by
+     * {@code redueForArtistDoesNotTouchAnotherArtistsJob}, which asserts a second artist's job is
+     * untouched); a query missing the {@code owner} predicate would leak across accounts (caught
+     * by {@code redueForArtistDoesNotTouchAnotherOwnersJobForTheSameArtistId}).
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE scan_job
+               SET next_due_at = :now, status = 'SCHEDULED', attempts = 0, claimed_at = NULL,
+                   version = version + 1
+             WHERE owner = :owner AND artist_id = :artistId
+            """, nativeQuery = true)
+    int redueForArtist(@Param("owner") String owner,
+                        @Param("artistId") Long artistId,
+                        @Param("now") Instant now);
 }
