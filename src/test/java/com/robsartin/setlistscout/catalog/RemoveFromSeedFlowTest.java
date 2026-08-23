@@ -132,7 +132,7 @@ class RemoveFromSeedFlowTest extends AbstractPostgresIntegrationTest {
         awaitUntil(() -> expandJobRepository.findByOwnerAndArtistId(OWNER, artistId),
                 jobs -> jobs.size() == relationSources.size());
 
-        String view = controller().removeFromSeed(artistId, null, new ConcurrentModel());
+        String view = controller().removeFromSeed(null, artistId, null, new ConcurrentModel());
 
         assertThat(view).isEqualTo("redirect:/artists");
         Artist removed = artistRepository.findByIdAndOwner(artistId, OWNER).orElseThrow();
@@ -157,7 +157,7 @@ class RemoveFromSeedFlowTest extends AbstractPostgresIntegrationTest {
                 jobs -> jobs.size() == relationSources.size());
 
         when(currentUser.email()).thenReturn("intruder@example.com");
-        String view = controller().removeFromSeed(artistId, null, new ConcurrentModel());
+        String view = controller().removeFromSeed(null, artistId, null, new ConcurrentModel());
 
         assertThat(view).isEqualTo("redirect:/artists");
         Artist unchanged = artistRepository.findByIdAndOwner(artistId, OWNER).orElseThrow();

@@ -154,7 +154,7 @@ class ArtistSiteUrlChangeFlowTest extends AbstractPostgresIntegrationTest {
         Long otherArtistId = seedArtist("Other Artist");
         // Establish the ORIGINAL url first (old value null -> no event -- just a baseline, same as
         // MusicBrainz's first-ever resolve would do).
-        controller().setSiteUrl(asoId, "https://www.austinsymphony.org", null, new ConcurrentModel());
+        controller().setSiteUrl(asoId, "https://www.austinsymphony.org", null, null, new ConcurrentModel());
 
         LocalDateTime when = LocalDateTime.now().plusDays(40).truncatedTo(ChronoUnit.SECONDS);
         Long staleShowId = saveShow(OWNER, asoId, "Austin Symphony Orchestra", when,
@@ -168,7 +168,7 @@ class ArtistSiteUrlChangeFlowTest extends AbstractPostgresIntegrationTest {
         Long hiddenStaleShowId = saveShow(OWNER, asoId, "Austin Symphony Orchestra", when.plusHours(4),
                 "Austin Symphony Orchestra", "band-site:www.austinsymphony.org", true);
 
-        String view = controller().setSiteUrl(asoId, "https://austinsymphony.org/season-announcement/",
+        String view = controller().setSiteUrl(asoId, "https://austinsymphony.org/season-announcement/", null,
                 null, new ConcurrentModel());
 
         assertThat(view).isEqualTo("redirect:/artists");
@@ -200,21 +200,21 @@ class ArtistSiteUrlChangeFlowTest extends AbstractPostgresIntegrationTest {
             + "not just idle, so this negative isn't a false green from a broken listener")
     void settingTheSameUrlAgainRetiresNothing() {
         Long targetId = seedArtist("Same URL Target");
-        controller().setSiteUrl(targetId, "https://www.example-target.org", null, new ConcurrentModel());
+        controller().setSiteUrl(targetId, "https://www.example-target.org", null, null, new ConcurrentModel());
         Long targetShowId = saveShow(OWNER, targetId, "Same URL Target",
                 LocalDateTime.now().plusDays(41).truncatedTo(ChronoUnit.SECONDS), "Some Venue",
                 "band-site:www.example-target.org", false);
 
         Long controlId = seedArtist("Same URL Control");
-        controller().setSiteUrl(controlId, "https://www.control-old.org", null, new ConcurrentModel());
+        controller().setSiteUrl(controlId, "https://www.control-old.org", null, null, new ConcurrentModel());
         Long controlShowId = saveShow(OWNER, controlId, "Same URL Control",
                 LocalDateTime.now().plusDays(42).truncatedTo(ChronoUnit.SECONDS), "Control Venue",
                 "band-site:www.control-old.org", false);
-        controller().setSiteUrl(controlId, "https://control-new.org", null, new ConcurrentModel());
+        controller().setSiteUrl(controlId, "https://control-new.org", null, null, new ConcurrentModel());
         awaitUntil(() -> showRepository.findById(controlShowId), Optional::isEmpty);
 
         // The no-op under test: re-setting the SAME url for the target artist.
-        controller().setSiteUrl(targetId, "https://www.example-target.org", null, new ConcurrentModel());
+        controller().setSiteUrl(targetId, "https://www.example-target.org", null, null, new ConcurrentModel());
         Long incomplete = awaitQuiescence(jdbcTemplate);
         assertThat(incomplete).as("every listener triggered by this test has finished").isZero();
 
@@ -234,15 +234,15 @@ class ArtistSiteUrlChangeFlowTest extends AbstractPostgresIntegrationTest {
                 "band-site:first-set-target.org", false);
 
         Long controlId = seedArtist("First Set Control");
-        controller().setSiteUrl(controlId, "https://www.control2-old.org", null, new ConcurrentModel());
+        controller().setSiteUrl(controlId, "https://www.control2-old.org", null, null, new ConcurrentModel());
         Long controlShowId = saveShow(OWNER, controlId, "First Set Control",
                 LocalDateTime.now().plusDays(44).truncatedTo(ChronoUnit.SECONDS), "Control Venue",
                 "band-site:www.control2-old.org", false);
-        controller().setSiteUrl(controlId, "https://control2-new.org", null, new ConcurrentModel());
+        controller().setSiteUrl(controlId, "https://control2-new.org", null, null, new ConcurrentModel());
         awaitUntil(() -> showRepository.findById(controlShowId), Optional::isEmpty);
 
         // The no-op under test: FIRST-time set for the target artist (old value was null).
-        controller().setSiteUrl(targetId, "https://first-set-target.org", null, new ConcurrentModel());
+        controller().setSiteUrl(targetId, "https://first-set-target.org", null, null, new ConcurrentModel());
         Long incomplete = awaitQuiescence(jdbcTemplate);
         assertThat(incomplete).as("every listener triggered by this test has finished").isZero();
 
@@ -258,7 +258,7 @@ class ArtistSiteUrlChangeFlowTest extends AbstractPostgresIntegrationTest {
         Long artistId = seedArtist("Rescan Repopulate Artist");
         String oldUrl = "https://www.rescan-repop.example";
         String newUrl = "https://rescan-repop.example/season/";
-        controller().setSiteUrl(artistId, oldUrl, null, new ConcurrentModel());
+        controller().setSiteUrl(artistId, oldUrl, null, null, new ConcurrentModel());
         // city left null -- BandSiteShowSource#search skips distance filtering entirely when the
         // owner's settings carry no city, so this test needs no real geocoding call.
         searchSettingsRepository.save(new SearchSettings(OWNER, null, null, 50, 6));
@@ -267,7 +267,7 @@ class ArtistSiteUrlChangeFlowTest extends AbstractPostgresIntegrationTest {
                 LocalDateTime.now().plusDays(45).truncatedTo(ChronoUnit.SECONDS), "Old Venue",
                 "band-site:www.rescan-repop.example", false);
 
-        controller().setSiteUrl(artistId, newUrl, null, new ConcurrentModel());
+        controller().setSiteUrl(artistId, newUrl, null, null, new ConcurrentModel());
         awaitUntil(() -> showRepository.findById(staleShowId), Optional::isEmpty);
 
         LocalDateTime freshDate = LocalDateTime.now().plusDays(46).truncatedTo(ChronoUnit.SECONDS);

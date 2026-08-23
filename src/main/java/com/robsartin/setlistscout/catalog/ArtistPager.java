@@ -55,26 +55,54 @@ public class ArtistPager {
      * be non-blank -- see the class doc for the tie-break when both are somehow present. Neither
      * present means the first page.
      */
-    public ActivePage page(String owner, String after, String before) {
+    public ActivePage page(String owner, String after, String before, String query) {
         if (after != null && !after.isBlank()) {
-            return nextPage(owner, after);
+            return nextPage(owner, after, query);
         }
         if (before != null && !before.isBlank()) {
-            return previousPage(owner, before);
+            return previousPage(owner, before, query);
         }
-        return firstPage(owner);
+        return firstPage(owner, query);
     }
 
-    private ActivePage firstPage(String owner) {
-        List<Artist> fetched = artistRepository.findActiveFirstPage(owner, ACTIVE_STATUSES, pageSize + 1);
+    /**
+     * #250: the filter is applied inside the keyset queries, so a filtered list keeps #174's
+     * guarantee (no duplicate, no skipped row while the list mutates). Deliberately NOT
+     * "fetch everything matching, then page in memory" -- that would reintroduce exactly the
+     * whole-list load this page was built to avoid, and on a 3,000-row catalog it would appear
+     * to work right up until it didn't.
+     */
+    private List<Artist> fetchFirst(String owner, String query, int limit) {
+        return ArtistSearchTerm.isSearch(query)
+                ? artistRepository.findActiveMatchingFirstPage(owner, ACTIVE_STATUSES,
+                        ArtistSearchTerm.likePattern(query), limit)
+                : artistRepository.findActiveFirstPage(owner, ACTIVE_STATUSES, limit);
+    }
+
+    private List<Artist> fetchAfter(String owner, String query, String cursor, int limit) {
+        return ArtistSearchTerm.isSearch(query)
+                ? artistRepository.findActiveMatchingAfter(owner, ACTIVE_STATUSES,
+                        ArtistSearchTerm.likePattern(query), cursor, limit)
+                : artistRepository.findActiveAfter(owner, ACTIVE_STATUSES, cursor, limit);
+    }
+
+    private List<Artist> fetchBefore(String owner, String query, String cursor, int limit) {
+        return ArtistSearchTerm.isSearch(query)
+                ? artistRepository.findActiveMatchingBefore(owner, ACTIVE_STATUSES,
+                        ArtistSearchTerm.likePattern(query), cursor, limit)
+                : artistRepository.findActiveBefore(owner, ACTIVE_STATUSES, cursor, limit);
+    }
+
+    private ActivePage firstPage(String owner, String query) {
+        List<Artist> fetched = fetchFirst(owner, query, pageSize + 1);
         boolean hasNext = fetched.size() > pageSize;
         List<Artist> page = hasNext ? fetched.subList(0, pageSize) : fetched;
         String nextCursor = hasNext ? lastCursor(page) : null;
-        return new ActivePage(page, hasNext, false, nextCursor, null);
+        return new ActivePage(page, hasNext, false, nextCursor, null, query);
     }
 
-    private ActivePage nextPage(String owner, String cursor) {
-        List<Artist> fetched = artistRepository.findActiveAfter(owner, ACTIVE_STATUSES, cursor, pageSize + 1);
+    private ActivePage nextPage(String owner, String cursor, String query) {
+        List<Artist> fetched = fetchAfter(owner, query, cursor, pageSize + 1);
         boolean hasNext = fetched.size() > pageSize;
         List<Artist> page = hasNext ? fetched.subList(0, pageSize) : fetched;
         String nextCursor = hasNext ? lastCursor(page) : null;
@@ -83,11 +111,11 @@ public class ArtistPager {
         // reproduces exactly the page this request came from, which is the correct "previous" from
         // here regardless of whether this page has any rows of its own.
         String previousCursor = page.isEmpty() ? cursor : firstCursor(page);
-        return new ActivePage(page, hasNext, true, nextCursor, previousCursor);
+        return new ActivePage(page, hasNext, true, nextCursor, previousCursor, query);
     }
 
-    private ActivePage previousPage(String owner, String cursor) {
-        List<Artist> fetchedDescending = artistRepository.findActiveBefore(owner, ACTIVE_STATUSES, cursor, pageSize + 1);
+    private ActivePage previousPage(String owner, String cursor, String query) {
+        List<Artist> fetchedDescending = fetchBefore(owner, query, cursor, pageSize + 1);
         boolean hasPrevious = fetchedDescending.size() > pageSize;
         List<Artist> trimmedDescending = hasPrevious ? fetchedDescending.subList(0, pageSize) : fetchedDescending;
         List<Artist> page = new ArrayList<>(trimmedDescending);
@@ -96,7 +124,7 @@ public class ArtistPager {
         // Same stale-cursor fallback as nextPage, mirrored: an empty result hands back the original
         // cursor as the "next" anchor, so the link still returns to where the user came from.
         String nextCursor = page.isEmpty() ? cursor : lastCursor(page);
-        return new ActivePage(page, true, hasPrevious, nextCursor, previousCursor);
+        return new ActivePage(page, true, hasPrevious, nextCursor, previousCursor, query);
     }
 
     private static String firstCursor(List<Artist> page) {
