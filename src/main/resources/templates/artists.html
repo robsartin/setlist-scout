@@ -58,6 +58,18 @@
     </form>
 
     <h2>Active list (seed + approved)</h2>
+    <!--/* #250: a plain GET form. No custom JS anywhere in this app (CLAUDE.md), and a GET keeps
+           the result bookmarkable and the back button honest -- the same reasoning as the #174
+           pagination links below. Deliberately NOT hx-boosted onto #active-section: the search
+           belongs in the URL, and a full navigation is the behaviour a bookmarked or shared
+           /artists?q=... has to produce anyway. */-->
+    <form class="scope-edit" th:action="@{/artists}" method="get" role="search">
+        <label for="artist-search">Search artists</label>
+        <input id="artist-search" type="search" name="q" th:value="${query}"
+               placeholder="name or part of a name">
+        <button type="submit" class="btn btn-sm">Search</button>
+        <a th:if="${!#strings.isEmpty(query)}" class="btn btn-sm" th:href="@{/artists}">Clear</a>
+    </form>
     <!--/* activeSection is a swap target so a manual add can refresh it without a reload.
            Deliberately NO focus anchor here (no tabindex/autofocus), unlike shows.html's
            showsRegion or shared.html's shared-content: the add-artist form (issue #175) lives
@@ -109,6 +121,10 @@
                 </p>
                 <form class="inline" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
                       th:action="@{'/artists/' + ${a.id} + '/site-url'}" method="post">
+                    <!--/* #250: carries the active search across this swap. Without it, editing a
+                           row while a search is active answers by replacing the filtered list with
+                           the unfiltered one -- the user's filter silently gone. */-->
+                    <input type="hidden" name="q" th:value="${query}"/>
                     <label class="visually-hidden" th:for="'site-url-' + ${a.id}" th:text="'Official site URL for ' + ${a.name}">Official site URL</label>
                     <input type="url" th:id="'site-url-' + ${a.id}" name="url" th:value="${a.officialSiteUrl}"
                            placeholder="official site URL" size="22"/>
@@ -122,6 +138,10 @@
                        above, not hover-gated for the same reason. */-->
                 <form class="inline" hx-boost="true" hx-target="#active-section" hx-swap="outerHTML" hx-push-url="false"
                       th:action="@{'/artists/' + ${a.id} + '/default-venue'}" method="post">
+                    <!--/* #250: carries the active search across this swap. Without it, editing a
+                           row while a search is active answers by replacing the filtered list with
+                           the unfiltered one -- the user's filter silently gone. */-->
+                    <input type="hidden" name="q" th:value="${query}"/>
                     <label class="visually-hidden" th:for="'default-venue-name-' + ${a.id}" th:text="'Default venue name for ' + ${a.name}">Default venue name</label>
                     <input type="text" th:id="'default-venue-name-' + ${a.id}" name="name" th:value="${a.defaultVenueName}"
                            placeholder="default venue name" size="18"/>
@@ -156,7 +176,31 @@
                 </form>
             </div>
         </div>
-        <p th:if="${#lists.isEmpty(active)}" class="note">No artists yet -- add one above.</p>
+        <!--/* #250: an empty list and an empty RESULT are different statements. "No artists yet"
+               during a search would be simply false. */-->
+        <p th:if="${#lists.isEmpty(active) and #strings.isEmpty(query)}" class="note">No artists yet -- add one above.</p>
+        <p th:if="${#lists.isEmpty(active) and !#strings.isEmpty(query)}" class="note">
+            No active artists match &quot;<span th:text="${query}">query</span>&quot;.
+        </p>
+
+        <!--/* #250: matches the owner already rejected. With 32,201 rejected rows, a bare "no
+               results" is the misleading answer far more often than the true one -- "you decided
+               about this one already" is what someone needs before re-adding a name. Informational
+               only: capped, not paged, and never mixed into the active list or its count. */-->
+        <div th:if="${!#lists.isEmpty(inactiveMatches)}" class="scope">
+            <h3>Previously rejected or removed</h3>
+            <p class="note">Not in your active list. Shown because they match your search.</p>
+            <div class="row-listing" th:each="a : ${inactiveMatches}">
+                <div class="row-main">
+                    <h4 class="row-name"><span th:text="${a.name}">Name</span></h4>
+                    <p class="note">
+                        <span th:text="${a.status}">REJECTED</span>
+                        <span th:if="${a.discoveredVia != null}"
+                              th:text="' -- found via ' + ${a.discoveredVia}"> -- found via X</span>
+                    </p>
+                </div>
+            </div>
+        </div>
         <!--/* Issue #174: keyset pagination controls. Real th:href links (work with the non-JS
                fallback -- a full navigation to GET /artists?after=... or ?before=... renders the
                same page server-side) enhanced with th:hx-get (Thymeleaf only resolves expressions
@@ -175,12 +219,12 @@
         <p class="note" id="active-position" th:text="${activePage.positionSummary()}">Showing 20 artists, Alpha Band to Zulu Band.</p>
         <nav class="pagination" aria-label="Active list pages" th:if="${activePage.hasPrevious or activePage.hasNext}">
             <a th:if="${activePage.hasPrevious}" id="active-prev" class="btn btn-sm"
-               th:href="@{/artists(before=${activePage.previousCursor})}"
-               th:hx-get="@{/artists(before=${activePage.previousCursor})}"
+               th:href="@{/artists(before=${activePage.previousCursor},q=${query})}"
+               th:hx-get="@{/artists(before=${activePage.previousCursor},q=${query})}"
                hx-target="#active-section" hx-swap="outerHTML" hx-push-url="true">Previous page</a>
             <a th:if="${activePage.hasNext}" id="active-next" class="btn btn-sm"
-               th:href="@{/artists(after=${activePage.nextCursor})}"
-               th:hx-get="@{/artists(after=${activePage.nextCursor})}"
+               th:href="@{/artists(after=${activePage.nextCursor},q=${query})}"
+               th:hx-get="@{/artists(after=${activePage.nextCursor},q=${query})}"
                hx-target="#active-section" hx-swap="outerHTML" hx-push-url="true">Next page</a>
         </nav>
     </div>

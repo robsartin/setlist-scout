@@ -16,7 +16,7 @@ import java.util.List;
  * construction.
  */
 public record ActivePage(List<Artist> artists, boolean hasNext, boolean hasPrevious,
-                          String nextCursor, String previousCursor) {
+                          String nextCursor, String previousCursor, String query) {
 
     /**
      * The current-position sentence rendered visibly next to the pagination controls AND announced
@@ -25,14 +25,19 @@ public record ActivePage(List<Artist> artists, boolean hasNext, boolean hasPrevi
      * matching visible-empty-state and announcement text.
      */
     public String positionSummary() {
+        // #250: the same sentence has to stay true when a search narrows the list. "No active
+        // artists." while a query is active reads as "your list is empty" -- a different claim,
+        // and a wrong one. Unfiltered wording is byte-for-byte what #174 shipped.
+        boolean searching = ArtistSearchTerm.isSearch(query);
+        String matching = searching ? " matching \"" + query.trim() + "\"" : "";
         if (artists.isEmpty()) {
-            return "No active artists.";
+            return searching ? "No active artists match \"" + query.trim() + "\"." : "No active artists.";
         }
         if (artists.size() == 1) {
-            return "Showing the only active artist: " + artists.get(0).getName() + ".";
+            return "Showing the only active artist" + matching + ": " + artists.get(0).getName() + ".";
         }
         String first = artists.get(0).getName();
         String last = artists.get(artists.size() - 1).getName();
-        return "Showing " + artists.size() + " artists, " + first + " to " + last + ".";
+        return "Showing " + artists.size() + " artists" + matching + ", " + first + " to " + last + ".";
     }
 }

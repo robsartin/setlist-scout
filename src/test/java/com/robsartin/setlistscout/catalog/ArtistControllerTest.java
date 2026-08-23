@@ -111,7 +111,7 @@ class ArtistControllerTest {
                 .thenReturn(List.of(active));
 
         Model model = new ConcurrentModel();
-        controller.list(null, null, null, null, model);
+        controller.list(null, null, null, null, null, model);
 
         assertThat((List<Artist>) model.getAttribute("active"))
                 .extracting(Artist::getName).containsExactly("Wilco");
@@ -126,7 +126,7 @@ class ArtistControllerTest {
         when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
 
         Model model = new ConcurrentModel();
-        String view = controller.list(null, null, null, null, model);
+        String view = controller.list(null, null, null, null, null, model);
 
         assertThat(view).isEqualTo("artists");
         assertThat(model.getAttribute("announceActivePage")).isEqualTo(false);
@@ -139,7 +139,7 @@ class ArtistControllerTest {
         when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
 
         Model model = new ConcurrentModel();
-        String view = controller.list(null, null, "true", null, model);
+        String view = controller.list(null, null, null, "true", null, model);
 
         assertThat(view).isEqualTo("artists :: activeSection");
         assertThat(model.getAttribute("announceActivePage")).isEqualTo(true);
@@ -153,7 +153,7 @@ class ArtistControllerTest {
         when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
 
         Model model = new ConcurrentModel();
-        String view = controller.list(null, null, "true", "true", model);
+        String view = controller.list(null, null, null, "true", "true", model);
 
         assertThat(view).isEqualTo("artists");
         assertThat(model.getAttribute("announceActivePage")).isEqualTo(false);
@@ -169,7 +169,7 @@ class ArtistControllerTest {
                 .thenReturn(List.of(beta));
 
         Model model = new ConcurrentModel();
-        controller.list("alpha", null, "true", null, model);
+        controller.list("alpha", null, null, "true", null, model);
 
         ActivePage page = (ActivePage) model.getAttribute("activePage");
         assertThat(page.artists()).extracting(Artist::getName).containsExactly("Beta");
@@ -186,7 +186,7 @@ class ArtistControllerTest {
                 .thenReturn(List.of(bravo, alpha)); // DESCENDING, as findActiveBefore returns it
 
         Model model = new ConcurrentModel();
-        controller.list(null, "charlie", "true", null, model);
+        controller.list(null, "charlie", null, "true", null, model);
 
         ActivePage page = (ActivePage) model.getAttribute("activePage");
         assertThat(page.artists()).extracting(Artist::getName).containsExactly("Alpha", "Bravo");
@@ -200,7 +200,7 @@ class ArtistControllerTest {
                 .thenReturn(List.of(new Artist("Only One", ArtistSource.SEED_LIST, ArtistStatus.SEED, null, null)));
 
         Model model = new ConcurrentModel();
-        controller.list(null, null, null, null, model);
+        controller.list(null, null, null, null, null, model);
 
         ActivePage page = (ActivePage) model.getAttribute("activePage");
         assertThat(page.hasNext()).isFalse();
@@ -261,7 +261,7 @@ class ArtistControllerTest {
     @DisplayName("setSiteUrl delegates to ArtistSiteUrlService, trimmed -- issue #248: that service, "
             + "never a direct repository save, is what lets a URL change retire the artist's stale shows")
     void setSiteUrlDelegatesToSiteUrlService() {
-        controller.setSiteUrl(7L, "  https://dawestheband.com  ", null, new ConcurrentModel());
+        controller.setSiteUrl(7L, "  https://dawestheband.com  ", null, null, new ConcurrentModel());
 
         verify(siteUrlService).recordOfficialSiteUrl(7L, OWNER, "https://dawestheband.com");
         verify(artistRepository, never()).save(any(Artist.class));
@@ -270,7 +270,7 @@ class ArtistControllerTest {
     @Test
     @DisplayName("setSiteUrl with a blank value delegates null, not an empty string")
     void setSiteUrlBlankDelegatesNull() {
-        controller.setSiteUrl(7L, "   ", null, new ConcurrentModel());
+        controller.setSiteUrl(7L, "   ", null, null, new ConcurrentModel());
 
         verify(siteUrlService).recordOfficialSiteUrl(7L, OWNER, null);
     }
@@ -281,7 +281,7 @@ class ArtistControllerTest {
         Artist a = pending("Austin Symphony Orchestra", ArtistSource.SIMILAR_EXPANSION);
         when(artistRepository.findByIdAndOwner(7L, OWNER)).thenReturn(java.util.Optional.of(a));
 
-        controller.setDefaultVenue(7L, "Long Center for the Performing Arts", "Austin", null, new ConcurrentModel());
+        controller.setDefaultVenue(null, 7L, "Long Center for the Performing Arts", "Austin", null, new ConcurrentModel());
 
         assertThat(a.getDefaultVenueName()).isEqualTo("Long Center for the Performing Arts");
         assertThat(a.getDefaultVenueCity()).isEqualTo("Austin");
@@ -345,7 +345,7 @@ class ArtistControllerTest {
     @DisplayName("removeFromSeed transitions the artist to REMOVED via ArtistActivationService, "
             + "not a direct repository save")
     void removeFromSeedInvokesActivationService() {
-        controller.removeFromSeed(7L, null, new ConcurrentModel());
+        controller.removeFromSeed(null, 7L, null, new ConcurrentModel());
 
         verify(activationService).changeStatus(7L, OWNER, ArtistStatus.REMOVED);
         verify(artistRepository, never()).save(any(Artist.class));
@@ -357,7 +357,7 @@ class ArtistControllerTest {
         Model model = new ConcurrentModel();
         when(artistRepository.findActiveFirstPage(OWNER, ACTIVE_STATUSES, PAGE_SIZE_PLUS_ONE)).thenReturn(List.of());
 
-        String view = controller.removeFromSeed(7L, "true", model);
+        String view = controller.removeFromSeed(null, 7L, "true", model);
 
         assertThat(view).isEqualTo("artists :: activeSection");
         assertThat(model.getAttribute("active")).isNotNull();
@@ -366,7 +366,7 @@ class ArtistControllerTest {
     @Test
     @DisplayName("removeFromSeed redirects to /artists for a non-htmx request")
     void removeFromSeedRedirectsForNonHtmx() {
-        String view = controller.removeFromSeed(7L, null, new ConcurrentModel());
+        String view = controller.removeFromSeed(null, 7L, null, new ConcurrentModel());
 
         assertThat(view).isEqualTo("redirect:/artists");
     }

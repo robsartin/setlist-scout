@@ -119,6 +119,76 @@ public interface ArtistRepository extends JpaRepository<Artist, Long> {
                                    @Param("cursor") String cursor, @Param("limit") int limit);
 
     /**
+     * Issue #250: the three keyset queries above, with a substring filter on {@code normalizedName}.
+     * Separate methods rather than an always-present {@code LIKE '%%'} on the unfiltered path --
+     * that would put a non-sargable predicate on every page render of the plain list for nothing.
+     * <p>
+     * The filter is applied INSIDE the keyset query, never by loading all matches and paging in
+     * memory: the cursor semantics of #174 (no duplicate, no skipped row while the list mutates)
+     * only hold if the boundary and the filter are evaluated together by the same statement.
+     * <p>
+     * {@code ESCAPE} names {@link ArtistSearchTerm#ESCAPE} so a query containing {@code %} or
+     * {@code _} matches those characters literally -- see that class for why the pattern must be
+     * built there and not hand-rolled at a call site.
+     */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses
+               AND a.normalizedName LIKE :pattern ESCAPE '\\'
+             ORDER BY a.normalizedName ASC
+             LIMIT :limit
+            """)
+    List<Artist> findActiveMatchingFirstPage(@Param("owner") String owner,
+                                              @Param("statuses") List<ArtistStatus> statuses,
+                                              @Param("pattern") String pattern, @Param("limit") int limit);
+
+    /** Keyset "next" page of a filtered list -- see {@link #findActiveMatchingFirstPage}. */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses
+               AND a.normalizedName LIKE :pattern ESCAPE '\\'
+               AND a.normalizedName > :cursor
+             ORDER BY a.normalizedName ASC
+             LIMIT :limit
+            """)
+    List<Artist> findActiveMatchingAfter(@Param("owner") String owner,
+                                          @Param("statuses") List<ArtistStatus> statuses,
+                                          @Param("pattern") String pattern, @Param("cursor") String cursor,
+                                          @Param("limit") int limit);
+
+    /** Keyset "previous" page of a filtered list, DESCENDING -- see {@link #findActiveBefore}. */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses
+               AND a.normalizedName LIKE :pattern ESCAPE '\\'
+               AND a.normalizedName < :cursor
+             ORDER BY a.normalizedName DESC
+             LIMIT :limit
+            """)
+    List<Artist> findActiveMatchingBefore(@Param("owner") String owner,
+                                           @Param("statuses") List<ArtistStatus> statuses,
+                                           @Param("pattern") String pattern, @Param("cursor") String cursor,
+                                           @Param("limit") int limit);
+
+    /**
+     * Issue #250: matches among the owner's REJECTED/REMOVED artists, shown in their own section
+     * under the active results. With 32,201 rejected rows a bare "no results" is the misleading
+     * answer far more often than the true one -- "you already decided about this artist" is the
+     * thing worth knowing before re-adding a name. Hard {@code LIMIT} because this section is
+     * informational, not a second paged list.
+     */
+    @Query("""
+            SELECT a FROM Artist a
+             WHERE a.owner = :owner AND a.status IN :statuses
+               AND a.normalizedName LIKE :pattern ESCAPE '\\'
+             ORDER BY a.normalizedName ASC
+             LIMIT :limit
+            """)
+    List<Artist> findInactiveMatching(@Param("owner") String owner,
+                                       @Param("statuses") List<ArtistStatus> statuses,
+                                       @Param("pattern") String pattern, @Param("limit") int limit);
+
+    /**
      * DB-level idempotent enqueue: relies on the {@code artist_owner_normalized_name_key} unique
      * constraint via {@code ON CONFLICT ... DO NOTHING} so a racing duplicate candidate for the
      * same artist is a silent no-op instead of a {@code DataIntegrityViolationException}. That

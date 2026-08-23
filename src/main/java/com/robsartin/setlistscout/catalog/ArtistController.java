@@ -77,15 +77,23 @@ public class ArtistController {
      * #sr-status} announcement -- a history-restore re-fetch must render neither, or the layout's
      * real {@code #sr-status} node would collide with a duplicate id.
      */
+    /**
+     * #250: how many previously-rejected matches the search shows. Informational, not a second
+     * paged list -- enough to answer "have I already decided about this artist?" without turning
+     * into a 32,201-row render (the failure #251 describes).
+     */
+    private static final int INACTIVE_MATCH_LIMIT = 25;
+
     @GetMapping
     public String list(@RequestParam(required = false) String after,
                        @RequestParam(required = false) String before,
+                       @RequestParam(required = false) String q,
                        @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                        @RequestHeader(value = HX_HISTORY_RESTORE_REQUEST, required = false) String historyRestore,
                        Model model) {
         String owner = currentUser.email();
         boolean fragment = hxRequest != null && historyRestore == null;
-        populateActive(model, owner, after, before, fragment);
+        populateActive(model, owner, after, before, fragment, q);
         return fragment ? ACTIVE_SECTION_FRAGMENT : "artists";
     }
 
@@ -108,7 +116,13 @@ public class ArtistController {
             // returning there keeps the confirmation in view next to what the user just did. The
             // same reasoning is applied uniformly to setSiteUrl/removeFromSeed below rather than
             // inventing a third, untested behaviour for those.
-            populateActive(model, owner, null, null, true);
+            //
+            // #250: this one deliberately CLEARS an active search (null query), unlike the
+            // row-level actions below which preserve it. Those act on a row already visible in the
+            // filtered list, so keeping the filter keeps the user where they were; this one adds a
+            // NEW artist, which by definition may not match the current query -- keeping the filter
+            // would answer "added" with a list the new artist isn't in.
+            populateActive(model, owner, null, null, true, null);
             return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
@@ -157,13 +171,16 @@ public class ArtistController {
     @PostMapping("/{id}/site-url")
     public String setSiteUrl(@PathVariable Long id,
                              @RequestParam String url,
+                             @RequestParam(required = false) String q,
                              @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                              Model model) {
         String owner = currentUser.email();
         siteUrlService.recordOfficialSiteUrl(id, owner, url.isBlank() ? null : url.trim());
         if (hxRequest != null) {
-            // Issue #174: first page, same reasoning as addSeed's comment above.
-            populateActive(model, owner, null, null, true);
+            // Issue #174: first page, same reasoning as addSeed's comment above. #250: the
+            // active search is preserved -- the edited row was visible in the filtered list, so
+            // dropping the filter would move the user somewhere they didn't ask to go.
+            populateActive(model, owner, null, null, true, q);
             return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
@@ -177,7 +194,8 @@ public class ArtistController {
      * null, which the distance filter treats as "no match" and drops (issue #211's shape). Owner-scoped.
      */
     @PostMapping("/{id}/default-venue")
-    public String setDefaultVenue(@PathVariable Long id,
+    public String setDefaultVenue(@RequestParam(required = false) String q,
+                                  @PathVariable Long id,
                              @RequestParam String name,
                              @RequestParam String city,
                              @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
@@ -189,8 +207,10 @@ public class ArtistController {
             artistRepository.save(a);
         });
         if (hxRequest != null) {
-            // Issue #174: first page, same reasoning as addSeed's comment above.
-            populateActive(model, owner, null, null, true);
+            // Issue #174: first page, same reasoning as addSeed's comment above. #250: the
+            // active search is preserved -- the edited row was visible in the filtered list, so
+            // dropping the filter would move the user somewhere they didn't ask to go.
+            populateActive(model, owner, null, null, true, q);
             return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
@@ -207,14 +227,17 @@ public class ArtistController {
      * absent behavior -- a foreign owner's id is silently ignored, not a leak.
      */
     @PostMapping("/{id}/remove-from-seed")
-    public String removeFromSeed(@PathVariable Long id,
+    public String removeFromSeed(@RequestParam(required = false) String q,
+                                 @PathVariable Long id,
                                  @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                                  Model model) {
         String owner = currentUser.email();
         activationService.changeStatus(id, owner, ArtistStatus.REMOVED);
         if (hxRequest != null) {
-            // Issue #174: first page, same reasoning as addSeed's comment above.
-            populateActive(model, owner, null, null, true);
+            // Issue #174: first page, same reasoning as addSeed's comment above. #250: the
+            // active search is preserved -- the edited row was visible in the filtered list, so
+            // dropping the filter would move the user somewhere they didn't ask to go.
+            populateActive(model, owner, null, null, true, q);
             return ACTIVE_SECTION_FRAGMENT;
         }
         return "redirect:/artists";
@@ -299,10 +322,23 @@ public class ArtistController {
      * the one real {@code #sr-status} node and a second copy under the same id would be a
      * duplicate-id bug -- see {@link #list}'s {@code fragment} computation.
      */
-    private void populateActive(Model model, String owner, String after, String before, boolean announce) {
-        ActivePage page = artistPager.page(owner, after, before);
+    private void populateActive(Model model, String owner, String after, String before,
+                                 boolean announce, String query) {
+        ActivePage page = artistPager.page(owner, after, before, query);
         model.addAttribute("active", page.artists());
         model.addAttribute("activePage", page);
+        // #250: the raw query, echoed back into the search box and into every link and form inside
+        // #active-section so paging or editing does not silently drop the filter. Normalised to ""
+        // rather than null so the template never has to null-check it.
+        model.addAttribute("query", ArtistSearchTerm.isSearch(query) ? query.trim() : "");
+        // Matches among this owner's REJECTED/REMOVED artists, shown in their own section (#250).
+        // Only ever populated during a search: an unfiltered page has no reason to list them, and
+        // there are 32,201 of them.
+        model.addAttribute("inactiveMatches", ArtistSearchTerm.isSearch(query)
+                ? artistRepository.findInactiveMatching(owner,
+                        List.of(ArtistStatus.REJECTED, ArtistStatus.REMOVED),
+                        ArtistSearchTerm.likePattern(query), INACTIVE_MATCH_LIMIT)
+                : List.of());
         model.addAttribute("announceActivePage", announce);
         // #177 upload-progress display: plain server-rendered counts, refreshed whenever this
         // model gets built (a full page load, or any htmx action that swaps activeSection) --
