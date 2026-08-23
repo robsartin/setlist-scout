@@ -13,8 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Second opinion on similar artists, useful for niche/regional acts that thin
@@ -27,9 +25,11 @@ public class SimilarArtistLlmService {
 
     private static final Logger log = LoggerFactory.getLogger(SimilarArtistLlmService.class);
 
+    /** The tool the model must call, so commentary has nowhere to live (#253). */
+    private static final String TOOL = "record_similar_artists";
+
     private final RestClient restClient;
     private final String apiKey;
-    private static final Pattern LINE_ITEM = Pattern.compile("^\\s*[-\\d.]+\\s*[).]?\\s*(.+)$");
 
     /**
      * Base URL is injectable (#184) rather than hardcoded, so tests can point it at an unroutable
@@ -58,6 +58,8 @@ public class SimilarArtistLlmService {
                 "model", "claude-sonnet-5",
                 "max_tokens", 300,
                 "thinking", AnthropicMessages.THINKING_DISABLED,
+                "tools", List.of(AnthropicMessages.nameListTool(TOOL, "names", "Record the similar bands or musicians you identified. Names only.")),
+                "tool_choice", AnthropicMessages.forceTool(TOOL),
                 "messages", List.of(Map.of("role", "user", "content", prompt))
         );
 
@@ -77,11 +79,11 @@ public class SimilarArtistLlmService {
             response = Map.of();
         }
 
-        Optional<String> text = AnthropicMessages.textBlock(response);
-        if (text.isEmpty()) {
-            // Total failure (e.g. thinking consumed the whole output budget) and "the model knows
-            // of none" must not look identical from the outside (#213) -- the latter always
-            // produces a text block, even an empty one.
+        Optional<List<String>> names = AnthropicMessages.nameList(response, TOOL, "names");
+        if (names.isEmpty()) {
+            // Total failure (the call errored, or the model answered in prose instead of calling
+            // the tool) and "the model knows of none" must not look identical from the outside
+            // (#213) -- the latter calls the tool with an empty array.
             var warn = log.atWarn()
                     .addKeyValue("source", "similar-llm")
                     .addKeyValue("artist", artistName);
@@ -89,15 +91,11 @@ public class SimilarArtistLlmService {
             if (stopReason != null) {
                 warn = warn.addKeyValue("stop_reason", stopReason);
             }
-            warn.log("similar-artists returned no text block");
+            warn.log("similar-artists produced no tool call");
             return result;
         }
 
-        for (String line : text.get().split("\n")) {
-            if (line.isBlank()) continue;
-            Matcher m = LINE_ITEM.matcher(line.trim());
-            result.add(m.matches() ? m.group(1).trim() : line.trim());
-        }
+        result.addAll(names.get());
         log.atDebug().addKeyValue("source", "similar-llm").addKeyValue("artist", artistName)
                 .addKeyValue("count", result.size()).log("similar artists request");
         return result;

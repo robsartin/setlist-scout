@@ -43,34 +43,37 @@ class TributeLlmServiceTest {
     }
 
     @Test
-    @DisplayName("should strip numbering and bullets but keep plain lines as-is")
-    void shouldParseMixedFormattingLines() {
+    @DisplayName("should read names from the forced tool_use block (#253)")
+    void shouldReadNamesFromToolUse() {
         server.enqueue(json("""
-                {"content": [{"type": "text", "text": "1. The Iron Maidens\\n- Dread Zeppelin\\nMandonna"}]}
+                {"content": [{"type": "tool_use", "name": "record_tribute_bands", \
+                "input": {"names": ["Bon Iver", "Fleet Foxes", "The National"]}}]}
                 """));
 
-        List<String> result = service.findTributeBands("Iron Maiden", 3);
+        List<String> result = service.findTributeBands("Pink Floyd", 3);
 
-        assertThat(result).containsExactly("The Iron Maidens", "Dread Zeppelin", "Mandonna");
+        assertThat(result).containsExactly("Bon Iver", "Fleet Foxes", "The National");
     }
 
     @Test
-    @DisplayName("should skip blank lines")
-    void shouldSkipBlankLines() {
+    @DisplayName("should ignore a text block that precedes the tool_use block (#253)")
+    void shouldIgnorePrecedingCommentary() {
         server.enqueue(json("""
-                {"content": [{"type": "text", "text": "The Iron Maidens\\n\\nDread Zeppelin"}]}
+                {"content": [{"type": "text", "text": "Here are 8 tribute acts:"}, \
+                {"type": "tool_use", "name": "record_tribute_bands", \
+                "input": {"names": ["Bon Iver", "Fleet Foxes"]}}]}
                 """));
 
-        List<String> result = service.findTributeBands("Iron Maiden", 2);
+        List<String> result = service.findTributeBands("Pink Floyd", 2);
 
-        assertThat(result).containsExactly("The Iron Maidens", "Dread Zeppelin");
+        assertThat(result).containsExactly("Bon Iver", "Fleet Foxes");
     }
 
     @Test
     @DisplayName("should return an empty list when the model reports no known tributes")
     void shouldReturnEmptyWhenNoneKnown() {
         server.enqueue(json("""
-                {"content": [{"type": "text", "text": ""}]}
+                {"content": [{"type": "tool_use", "name": "record_tribute_bands", "input": {"names": []}}]}
                 """));
 
         List<String> result = service.findTributeBands("Some Obscure Band", 5);
@@ -101,21 +104,22 @@ class TributeLlmServiceTest {
     // ---- #213: read the text block even when extended thinking precedes it ----------------
 
     @Test
-    @DisplayName("should read the text block even when a thinking block precedes it in content (#213)")
-    void shouldReadTextBlockWhenThinkingBlockPrecedesIt() {
+    @DisplayName("should read the tool_use block even when a thinking block precedes it (#213)")
+    void shouldReadNamesWhenThinkingBlockPrecedesThem() {
         server.enqueue(json("""
-                {"content": [{"type": "thinking", "thinking": "reasoning about the band..."}, \
-                {"type": "text", "text": "The Iron Maidens\\nDread Zeppelin"}]}
+                {"content": [{"type": "thinking", "thinking": "reasoning about the artist..."}, \
+                {"type": "tool_use", "name": "record_tribute_bands", \
+                "input": {"names": ["Bon Iver", "Fleet Foxes"]}}]}
                 """));
 
-        List<String> result = service.findTributeBands("Iron Maiden", 2);
+        List<String> result = service.findTributeBands("Pink Floyd", 2);
 
-        assertThat(result).containsExactly("The Iron Maidens", "Dread Zeppelin");
+        assertThat(result).containsExactly("Bon Iver", "Fleet Foxes");
     }
 
     @Test
-    @DisplayName("should log a WARN with stop_reason when the response contains no text block at all (#213)")
-    void shouldLogWarnWhenNoTextBlockPresent() {
+    @DisplayName("should log a WARN with stop_reason when the response contains no tool_use block at all (#213)")
+    void shouldLogWarnWhenNoToolUseBlockPresent() {
         server.enqueue(json("""
                 {"content": [{"type": "thinking", "thinking": "reasoning about the band..."}], \
                 "stop_reason": "max_tokens"}
@@ -129,7 +133,7 @@ class TributeLlmServiceTest {
             ILoggingEvent warnEvent = logs.events().stream()
                     .filter(e -> e.getLevel() == Level.WARN)
                     .findFirst()
-                    .orElseThrow(() -> new AssertionError("expected a WARN log for the missing text block"));
+                    .orElseThrow(() -> new AssertionError("expected a WARN log for the missing tool_use block"));
             assertThat(warnEvent.getKeyValuePairs().stream()
                     .filter(kv -> "stop_reason".equals(kv.key))
                     .map(kv -> String.valueOf(kv.value))
@@ -139,10 +143,10 @@ class TributeLlmServiceTest {
     }
 
     @Test
-    @DisplayName("should not warn when a text block is present but the model knows no tributes (#213)")
-    void shouldNotWarnWhenTextBlockNamesNoTributes() {
+    @DisplayName("should not warn when the tool_use block is present but the model knows no tributes (#213)")
+    void shouldNotWarnWhenToolUseNamesNoTributes() {
         server.enqueue(json("""
-                {"content": [{"type": "text", "text": ""}]}
+                {"content": [{"type": "tool_use", "name": "record_tribute_bands", "input": {"names": []}}]}
                 """));
 
         try (LogCapture logs = LogCapture.attach(TributeLlmService.class)) {
@@ -157,7 +161,7 @@ class TributeLlmServiceTest {
     @DisplayName("should disable extended thinking so the output budget goes to the list, not reasoning (#213)")
     void shouldDisableExtendedThinking() throws InterruptedException, IOException {
         server.enqueue(json("""
-                {"content": [{"type": "text", "text": ""}]}
+                {"content": [{"type": "tool_use", "name": "record_tribute_bands", "input": {"names": []}}]}
                 """));
 
         service.findTributeBands("Iron Maiden", 3);
@@ -165,5 +169,57 @@ class TributeLlmServiceTest {
         RecordedRequest request = server.takeRequest();
         JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
         assertThat(body.path("thinking").path("type").asText()).isEqualTo("disabled");
+    }
+
+    // ---- #253: commentary must never become an artist -------------------------------------
+
+    @Test
+    @DisplayName("should keep real names that look like sentences -- the anti-blocklist guard (#253)")
+    void shouldKeepRealNamesThatLookLikeSentences() {
+        server.enqueue(json("""
+                {"content": [{"type": "tool_use", "name": "record_tribute_bands", "input": {"names": [\
+                "Does It Offend You, Yeah?", "I See Hawks in L.A.", "These United States", \
+                "Grover Washington, Jr.", "Wau Y Los Arrrghs!!!"]}}]}
+                """));
+
+        List<String> result = service.findTributeBands("Pink Floyd", 5);
+
+        assertThat(result).containsExactly("Does It Offend You, Yeah?", "I See Hawks in L.A.",
+                "These United States", "Grover Washington, Jr.", "Wau Y Los Arrrghs!!!");
+    }
+
+    @Test
+    @DisplayName("should return nothing when the model only produced prose, and WARN (#253)")
+    void shouldReturnNothingForProseOnlyResponse() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": \
+                "I'd rather return nothing than provide fabricated names."}], \
+                "stop_reason": "end_turn"}
+                """));
+
+        try (LogCapture logs = LogCapture.attach(TributeLlmService.class)) {
+            List<String> result = service.findTributeBands("Pink Floyd", 3);
+
+            assertThat(result).isEmpty();
+            assertThat(logs.events()).anyMatch(e -> e.getLevel() == Level.WARN);
+        }
+    }
+
+    @Test
+    @DisplayName("should declare the tool and force the model to call it (#253)")
+    void shouldDeclareAndForceTheTool() throws InterruptedException, IOException {
+        server.enqueue(json("""
+                {"content": [{"type": "tool_use", "name": "record_tribute_bands", "input": {"names": []}}]}
+                """));
+
+        service.findTributeBands("Pink Floyd", 3);
+
+        RecordedRequest request = server.takeRequest();
+        JsonNode body = MAPPER.readTree(request.getBody().readUtf8());
+        assertThat(body.path("tools").get(0).path("name").asText()).isEqualTo("record_tribute_bands");
+        assertThat(body.path("tools").get(0).path("input_schema").path("properties")
+                .path("names").path("type").asText()).isEqualTo("array");
+        assertThat(body.path("tool_choice").path("type").asText()).isEqualTo("tool");
+        assertThat(body.path("tool_choice").path("name").asText()).isEqualTo("record_tribute_bands");
     }
 }
