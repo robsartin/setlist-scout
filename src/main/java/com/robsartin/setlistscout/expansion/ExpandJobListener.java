@@ -5,6 +5,7 @@ import com.robsartin.setlistscout.expansion.source.RelationSource;
 import com.robsartin.setlistscout.shared.SharedScanOwner;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
+import com.robsartin.setlistscout.shared.events.ArtistShowsFound;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
@@ -43,6 +44,37 @@ public class ExpandJobListener {
         // this listener no longer needs to query catalog.ArtistRepository back for it.
         ArtistStatus artistStatus = parseStatus(e.status());
 
+        // #254: only a SEED expands on activation. A SEED is an artist the owner named
+        // themselves, so it is evidence by construction. Everything else arrived from an earlier
+        // expansion and has proven nothing yet -- it waits for ArtistShowsFound. Without this,
+        // one wrong name match multiplies without limit: "Bill Bryson" the bluegrass bassist
+        // resolved on the next hop to "Bill Bryson" the travel author, and the cluster below that
+        // reached ~40 approved authors, none of which has ever had a show.
+        if (artistStatus != ArtistStatus.SEED) {
+            return;
+        }
+
+        enqueueFor(e.owner(), e.artistId(), artistStatus);
+    }
+
+    /**
+     * #254: an expansion-discovered artist earns the right to be expanded from by actually
+     * turning up a show. {@code scan} publishes {@link ArtistShowsFound} when a scan run finds
+     * one; until then the artist sits in the catalog without spreading.
+     * <p>
+     * Idempotent for free: this fires on every scan cycle that finds shows for the artist, and
+     * {@code insertIfAbsent} is an {@code ON CONFLICT DO NOTHING}, so repeats cost one no-op
+     * insert per source rather than duplicate jobs.
+     */
+    @ApplicationModuleListener
+    void onArtistShowsFound(ArtistShowsFound e) {
+        if (SharedScanOwner.isSharedScanKey(e.owner())) {
+            return;
+        }
+        enqueueFor(e.owner(), e.artistId(), parseStatus(e.status()));
+    }
+
+    private void enqueueFor(String owner, Long artistId, ArtistStatus artistStatus) {
         for (RelationSource source : relationSources) {
             if (!source.appliesTo(artistStatus)) {
                 continue;
@@ -53,7 +85,7 @@ public class ExpandJobListener {
             // constraint race aborts the ENTIRE transaction for every later iteration too (Postgres
             // "current transaction is aborted"). insertIfAbsent never throws on a duplicate, so the
             // loop always completes in a single pass.
-            expandJobRepository.insertIfAbsent(e.owner(), e.artistId(), source.id(), Instant.now());
+            expandJobRepository.insertIfAbsent(owner, artistId, source.id(), Instant.now());
         }
     }
 

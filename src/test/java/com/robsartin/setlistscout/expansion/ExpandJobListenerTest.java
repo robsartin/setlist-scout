@@ -3,7 +3,9 @@ package com.robsartin.setlistscout.expansion;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.source.RelationSource;
+import com.robsartin.setlistscout.shared.SharedScanOwner;
 import com.robsartin.setlistscout.shared.events.ArtistActivated;
+import com.robsartin.setlistscout.shared.events.ArtistShowsFound;
 import com.robsartin.setlistscout.shared.events.ArtistDeactivated;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,9 +71,14 @@ class ExpandJobListenerTest {
     }
 
     @Test
-    @DisplayName("APPROVED artist activation enqueues non-tribute sources but never tribute-llm")
-    void approvedArtistSkipsTributeSource() {
+    @DisplayName("APPROVED activation enqueues nothing on its own -- it enqueues once a show is "
+            + "found, and tribute-llm stays SEED-only even then (#254)")
+    void approvedArtistWaitsForShowsAndStillSkipsTribute() {
         listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes", ArtistStatus.APPROVED.name()));
+
+        verify(expandJobRepository, never()).insertIfAbsent(any(), any(), any(), any());
+
+        listener.onArtistShowsFound(new ArtistShowsFound(OWNER, ARTIST_ID, "Dawes", ArtistStatus.APPROVED.name()));
 
         for (String sourceId : List.of("musicbrainz", "discogs", "lastfm")) {
             verify(expandJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId), any());
@@ -81,10 +88,19 @@ class ExpandJobListenerTest {
 
     @Test
     @DisplayName("a null status (e.g. a legacy pre-#102 event replayed from the durable registry) "
-            + "doesn't throw -- tribute-llm is skipped but every other source is still enqueued, "
-            + "matching the old artist-not-found behavior")
-    void nullStatusSkipsTributeSourceWithoutThrowing() {
+            + "doesn't throw, and enqueues nothing -- an event we cannot classify must not be "
+            + "read as a SEED (#254)")
+    void nullStatusEnqueuesNothingWithoutThrowing() {
         listener.onArtistActivated(new ArtistActivated(OWNER, ARTIST_ID, "Dawes", null));
+
+        verify(expandJobRepository, never()).insertIfAbsent(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a null status on ArtistShowsFound still enqueues the non-SEED sources -- shows "
+            + "are the evidence, the status only decides tribute eligibility (#254)")
+    void nullStatusOnShowsFoundStillEnqueuesNonTributeSources() {
+        listener.onArtistShowsFound(new ArtistShowsFound(OWNER, ARTIST_ID, "Dawes", null));
 
         for (String sourceId : List.of("musicbrainz", "discogs", "lastfm")) {
             verify(expandJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId), any());
@@ -98,5 +114,46 @@ class ExpandJobListenerTest {
         listener.onArtistDeactivated(new ArtistDeactivated(OWNER, ARTIST_ID));
 
         verify(expandJobRepository).deleteByOwnerAndArtistId(OWNER, ARTIST_ID);
+    }
+
+    // ---- #254: an artist earns expansion by having a show ---------------------------------
+
+    @Test
+    @DisplayName("APPROVED activation enqueues nothing -- it has not proven it plays anywhere (#254)")
+    void approvedActivationEnqueuesNothing() {
+        listener.onArtistActivated(
+                new ArtistActivated(OWNER, ARTIST_ID, "Richard Dawkins", ArtistStatus.APPROVED.name()));
+
+        verify(expandJobRepository, never()).insertIfAbsent(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a show found for an APPROVED artist enqueues its expansion sources (#254)")
+    void showsFoundEnqueuesForApprovedArtist() {
+        listener.onArtistShowsFound(
+                new ArtistShowsFound(OWNER, ARTIST_ID, "Dawes", ArtistStatus.APPROVED.name()));
+
+        for (String sourceId : List.of("musicbrainz", "discogs", "lastfm")) {
+            verify(expandJobRepository).insertIfAbsent(eq(OWNER), eq(ARTIST_ID), eq(sourceId), any());
+        }
+    }
+
+    @Test
+    @DisplayName("shows found still respect per-source eligibility -- tribute stays SEED-only (#254)")
+    void showsFoundStillRespectsSourceEligibility() {
+        listener.onArtistShowsFound(
+                new ArtistShowsFound(OWNER, ARTIST_ID, "Dawes", ArtistStatus.APPROVED.name()));
+
+        verify(expandJobRepository, never())
+                .insertIfAbsent(any(), any(), eq("tribute-llm"), any());
+    }
+
+    @Test
+    @DisplayName("a shared-scan owner never expands, even once shows are found (#163, #254)")
+    void showsFoundStillGuardsSharedScanOwners() {
+        listener.onArtistShowsFound(new ArtistShowsFound(SharedScanOwner.newKey(),
+                ARTIST_ID, "Dawes", ArtistStatus.APPROVED.name()));
+
+        verify(expandJobRepository, never()).insertIfAbsent(any(), any(), any(), any());
     }
 }
