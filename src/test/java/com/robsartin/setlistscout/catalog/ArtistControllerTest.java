@@ -39,6 +39,7 @@ class ArtistControllerTest {
     private ArtistRepository artistRepository;
     private CurrentUser currentUser;
     private ArtistActivationService activationService;
+    private ArtistSiteUrlService siteUrlService;
     private ArtistImportService importService;
     private ArtistController controller;
 
@@ -48,6 +49,7 @@ class ArtistControllerTest {
         currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
         activationService = mock(ArtistActivationService.class);
+        siteUrlService = mock(ArtistSiteUrlService.class);
         // upload() (#177) delegates to ArtistImportService#queue, not seedService -- mocked here
         // (rather than a real instance over a mocked ArtistImportRepository) since its own
         // dedupe/skip/cap contract is exhaustively covered for real against Postgres by
@@ -65,8 +67,8 @@ class ArtistControllerTest {
         // size 20 matches application.yml's default, so PAGE_SIZE_PLUS_ONE below lines up with it.
         ArtistPager artistPager = new ArtistPager(artistRepository, PAGE_SIZE);
         controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService,
-                activationService, mock(ArtistConnectionsService.class), importService, mock(ArtistImportRepository.class),
-                artistPager);
+                activationService, siteUrlService, mock(ArtistConnectionsService.class), importService,
+                mock(ArtistImportRepository.class), artistPager);
     }
 
     private static Artist pending(String name, ArtistSource source) {
@@ -256,15 +258,21 @@ class ArtistControllerTest {
     }
 
     @Test
-    @DisplayName("setSiteUrl stores the official-site URL on the owner's artist")
-    void setSiteUrlStoresUrl() {
-        Artist a = pending("Dawes", ArtistSource.SIMILAR_EXPANSION);
-        when(artistRepository.findByIdAndOwner(7L, OWNER)).thenReturn(java.util.Optional.of(a));
+    @DisplayName("setSiteUrl delegates to ArtistSiteUrlService, trimmed -- issue #248: that service, "
+            + "never a direct repository save, is what lets a URL change retire the artist's stale shows")
+    void setSiteUrlDelegatesToSiteUrlService() {
+        controller.setSiteUrl(7L, "  https://dawestheband.com  ", null, new ConcurrentModel());
 
-        controller.setSiteUrl(7L, "https://dawestheband.com", null, new ConcurrentModel());
+        verify(siteUrlService).recordOfficialSiteUrl(7L, OWNER, "https://dawestheband.com");
+        verify(artistRepository, never()).save(any(Artist.class));
+    }
 
-        assertThat(a.getOfficialSiteUrl()).isEqualTo("https://dawestheband.com");
-        verify(artistRepository).save(a);
+    @Test
+    @DisplayName("setSiteUrl with a blank value delegates null, not an empty string")
+    void setSiteUrlBlankDelegatesNull() {
+        controller.setSiteUrl(7L, "   ", null, new ConcurrentModel());
+
+        verify(siteUrlService).recordOfficialSiteUrl(7L, OWNER, null);
     }
 
     @Test

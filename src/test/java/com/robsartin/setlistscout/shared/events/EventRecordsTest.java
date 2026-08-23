@@ -43,4 +43,13 @@ class EventRecordsTest {
 		assertThat(event.source()).isEqualTo("musicbrainz");
 		assertThat(event.note()).isEqualTo("note");
 	}
+
+	@Test
+	void artistSiteUrlChangedExposeComponentsCorrectly() {
+		var event = new ArtistSiteUrlChanged("owner", 5L, "https://www.austinsymphony.org");
+
+		assertThat(event.owner()).isEqualTo("owner");
+		assertThat(event.artistId()).isEqualTo(5L);
+		assertThat(event.oldUrl()).isEqualTo("https://www.austinsymphony.org");
+	}
 }

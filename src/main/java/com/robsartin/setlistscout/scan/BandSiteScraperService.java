@@ -192,7 +192,14 @@ public class BandSiteScraperService {
         return null;
     }
 
-    private String domainOf(String url) {
+    /**
+     * Package-private and {@code static} (not {@code private}) so {@code ShowRetirementListener}
+     * (#248) can derive the exact same {@code "band-site:" + host} source string for an artist's
+     * OLD url that this method already derives for whatever page it just scraped -- one definition
+     * of "band-site source for this URL", not a second, hand-rolled one that could silently drift
+     * from this one and break the exact-match retirement/cleanup this issue is built around.
+     */
+    static String domainOf(String url) {
         try {
             return java.net.URI.create(url).getHost();
         } catch (Exception e) {
