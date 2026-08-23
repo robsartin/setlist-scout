@@ -43,6 +43,35 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     /** Owner-scoped lookup for hide/unhide -- absent for a foreign id, never a leak. */
     Optional<Show> findByIdAndOwner(Long id, String owner);
 
+    /**
+     * Retires (deletes) an artist's shows still attributed to a source that's no longer scraped
+     * (issue #248) -- {@code ShowRetirementListener} calls this when {@code
+     * catalog.ArtistSiteUrlService#recordOfficialSiteUrl} reports the artist's official-site URL
+     * was REPLACED, for the exact {@code "band-site:" + oldHost} source string
+     * {@code BandSiteScraperService#domainOf} derived when those rows were scraped.
+     * <p>
+     * {@code source} is matched by plain equality (a derived query, never {@code LIKE}) --
+     * {@code band-site:www.example.com} and {@code band-site:example.com} differ only by
+     * {@code "www."} and must never be conflated (see the migration this issue also shipped,
+     * {@code V31}, for the production incident that made this exactness non-negotiable).
+     * {@code artistId} scopes to the one artist whose URL actually changed -- never another
+     * artist's identically-hosted band-site rows -- and {@code owner} is never skipped even though
+     * {@code artistId} alone would already be unique, matching this codebase's "owner-scope
+     * everything" convention.
+     * <p>
+     * {@code hiddenAtIsNull}: deliberately EXCLUDES a show the owner has hidden. Deleting a hidden
+     * row would remove the {@code (owner, artist_name, event_date_time, venue_name)} natural-key
+     * placeholder that {@code ScanUnitRunner#persistNew}'s {@code insertIfAbsent} relies on to skip
+     * (not resurrect) a rediscovered duplicate -- see {@code HiddenShowSurvivesRescanTest}. Leaving
+     * a hidden stale-source row in place is inert (its old source is never scraped again) and
+     * strictly safer than deleting it and opening a route for an unhidden repeat to reappear.
+     * <p>
+     * Mirrors {@code shared.JobRepository#deleteByOwnerAndArtistId} -- no {@code @Modifying}/
+     * {@code @Transactional} of its own, relying on Spring Data's default per-repository-method
+     * transaction (same reasoning documented there).
+     */
+    void deleteByOwnerAndArtistIdAndSourceAndHiddenAtIsNull(String owner, Long artistId, String source);
+
     /** Every show for an owner, unfiltered by window -- {@code VenueScanRunnerTest} (#206) reads this back. */
     List<Show> findByOwnerOrderByEventDateTimeAsc(String owner);
 

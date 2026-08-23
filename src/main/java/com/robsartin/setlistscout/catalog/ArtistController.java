@@ -45,6 +45,7 @@ public class ArtistController {
     private final CurrentUser currentUser;
     private final ArtistSeedService seedService;
     private final ArtistActivationService activationService;
+    private final ArtistSiteUrlService siteUrlService;
     private final ArtistConnectionsService connectionsService;
     private final ArtistImportService importService;
     private final ArtistImportRepository artistImportRepository;
@@ -52,7 +53,8 @@ public class ArtistController {
 
     public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
                            CurrentUser currentUser, ArtistSeedService seedService,
-                           ArtistActivationService activationService, ArtistConnectionsService connectionsService,
+                           ArtistActivationService activationService, ArtistSiteUrlService siteUrlService,
+                           ArtistConnectionsService connectionsService,
                            ArtistImportService importService, ArtistImportRepository artistImportRepository,
                            ArtistPager artistPager) {
         this.artistRepository = artistRepository;
@@ -60,6 +62,7 @@ public class ArtistController {
         this.currentUser = currentUser;
         this.seedService = seedService;
         this.activationService = activationService;
+        this.siteUrlService = siteUrlService;
         this.connectionsService = connectionsService;
         this.importService = importService;
         this.artistImportRepository = artistImportRepository;
@@ -140,17 +143,24 @@ public class ArtistController {
         return "redirect:/artists";
     }
 
-    /** Set or clear an artist's official-site URL (scraped for tour dates); owner-scoped. */
+    /**
+     * Set or clear an artist's official-site URL (scraped for tour dates); owner-scoped. Goes
+     * through {@link ArtistSiteUrlService#recordOfficialSiteUrl}, never a direct repository save
+     * (issue #248, the same reasoning {@link ArtistActivationService} already established for
+     * status changes) -- that service reads the OLD url before overwriting it and publishes {@code
+     * ArtistSiteUrlChanged} when a real prior value actually changed, which is what lets {@code
+     * scan.ShowRetirementListener} retire that artist's shows still attributed to the old site. A
+     * direct {@code artistRepository.save} here would silently bypass that: it was this method's
+     * ORIGINAL implementation, and the reason a URL correction used to leave stale shows behind
+     * forever with no way to clean them up other than by hand.
+     */
     @PostMapping("/{id}/site-url")
     public String setSiteUrl(@PathVariable Long id,
                              @RequestParam String url,
                              @RequestHeader(value = HX_REQUEST, required = false) String hxRequest,
                              Model model) {
         String owner = currentUser.email();
-        artistRepository.findByIdAndOwner(id, owner).ifPresent(a -> {
-            a.setOfficialSiteUrl(url.isBlank() ? null : url.trim());
-            artistRepository.save(a);
-        });
+        siteUrlService.recordOfficialSiteUrl(id, owner, url.isBlank() ? null : url.trim());
         if (hxRequest != null) {
             // Issue #174: first page, same reasoning as addSeed's comment above.
             populateActive(model, owner, null, null, true);
