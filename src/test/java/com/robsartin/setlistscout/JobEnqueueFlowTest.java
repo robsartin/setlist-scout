@@ -81,6 +81,9 @@ class JobEnqueueFlowTest extends AbstractPostgresIntegrationTest {
     @Autowired
     private ArtistSeedService artistSeedService;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     /**
      * The real ShowSource/RelationSource beans are left in the context (their id()s are what the
      * listeners fan out over -- exactly what's under test); only the external geocoder is
@@ -97,41 +100,34 @@ class JobEnqueueFlowTest extends AbstractPostgresIntegrationTest {
      * covered by ExpandJobListenerTest's unit tests (and by
      * {@link #seedingAnArtistEnqueuesAllExpandJobsIncludingTribute()} below end-to-end).
      */
-    private List<String> nonTributeExpandSourceIds() {
-        return relationSources.stream()
-                .filter(s -> s.classification() != ArtistSource.TRIBUTE_EXPANSION)
-                .map(RelationSource::id)
-                .toList();
-    }
-
     @Test
     @DisplayName("changeStatus(APPROVED) publishes ArtistActivated in a committed tx, and the real "
-            + "listeners enqueue one SCHEDULED scan_job per ShowSource and one per non-tribute RelationSource")
-    void activatingAnArtistEnqueuesAllScanAndExpandJobs() {
+            + "listeners enqueue one SCHEDULED scan_job per ShowSource -- but NO expand_job, "
+            + "because an approved artist has not yet proven it plays anywhere (#254)")
+    void activatingAnArtistEnqueuesScanJobsButNotExpandJobs() {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         String owner = "enqueue-flow@example.com";
         Long artistId = persistArtist(owner, "Enqueue Flow Artist", ArtistStatus.PENDING_REVIEW);
-        List<String> expectedExpandSourceIds = nonTributeExpandSourceIds();
 
         artistActivationService.changeStatus(artistId, owner, ArtistStatus.APPROVED);
 
         List<ScanJob> scanJobs = awaitUntil(
                 () -> scanJobRepository.findByOwnerAndArtistId(owner, artistId),
                 jobs -> jobs.size() == showSources.size());
-        List<ExpandJob> expandJobs = awaitUntil(
-                () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
-                jobs -> jobs.size() == expectedExpandSourceIds.size());
 
         assertThat(scanJobs).as("one scan_job per ShowSource").hasSize(showSources.size());
         assertThat(scanJobs).allMatch(j -> j.getStatus() == JobStatus.SCHEDULED);
         assertThat(scanJobs).extracting(ScanJob::getSource)
                 .containsExactlyInAnyOrderElementsOf(showSources.stream().map(ShowSource::id).toList());
 
-        // APPROVED artists get no tribute expand_job: tribute expansion is SEED-only.
-        assertThat(expandJobs).as("one expand_job per non-tribute RelationSource").hasSize(expectedExpandSourceIds.size());
-        assertThat(expandJobs).allMatch(j -> j.getStatus() == JobStatus.SCHEDULED);
-        assertThat(expandJobs).extracting(ExpandJob::getSource)
-                .containsExactlyInAnyOrderElementsOf(expectedExpandSourceIds);
+        // #254: scanning is how the artist earns expansion, so the scan jobs above are enqueued
+        // while the expand jobs are not. They arrive later, via ArtistShowsFound, only if a scan
+        // actually turns up a show -- see scan.ArtistShowsFoundFlowTest. Waiting on the event
+        // registry to drain first makes this a real absence rather than a race won by the assert.
+        awaitQuiescence(jdbcTemplate);
+        assertThat(expandJobRepository.findByOwnerAndArtistId(owner, artistId))
+                .as("no expand_job until a show proves the artist real")
+                .isEmpty();
     }
 
     @Test
@@ -273,26 +269,27 @@ class JobEnqueueFlowTest extends AbstractPostgresIntegrationTest {
         ScanJob preExisting = new ScanJob(artistId, "ticketmaster", JobStatus.SCHEDULED, 0, Instant.now());
         preExisting.setOwner(owner);
         scanJobRepository.save(preExisting);
-        List<String> expectedExpandSourceIds = nonTributeExpandSourceIds();
 
-        artistActivationService.changeStatus(artistId, owner, ArtistStatus.APPROVED);
+        // SEED, not APPROVED, since #254: an APPROVED artist enqueues no expand jobs on activation
+        // at all, which would make the "the expand pass survived the scan conflict" half of this
+        // test vacuously true. SEED keeps both enqueue paths live, which is what is under test.
+        artistActivationService.changeStatus(artistId, owner, ArtistStatus.SEED);
 
         List<ScanJob> scanJobs = awaitUntil(
                 () -> scanJobRepository.findByOwnerAndArtistId(owner, artistId),
                 jobs -> jobs.size() == showSources.size());
         List<ExpandJob> expandJobs = awaitUntil(
                 () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
-                jobs -> jobs.size() == expectedExpandSourceIds.size());
+                jobs -> jobs.size() == relationSources.size());
 
         assertThat(scanJobs).as("the pre-existing source wasn't duplicated, and the rest were enqueued")
                 .hasSize(showSources.size());
         assertThat(scanJobs).extracting(ScanJob::getSource)
                 .containsExactlyInAnyOrderElementsOf(showSources.stream().map(ShowSource::id).toList());
-        // APPROVED artists get no tribute expand_job: tribute expansion is SEED-only.
         assertThat(expandJobs).as("expand_job enqueue completed in the same pass, unaffected by the "
-                + "scan_job conflict").hasSize(expectedExpandSourceIds.size());
+                + "scan_job conflict").hasSize(relationSources.size());
         assertThat(expandJobs).extracting(ExpandJob::getSource)
-                .containsExactlyInAnyOrderElementsOf(expectedExpandSourceIds);
+                .containsExactlyInAnyOrderElementsOf(relationSources.stream().map(RelationSource::id).toList());
     }
 
     @Test
@@ -302,13 +299,15 @@ class JobEnqueueFlowTest extends AbstractPostgresIntegrationTest {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
         String owner = "cancel-flow@example.com";
         Long artistId = persistArtist(owner, "Cancel Flow Artist", ArtistStatus.PENDING_REVIEW);
-        artistActivationService.changeStatus(artistId, owner, ArtistStatus.APPROVED);
+        // SEED, not APPROVED, since #254: only a SEED gets expand jobs on activation, and this
+        // test needs some to exist before it can prove deactivation cancels them.
+        artistActivationService.changeStatus(artistId, owner, ArtistStatus.SEED);
         awaitUntil(
                 () -> scanJobRepository.findByOwnerAndArtistId(owner, artistId),
                 jobs -> jobs.size() == showSources.size());
         awaitUntil(
                 () -> expandJobRepository.findByOwnerAndArtistId(owner, artistId),
-                jobs -> jobs.size() == nonTributeExpandSourceIds().size());
+                jobs -> jobs.size() == relationSources.size());
 
         artistActivationService.changeStatus(artistId, owner, ArtistStatus.REJECTED);
 
