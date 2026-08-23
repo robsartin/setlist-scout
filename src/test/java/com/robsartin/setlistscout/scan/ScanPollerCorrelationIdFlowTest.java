@@ -82,7 +82,10 @@ class ScanPollerCorrelationIdFlowTest {
         when(settingsRepository.findByOwner(OWNER)).thenReturn(Optional.of(settings));
 
         ScanUnitRunner scanUnitRunner = new ScanUnitRunner(List.of(showSource), artistRepository,
-                artistSiteUrlService, showRepository, settingsRepository, musicBrainz);
+                artistSiteUrlService, showRepository, settingsRepository, musicBrainz,
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                new org.springframework.transaction.support.TransactionTemplate(
+                        mock(org.springframework.transaction.PlatformTransactionManager.class)));
 
         ScanJobRepository scanJobRepository = mock(ScanJobRepository.class);
         ScanJob job = new ScanJob(ARTIST_ID, SOURCE, JobStatus.RUNNING, 0, NOW);

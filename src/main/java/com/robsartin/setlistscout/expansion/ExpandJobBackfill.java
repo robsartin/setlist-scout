@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Startup reconciler: enqueue one expand job per {@link RelationSource} for every active
- * (SEED/APPROVED) artist that doesn't already have jobs. Mirrors {@code scan.ScanJobBackfill} --
+ * Startup reconciler: enqueue one expand job per {@link RelationSource} for every SEED artist
+ * that doesn't already have jobs. SEED only since #254 -- see {@link #reconcile()}. Mirrors {@code scan.ScanJobBackfill} --
  * see there for the full rationale (artists activated before PR3b's job tables existed never
  * fired ArtistActivated, so they'd otherwise be invisible to the poller; the #195 readiness fix
  * that dropped {@code ApplicationRunner} in favor of a one-shot {@code @Scheduled} method; why the
@@ -32,7 +32,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * {@code @Transactional}). Idempotent via a batched {@code INSERT ... ON CONFLICT DO NOTHING};
  * {@code next_due_at} is jittered across {@link PollerProperties#backfillSpread()}. Tribute expand
  * jobs stay SEED-only, matching {@code ExpandJobListener#onArtistActivated}: tribute/cover-band
- * expansion only makes sense for a hand-curated seed, not for an already-expanded artist.
+ * expansion only makes sense for a hand-curated seed, not for an already-expanded artist. Since
+ * #254 that is the whole population this backfill considers.
  */
 @Component
 @ConditionalOnProperty(name = "setlistscout.job-backfill-enabled", havingValue = "true", matchIfMissing = true)
@@ -82,8 +83,12 @@ public class ExpandJobBackfill {
 
     private void reconcile() {
         long spreadMs = properties.backfillSpread().toMillis();
-        List<Artist> active = artistRepository.findByStatusIn(
-                List.of(ArtistStatus.SEED, ArtistStatus.APPROVED));
+        // #254: SEED only. This used to backfill SEED + APPROVED, which on every restart
+        // re-enqueued expansion for every approved artist regardless of whether it had ever
+        // produced a show -- silently undoing ExpandJobListener's gate. An APPROVED artist now
+        // earns its expansion jobs through ArtistShowsFound, on the next scan cycle that finds it
+        // a show, so nothing real is lost by not seeding them here.
+        List<Artist> active = artistRepository.findByStatusIn(List.of(ArtistStatus.SEED));
 
         List<PendingExpandJob> pending = new ArrayList<>();
         for (Artist artist : active) {

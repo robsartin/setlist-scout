@@ -8,6 +8,9 @@ import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SearchSettingsRepository;
 import com.robsartin.setlistscout.shared.MusicBrainzService;
+import com.robsartin.setlistscout.shared.events.ArtistShowsFound;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -33,19 +36,25 @@ public class ScanUnitRunner {
     private final ShowRepository showRepository;
     private final SearchSettingsRepository settingsRepository;
     private final MusicBrainzService musicBrainz;
+    private final ApplicationEventPublisher publisher;
+    private final TransactionTemplate transactionTemplate;
 
     public ScanUnitRunner(List<ShowSource> showSources,
                            ArtistRepository artistRepository,
                            ArtistSiteUrlService artistSiteUrlService,
                            ShowRepository showRepository,
                            SearchSettingsRepository settingsRepository,
-                           MusicBrainzService musicBrainz) {
+                           MusicBrainzService musicBrainz,
+                           ApplicationEventPublisher publisher,
+                           TransactionTemplate transactionTemplate) {
         this.showSources = showSources;
         this.artistRepository = artistRepository;
         this.artistSiteUrlService = artistSiteUrlService;
         this.showRepository = showRepository;
         this.settingsRepository = settingsRepository;
         this.musicBrainz = musicBrainz;
+        this.publisher = publisher;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /**
@@ -89,7 +98,25 @@ public class ScanUnitRunner {
 
         ScanQuery query = buildQuery(artist, settings, start, end);
 
-        return persistNew(owner, artistId, source.search(query));
+        // The adapter call is the slow external -- it stays OUTSIDE any transaction (ScanPoller
+        // deliberately runs this method with no ambient transaction so a slow source never ties up
+        // a connection). Only then is the event published inside a short TransactionTemplate,
+        // which is the whole of ADR-0024: @ApplicationModuleListener is AFTER_COMMIT, so a publish
+        // with no committing transaction around it is silently dropped and expansion would never
+        // fire -- architecturally present, functionally dead, exactly the shape of #211 and #230.
+        List<Show> found = source.search(query);
+        int saved = persistNew(owner, artistId, found);
+
+        // #254: shows are the evidence that lets expansion recurse from this artist. Published on
+        // "found", not on "newly saved": an artist whose shows are all already known is still an
+        // artist that plays, and keying on new inserts would disqualify every stable act.
+        if (!found.isEmpty()) {
+            String artistName = artist.getName();
+            String artistStatus = artist.getStatus().name();
+            transactionTemplate.executeWithoutResult(tx -> publisher.publishEvent(
+                    new ArtistShowsFound(owner, artistId, artistName, artistStatus)));
+        }
+        return saved;
     }
 
     /**

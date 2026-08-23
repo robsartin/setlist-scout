@@ -65,11 +65,13 @@ class ExpandJobBackfillTest extends AbstractPostgresIntegrationTest {
     private GeocodingService geocodingService;
 
     @Test
-    @DisplayName("backfill enqueues one expand job per source for each active artist, jittered, "
-            + "idempotently, with tribute-only-for-SEED")
-    void backfillEnqueuesJobsForActiveArtists() {
+    @DisplayName("backfill enqueues every source for SEED artists only, jittered and idempotently "
+            + "-- an APPROVED artist gets nothing here, it earns expansion by having a show (#254)")
+    void backfillEnqueuesJobsForSeedArtistsOnly() {
         when(geocodingService.geocode(any())).thenReturn(Optional.empty());
-        // Two active (SEED + APPROVED) + one REJECTED artist for the same owner.
+        // One SEED + one APPROVED + one REJECTED artist for the same owner. Before #254 the
+        // APPROVED artist got jobs here, which meant every restart re-enqueued expansion for the
+        // whole approved catalog and silently undid ExpandJobListener's gate.
         Artist seed = save(artist(OWNER, "Wilco", ArtistStatus.SEED));
         Artist approved = save(artist(OWNER, "Dawes", ArtistStatus.APPROVED));
         save(artist(OWNER, "Nope", ArtistStatus.REJECTED));
@@ -83,16 +85,12 @@ class ExpandJobBackfillTest extends AbstractPostgresIntegrationTest {
 
         List<ExpandJob> seedJobs = expandJobRepository.findByOwnerAndArtistId(OWNER, seed.getId());
         List<ExpandJob> approvedJobs = expandJobRepository.findByOwnerAndArtistId(OWNER, approved.getId());
-        // SEED gets every source, including tribute; APPROVED gets everything except tribute.
+        // SEED gets every source, including tribute. APPROVED gets nothing at all (#254).
         assertThat(seedJobs).hasSize(relationSources.size());
-        assertThat(approvedJobs).hasSize(relationSources.size() - (int) tributeSources);
-        assertThat(approvedJobs).extracting(ExpandJob::getSource)
-                .noneMatch(sourceId -> relationSources.stream()
-                        .anyMatch(s -> s.id().equals(sourceId)
-                                && s.classification() == ArtistSource.TRIBUTE_EXPANSION));
-        // No jobs for the rejected artist.
+        assertThat(approvedJobs).isEmpty();
+        // No jobs for the rejected artist either -- SEED is now the whole population.
         assertThat(expandJobRepository.findByOwner(OWNER))
-                .allSatisfy(j -> assertThat(j.getArtistId()).isIn(seed.getId(), approved.getId()));
+                .allSatisfy(j -> assertThat(j.getArtistId()).isEqualTo(seed.getId()));
         // next_due_at jittered into [now, now + spread].
         assertThat(seedJobs).allSatisfy(j -> assertThat(j.getNextDueAt())
                 .isBetween(before, before.plus(Duration.ofHours(2)).plusSeconds(5)));
@@ -101,8 +99,7 @@ class ExpandJobBackfillTest extends AbstractPostgresIntegrationTest {
         expandJobBackfill.run(null);
         assertThat(expandJobRepository.findByOwnerAndArtistId(OWNER, seed.getId()))
                 .hasSize(relationSources.size());
-        assertThat(expandJobRepository.findByOwnerAndArtistId(OWNER, approved.getId()))
-                .hasSize(relationSources.size() - (int) tributeSources);
+        assertThat(expandJobRepository.findByOwnerAndArtistId(OWNER, approved.getId())).isEmpty();
     }
 
     private Artist artist(String owner, String name, ArtistStatus status) {

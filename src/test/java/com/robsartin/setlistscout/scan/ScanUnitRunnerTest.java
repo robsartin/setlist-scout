@@ -54,7 +54,10 @@ class ScanUnitRunnerTest {
         when(showSource.id()).thenReturn(SOURCE_ID);
         when(showSource.search(any())).thenReturn(List.of());
         runner = new ScanUnitRunner(List.of(showSource), artistRepository, artistSiteUrlService, showRepository,
-                settingsRepository, musicBrainz);
+                settingsRepository, musicBrainz,
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                new org.springframework.transaction.support.TransactionTemplate(
+                        mock(org.springframework.transaction.PlatformTransactionManager.class)));
 
         SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
         settings.setPostalCode("78701");
