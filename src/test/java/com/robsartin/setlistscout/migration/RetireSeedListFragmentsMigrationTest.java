@@ -1,10 +1,10 @@
 package com.robsartin.setlistscout.migration;
 
+import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.output.MigrateResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.core.io.ClassPathResource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -37,12 +37,12 @@ class RetireSeedListFragmentsMigrationTest {
     @Test
     @DisplayName("retires only this owner's SEED_LIST fragments and only their scan jobs (#255)")
     void retiresOnlyTheFragments() throws Exception {
-        String baseline = new String(new ClassPathResource("db/migration/V1__baseline.sql")
-                .getInputStream().readAllBytes());
+        // Migrate to V31 first: scan_job arrives in V6, so the rows this migration acts on cannot
+        // exist until the schema that holds them does. Seeding between V31 and V32 is what makes
+        // this a test of the migration rather than of an empty database.
+        migrateTo("31");
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
-            s.execute(baseline);
-
             // The fragments themselves.
             insertArtist(s, OWNER, "Peter", "SEED_LIST", "SEED");
             insertArtist(s, OWNER, "Jr.", "SEED_LIST", "SEED");
@@ -64,12 +64,7 @@ class RetireSeedListFragmentsMigrationTest {
             insertScanJob(s, OWNER, artistId(s, OWNER, "Peter Gabriel", "SEED"), "ticketmaster");
         }
 
-        MigrateResult result = Flyway.configure()
-                .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
-                .baselineOnMigrate(true).baselineVersion("0")
-                .locations("classpath:db/migration")
-                .load().migrate();
-        assertThat(result.success).isTrue();
+        assertThat(migrateTo("latest").success).isTrue();
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
             assertThat(status(s, OWNER, "Peter")).isEqualTo("REMOVED");
@@ -91,10 +86,22 @@ class RetireSeedListFragmentsMigrationTest {
         }
     }
 
+    private static MigrateResult migrateTo(String version) {
+        var config = Flyway.configure()
+                .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration");
+        if (!"latest".equals(version)) {
+            config = config.target(org.flywaydb.core.api.MigrationVersion.fromVersion(version));
+        }
+        return config.load().migrate();
+    }
+
     private static void insertArtist(Statement s, String owner, String name, String source,
             String status) throws Exception {
-        s.execute("INSERT INTO artist (owner, name, source, status, created_at) VALUES ("
-                + q(owner) + ", " + q(name) + ", " + q(source) + ", " + q(status) + ", now())");
+        s.execute("INSERT INTO artist (owner, name, normalized_name, source, status, created_at)"
+                + " VALUES (" + q(owner) + ", " + q(name) + ", "
+                + q(ArtistNameNormalizer.normalize(name)) + ", " + q(source) + ", "
+                + q(status) + ", now())");
     }
 
     private static void insertScanJob(Statement s, String owner, long artistId, String source)
