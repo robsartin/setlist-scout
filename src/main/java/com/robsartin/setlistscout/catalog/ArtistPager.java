@@ -39,7 +39,11 @@ import java.util.List;
 @Component
 public class ArtistPager {
 
-    private static final List<ArtistStatus> ACTIVE_STATUSES = List.of(ArtistStatus.SEED, ArtistStatus.APPROVED);
+    /** The artists list's own population -- callers that want it pass {@link #ACTIVE_STATUSES}. */
+    public static final List<ArtistStatus> ACTIVE_STATUSES = List.of(ArtistStatus.SEED, ArtistStatus.APPROVED);
+
+    /** The Rejected page's population (#251). REMOVED rides along: both are "not on your list". */
+    public static final List<ArtistStatus> INACTIVE_STATUSES = List.of(ArtistStatus.REJECTED, ArtistStatus.REMOVED);
 
     private final ArtistRepository artistRepository;
     private final int pageSize;
@@ -55,14 +59,15 @@ public class ArtistPager {
      * be non-blank -- see the class doc for the tie-break when both are somehow present. Neither
      * present means the first page.
      */
-    public ActivePage page(String owner, String after, String before, String query) {
+    public ActivePage page(String owner, String after, String before, String query,
+                            List<ArtistStatus> statuses) {
         if (after != null && !after.isBlank()) {
-            return nextPage(owner, after, query);
+            return nextPage(owner, after, query, statuses);
         }
         if (before != null && !before.isBlank()) {
-            return previousPage(owner, before, query);
+            return previousPage(owner, before, query, statuses);
         }
-        return firstPage(owner, query);
+        return firstPage(owner, query, statuses);
     }
 
     /**
@@ -72,37 +77,37 @@ public class ArtistPager {
      * whole-list load this page was built to avoid, and on a 3,000-row catalog it would appear
      * to work right up until it didn't.
      */
-    private List<Artist> fetchFirst(String owner, String query, int limit) {
+    private List<Artist> fetchFirst(String owner, String query, List<ArtistStatus> statuses, int limit) {
         return ArtistSearchTerm.isSearch(query)
-                ? artistRepository.findActiveMatchingFirstPage(owner, ACTIVE_STATUSES,
+                ? artistRepository.findActiveMatchingFirstPage(owner, statuses,
                         ArtistSearchTerm.likePattern(query), limit)
-                : artistRepository.findActiveFirstPage(owner, ACTIVE_STATUSES, limit);
+                : artistRepository.findActiveFirstPage(owner, statuses, limit);
     }
 
-    private List<Artist> fetchAfter(String owner, String query, String cursor, int limit) {
+    private List<Artist> fetchAfter(String owner, String query, List<ArtistStatus> statuses, String cursor, int limit) {
         return ArtistSearchTerm.isSearch(query)
-                ? artistRepository.findActiveMatchingAfter(owner, ACTIVE_STATUSES,
+                ? artistRepository.findActiveMatchingAfter(owner, statuses,
                         ArtistSearchTerm.likePattern(query), cursor, limit)
-                : artistRepository.findActiveAfter(owner, ACTIVE_STATUSES, cursor, limit);
+                : artistRepository.findActiveAfter(owner, statuses, cursor, limit);
     }
 
-    private List<Artist> fetchBefore(String owner, String query, String cursor, int limit) {
+    private List<Artist> fetchBefore(String owner, String query, List<ArtistStatus> statuses, String cursor, int limit) {
         return ArtistSearchTerm.isSearch(query)
-                ? artistRepository.findActiveMatchingBefore(owner, ACTIVE_STATUSES,
+                ? artistRepository.findActiveMatchingBefore(owner, statuses,
                         ArtistSearchTerm.likePattern(query), cursor, limit)
-                : artistRepository.findActiveBefore(owner, ACTIVE_STATUSES, cursor, limit);
+                : artistRepository.findActiveBefore(owner, statuses, cursor, limit);
     }
 
-    private ActivePage firstPage(String owner, String query) {
-        List<Artist> fetched = fetchFirst(owner, query, pageSize + 1);
+    private ActivePage firstPage(String owner, String query, List<ArtistStatus> statuses) {
+        List<Artist> fetched = fetchFirst(owner, query, statuses, pageSize + 1);
         boolean hasNext = fetched.size() > pageSize;
         List<Artist> page = hasNext ? fetched.subList(0, pageSize) : fetched;
         String nextCursor = hasNext ? lastCursor(page) : null;
         return new ActivePage(page, hasNext, false, nextCursor, null, query);
     }
 
-    private ActivePage nextPage(String owner, String cursor, String query) {
-        List<Artist> fetched = fetchAfter(owner, query, cursor, pageSize + 1);
+    private ActivePage nextPage(String owner, String cursor, String query, List<ArtistStatus> statuses) {
+        List<Artist> fetched = fetchAfter(owner, query, statuses, cursor, pageSize + 1);
         boolean hasNext = fetched.size() > pageSize;
         List<Artist> page = hasNext ? fetched.subList(0, pageSize) : fetched;
         String nextCursor = hasNext ? lastCursor(page) : null;
@@ -114,8 +119,8 @@ public class ArtistPager {
         return new ActivePage(page, hasNext, true, nextCursor, previousCursor, query);
     }
 
-    private ActivePage previousPage(String owner, String cursor, String query) {
-        List<Artist> fetchedDescending = fetchBefore(owner, query, cursor, pageSize + 1);
+    private ActivePage previousPage(String owner, String cursor, String query, List<ArtistStatus> statuses) {
+        List<Artist> fetchedDescending = fetchBefore(owner, query, statuses, cursor, pageSize + 1);
         boolean hasPrevious = fetchedDescending.size() > pageSize;
         List<Artist> trimmedDescending = hasPrevious ? fetchedDescending.subList(0, pageSize) : fetchedDescending;
         List<Artist> page = new ArrayList<>(trimmedDescending);

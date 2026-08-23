@@ -6,6 +6,18 @@
     <h1>Rejected</h1>
     <p class="page-sub">Candidates you've turned down. Unreject to send one back to Candidates.</p>
 
+    <!--/* #251: this page used to render every rejected row in one response -- 32,201 of them,
+           each wrapping its own form and submit button. Search is the control that actually makes
+           it usable; the same plain GET form as the artists page (#250), and the same reasoning:
+           no custom JS anywhere in this app, and a GET keeps the result bookmarkable. */-->
+    <form class="scope-edit" th:action="@{/artists/rejected}" method="get" role="search">
+        <label for="rejected-search">Search rejected artists</label>
+        <input id="rejected-search" type="search" name="q" th:value="${query}"
+               placeholder="name or part of a name">
+        <button type="submit" class="btn btn-sm">Search</button>
+        <a th:if="${!#strings.isEmpty(query)}" class="btn btn-sm" th:href="@{/artists/rejected}">Clear</a>
+    </form>
+
     <div class="card">
         <div class="table-scroll">
             <table>
@@ -16,6 +28,9 @@
                     <td class="note" th:text="${a.note}">Note</td>
                     <td>
                         <form class="inline unreject" th:action="@{'/artists/' + ${a.id} + '/unreject'}" method="post">
+                            <!--/* #251: carries the search across the redirect, so unrejecting one
+                                   row does not throw away the search that found it. */-->
+                            <input type="hidden" name="q" th:value="${query}"/>
                             <button type="submit" class="btn-sm" th:aria-label="'Unreject ' + ${a.name}">Unreject</button>
                         </form>
                     </td>
@@ -24,6 +39,26 @@
             </table>
         </div>
     </div>
+
+    <p th:if="${#lists.isEmpty(rejected) and #strings.isEmpty(query)}" class="note">
+        Nothing rejected yet.
+    </p>
+    <p th:if="${#lists.isEmpty(rejected) and !#strings.isEmpty(query)}" class="note">
+        No rejected artists match &quot;<span th:text="${query}">query</span>&quot;.
+    </p>
+
+    <!--/* #251: keyset pagination, same shape as artists.html's (#174) -- real th:href links so
+           the non-JS path works, and the search term rides along so paging a search does not
+           silently drop back to all 32,201 rows. No hx-* attributes here: this page has no swap
+           target of its own, and Unreject is a plain POST + redirect. */-->
+    <p class="note" id="rejected-position" th:text="${rejectedPage.positionSummary('rejected')}">Showing 20 artists, A to Z.</p>
+    <nav class="pagination" aria-label="Rejected list pages"
+         th:if="${rejectedPage.hasPrevious or rejectedPage.hasNext}">
+        <a th:if="${rejectedPage.hasPrevious}" id="rejected-prev" class="btn btn-sm"
+           th:href="@{/artists/rejected(before=${rejectedPage.previousCursor},q=${query})}">Previous page</a>
+        <a th:if="${rejectedPage.hasNext}" id="rejected-next" class="btn btn-sm"
+           th:href="@{/artists/rejected(after=${rejectedPage.nextCursor},q=${query})}">Next page</a>
+    </nav>
 </div>
 </body>
 </html>

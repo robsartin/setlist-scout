@@ -90,7 +90,7 @@
                history-restore re-fetch -- the layout already renders the one real #sr-status node
                on those, and a second copy under the same id would be a duplicate-id bug. */-->
         <p id="sr-status" hx-swap-oob="innerHTML" class="visually-hidden" th:if="${announceActivePage}">
-            <span th:text="${activePage.positionSummary()}">Showing 20 artists, Alpha Band to Zulu Band.</span>
+            <span th:text="${activePage.positionSummary('active')}">Showing 20 artists, Alpha Band to Zulu Band.</span>
         </p>
         <!--/* #235: row rhythm + hover-action pattern from shows.html/venues.html, minus the date
                rail -- the issue's own words for this page ("a long list with pagination. The rail
@@ -216,7 +216,7 @@
                Landing on a page where that same id isn't rendered (e.g. Next from the second-to-last
                page) is the one gap that leaves: focus falls back to <body>, same as any other
                destination this fragment doesn't name -- accepted deliberately, see issue #174. */-->
-        <p class="note" id="active-position" th:text="${activePage.positionSummary()}">Showing 20 artists, Alpha Band to Zulu Band.</p>
+        <p class="note" id="active-position" th:text="${activePage.positionSummary('active')}">Showing 20 artists, Alpha Band to Zulu Band.</p>
         <nav class="pagination" aria-label="Active list pages" th:if="${activePage.hasPrevious or activePage.hasNext}">
             <a th:if="${activePage.hasPrevious}" id="active-prev" class="btn btn-sm"
                th:href="@{/artists(before=${activePage.previousCursor},q=${query})}"

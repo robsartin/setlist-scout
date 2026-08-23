@@ -24,17 +24,25 @@ public record ActivePage(List<Artist> artists, boolean hasNext, boolean hasPrevi
      * two deliberately say the same thing, same reasoning as {@code ActionOutcome}/candidates.html's
      * matching visible-empty-state and announcement text.
      */
-    public String positionSummary() {
+    /**
+     * @param noun what this page is a page OF -- "active" on the artists list, "rejected" on the
+     * Rejected page (#251). A parameter rather than a record component because it is a rendering
+     * concern: the same page of rows says a different sentence depending on which list rendered
+     * it, and nothing about the paging itself changes.
+     */
+    public String positionSummary(String noun) {
         // #250: the same sentence has to stay true when a search narrows the list. "No active
         // artists." while a query is active reads as "your list is empty" -- a different claim,
         // and a wrong one. Unfiltered wording is byte-for-byte what #174 shipped.
         boolean searching = ArtistSearchTerm.isSearch(query);
         String matching = searching ? " matching \"" + query.trim() + "\"" : "";
         if (artists.isEmpty()) {
-            return searching ? "No active artists match \"" + query.trim() + "\"." : "No active artists.";
+            return searching
+                    ? "No " + noun + " artists match \"" + query.trim() + "\"."
+                    : "No " + noun + " artists.";
         }
         if (artists.size() == 1) {
-            return "Showing the only active artist" + matching + ": " + artists.get(0).getName() + ".";
+            return "Showing the only " + noun + " artist" + matching + ": " + artists.get(0).getName() + ".";
         }
         String first = artists.get(0).getName();
         String last = artists.get(artists.size() - 1).getName();
