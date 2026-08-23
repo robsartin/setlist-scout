@@ -18,39 +18,47 @@ class ActivePageTest {
     @Test
     @DisplayName("an empty unfiltered list says the list is empty")
     void emptyWithoutASearch() {
-        assertThat(page(List.of(), null).positionSummary()).isEqualTo("No active artists.");
+        assertThat(page(List.of(), null).positionSummary("active")).isEqualTo("No active artists.");
     }
 
     @Test
     @DisplayName("an empty filtered list names the query rather than claiming the list is empty")
     void emptyWithASearch() {
-        assertThat(page(List.of(), "petty").positionSummary())
+        assertThat(page(List.of(), "petty").positionSummary("active"))
                 .isEqualTo("No active artists match \"petty\".");
     }
 
     @Test
     @DisplayName("a filtered page counts the matches shown, not the whole list")
     void filteredCountsMatches() {
-        assertThat(page(List.of(artist("Petty Officer"), artist("Tom Petty")), "petty").positionSummary())
+        assertThat(page(List.of(artist("Petty Officer"), artist("Tom Petty")), "petty").positionSummary("active"))
                 .isEqualTo("Showing 2 artists matching \"petty\", Petty Officer to Tom Petty.");
     }
 
     @Test
     @DisplayName("a single filtered match reads naturally")
     void singleFilteredMatch() {
-        assertThat(page(List.of(artist("Tom Petty")), "petty").positionSummary())
+        assertThat(page(List.of(artist("Tom Petty")), "petty").positionSummary("active"))
                 .isEqualTo("Showing the only active artist matching \"petty\": Tom Petty.");
     }
 
     @Test
     @DisplayName("without a search the wording is unchanged -- #174's exact sentences still render")
     void unfilteredWordingIsUnchanged() {
-        assertThat(page(List.of(artist("Alpha"), artist("Zulu")), null).positionSummary())
+        assertThat(page(List.of(artist("Alpha"), artist("Zulu")), null).positionSummary("active"))
                 .isEqualTo("Showing 2 artists, Alpha to Zulu.");
-        assertThat(page(List.of(artist("Alpha")), null).positionSummary())
+        assertThat(page(List.of(artist("Alpha")), null).positionSummary("active"))
                 .isEqualTo("Showing the only active artist: Alpha.");
-        assertThat(page(List.of(artist("Alpha"), artist("Zulu")), "  ").positionSummary())
+        assertThat(page(List.of(artist("Alpha"), artist("Zulu")), "  ").positionSummary("active"))
                 .isEqualTo("Showing 2 artists, Alpha to Zulu.");
+    }
+
+    @Test
+    @DisplayName("the noun names the list -- the Rejected page says 'rejected', not 'active' (#251)")
+    void nounNamesTheList() {
+        assertThat(page(List.of(), null).positionSummary("rejected")).isEqualTo("No rejected artists.");
+        assertThat(page(List.of(artist("Amanda Shires")), "shires").positionSummary("rejected"))
+                .isEqualTo("Showing the only rejected artist matching \"shires\": Amanda Shires.");
     }
 
     private static ActivePage page(List<Artist> artists, String query) {

@@ -4,6 +4,11 @@ import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
+import java.nio.charset.StandardCharsets;
+import org.springframework.web.util.UriUtils;
+import com.robsartin.setlistscout.catalog.ActivePage;
+import com.robsartin.setlistscout.catalog.ArtistPager;
+import com.robsartin.setlistscout.catalog.ArtistSearchTerm;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.shared.AdminGuard;
@@ -47,15 +52,17 @@ public class ReviewController {
     private final CurrentUser currentUser;
     private final ArtistActivationService activationService;
     private final AdminGuard adminGuard;
+    private final ArtistPager artistPager;
 
     public ReviewController(ArtistRepository artistRepository, ExpandJobRepository expandJobRepository,
                            CurrentUser currentUser, ArtistActivationService activationService,
-                           AdminGuard adminGuard) {
+                           AdminGuard adminGuard, ArtistPager artistPager) {
         this.artistRepository = artistRepository;
         this.expandJobRepository = expandJobRepository;
         this.currentUser = currentUser;
         this.activationService = activationService;
         this.adminGuard = adminGuard;
+        this.artistPager = artistPager;
     }
 
     /**
@@ -198,11 +205,29 @@ public class ReviewController {
         return CANDIDATES_APP_FRAGMENT;
     }
 
-    /** The Rejected page: this owner's rejected artists, reversible via Unreject. */
+    /**
+     * The Rejected page: this owner's rejected artists, reversible via Unreject.
+     * <p>
+     * Issue #251: paginated and searchable. This used to be a bare {@code findByOwnerAndStatus}
+     * straight into the template, which rendered <b>32,201</b> rows -- and 32,201 focusable submit
+     * buttons -- in one response. It hydrated 32k entities per render (the same shape as the #220
+     * regression), took seconds to paint, truncated the accessibility tree before the end, and was
+     * unusable for its one job: finding a rejected artist to reverse.
+     * <p>
+     * Reuses {@link ArtistPager} and {@link ArtistSearchTerm} rather than growing a second
+     * pagination scheme, so this page inherits #174's no-duplicate/no-skip guarantee and #250's
+     * normalizer-based matching by construction.
+     */
     @GetMapping("/rejected")
-    public String rejected(Model model) {
-        model.addAttribute("rejected",
-                artistRepository.findByOwnerAndStatus(currentUser.email(), ArtistStatus.REJECTED));
+    public String rejected(@RequestParam(required = false) String after,
+                           @RequestParam(required = false) String before,
+                           @RequestParam(required = false) String q,
+                           Model model) {
+        String owner = currentUser.email();
+        ActivePage page = artistPager.page(owner, after, before, q, ArtistPager.INACTIVE_STATUSES);
+        model.addAttribute("rejected", page.artists());
+        model.addAttribute("rejectedPage", page);
+        model.addAttribute("query", ArtistSearchTerm.isSearch(q) ? q.trim() : "");
         return "rejected";
     }
 
@@ -266,11 +291,22 @@ public class ReviewController {
                 verb + " " + rows.size() + " " + CandidateGroups.label(type) + " from " + via + "."));
     }
 
-    /** Move a rejected artist back into the pending review queue. Owner-scoped via setStatus. */
+    /**
+     * Move a rejected artist back into the pending review queue. Owner-scoped via setStatus.
+     * <p>
+     * #251: returns to the Rejected page carrying the search that was active, rather than to
+     * /artists. On a 32,201-row list, landing somewhere else discards whatever the user did to
+     * find this row -- and the next one they want to unreject is almost always in the same search.
+     * The cursor is deliberately NOT carried: the row just left this list, so the page it was on
+     * has shifted, and returning to the first page of the same search is the honest destination
+     * (same reasoning as ArtistController's post-action reset, issue #174).
+     */
     @PostMapping("/{id}/unreject")
-    public String unreject(@PathVariable Long id) {
+    public String unreject(@PathVariable Long id, @RequestParam(required = false) String q) {
         setStatus(id, ArtistStatus.PENDING_REVIEW);
-        return "redirect:/artists";
+        return ArtistSearchTerm.isSearch(q)
+                ? "redirect:/artists/rejected?q=" + UriUtils.encodeQueryParam(q.trim(), StandardCharsets.UTF_8)
+                : "redirect:/artists/rejected";
     }
 
     /**

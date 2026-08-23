@@ -324,7 +324,7 @@ public class ArtistController {
      */
     private void populateActive(Model model, String owner, String after, String before,
                                  boolean announce, String query) {
-        ActivePage page = artistPager.page(owner, after, before, query);
+        ActivePage page = artistPager.page(owner, after, before, query, ArtistPager.ACTIVE_STATUSES);
         model.addAttribute("active", page.artists());
         model.addAttribute("activePage", page);
         // #250: the raw query, echoed back into the search box and into every link and form inside
@@ -335,8 +335,7 @@ public class ArtistController {
         // Only ever populated during a search: an unfiltered page has no reason to list them, and
         // there are 32,201 of them.
         model.addAttribute("inactiveMatches", ArtistSearchTerm.isSearch(query)
-                ? artistRepository.findInactiveMatching(owner,
-                        List.of(ArtistStatus.REJECTED, ArtistStatus.REMOVED),
+                ? artistRepository.findInactiveMatching(owner, ArtistPager.INACTIVE_STATUSES,
                         ArtistSearchTerm.likePattern(query), INACTIVE_MATCH_LIMIT)
                 : List.of());
         model.addAttribute("announceActivePage", announce);

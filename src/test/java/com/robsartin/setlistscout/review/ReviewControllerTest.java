@@ -45,7 +45,7 @@ class ReviewControllerTest {
         when(currentUser.email()).thenReturn(OWNER);
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         controller = new ReviewController(artistRepository, expandJobRepository, currentUser, activationService,
-                adminGuard);
+                adminGuard, new com.robsartin.setlistscout.catalog.ArtistPager(artistRepository, 20));
     }
 
     private static Artist pending(String name, ArtistSource source, long id) {
@@ -228,10 +228,19 @@ class ReviewControllerTest {
     @Test
     @DisplayName("unreject delegates to the activation service to move a rejected artist back to pending")
     void unrejectMovesBackToPending() {
-        String view = controller.unreject(9L);
+        String view = controller.unreject(9L, null);
 
-        assertThat(view).isEqualTo("redirect:/artists");
+        // #251: back to the Rejected page, not /artists -- see ReviewController#unreject.
+        assertThat(view).isEqualTo("redirect:/artists/rejected");
         verify(activationService).changeStatus(9L, OWNER, ArtistStatus.PENDING_REVIEW);
+    }
+
+    @Test
+    @DisplayName("unreject carries an active search back to the Rejected page, url-encoded (#251)")
+    void unrejectCarriesTheSearch() {
+        assertThat(controller.unreject(9L, "tom petty")).isEqualTo("redirect:/artists/rejected?q=tom%20petty");
+        assertThat(controller.unreject(9L, "  ")).isEqualTo("redirect:/artists/rejected");
+        assertThat(controller.unreject(9L, "a&b")).isEqualTo("redirect:/artists/rejected?q=a%26b");
     }
 
     @Test
