@@ -115,4 +115,57 @@ class ArtistNameNormalizerTest {
         assertThat(hebrew).isNotEqualTo(japanese2);
         assertThat(japanese1).isNotEqualTo(japanese2);
     }
+
+    // ---- #261: U+2010 HYPHEN and U+2011 NON-BREAKING HYPHEN ----------------------------------
+
+    @Test
+    @DisplayName("issue #261: U+2010 HYPHEN folds to the ASCII hyphen -- 33 duplicate artist pairs "
+            + "in production exist only because it did not")
+    void unicodeHyphenFoldsToAsciiHyphen() {
+        assertThat(ArtistNameNormalizer.normalize("Drive\u2010By Truckers"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Drive-By Truckers"));
+    }
+
+    @Test
+    @DisplayName("issue #261: U+2011 NON-BREAKING HYPHEN folds to the ASCII hyphen")
+    void nonBreakingHyphenFoldsToAsciiHyphen() {
+        assertThat(ArtistNameNormalizer.normalize("Olivia Newton\u2011John"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Olivia Newton-John"));
+    }
+
+    @Test
+    @DisplayName("issue #261: the #157 whitespace collapse applies to the NEW characters too, not "
+            + "just the ASCII hyphen -- folding the character without this leaves \"X\u2010 Y\" distinct")
+    void whitespaceAroundTheNewHyphensCollapsesToo() {
+        String target = ArtistNameNormalizer.normalize("X-Y");
+        for (String variant : java.util.List.of(
+                "X\u2010 Y", "X \u2010Y", "X \u2010 Y",
+                "X\u2011 Y", "X \u2011Y", "X \u2011 Y")) {
+            assertThat(ArtistNameNormalizer.normalize(variant))
+                    .as("%s should normalize to the same form as X-Y", variant)
+                    .isEqualTo(target);
+        }
+    }
+
+    @Test
+    @DisplayName("issue #261 regression guard: the four dashes folded before this change still fold")
+    void previouslyFoldedDashesStillFold() {
+        String target = ArtistNameNormalizer.normalize("X-Y");
+        for (String variant : java.util.List.of("X\u2013Y", "X\u2014Y", "X\u2015Y", "X\u2212Y")) {
+            assertThat(ArtistNameNormalizer.normalize(variant))
+                    .as("%s should still normalize to the same form as X-Y", variant)
+                    .isEqualTo(target);
+        }
+    }
+
+    @Test
+    @DisplayName("issue #261: real production pairs collapse -- these are the rows being scanned twice")
+    void realProductionDuplicatePairsCollapse() {
+        assertThat(ArtistNameNormalizer.normalize("Go\u2011Go\u2019s"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Go-Go's"));
+        assertThat(ArtistNameNormalizer.normalize("Blue Note All\u2010Stars"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Blue Note All-Stars"));
+        assertThat(ArtistNameNormalizer.normalize("Yo\u2011Yo Ma & Kathryn Stott"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Yo-Yo Ma & Kathryn Stott"));
+    }
 }
