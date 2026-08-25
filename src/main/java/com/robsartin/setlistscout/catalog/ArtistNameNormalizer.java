@@ -14,7 +14,8 @@ import java.util.Locale;
  * <p>
  * Deliberately conservative: only folds case, collapses whitespace (including whitespace touching
  * a hyphen/dash, issue #157 -- {@code "X - Y"} and {@code "X-Y"} match), and maps the specific
- * unicode punctuation variants seen in the wild (en/em dash to hyphen, curly quotes to straight)
+ * unicode punctuation variants seen in the wild (unicode hyphens and en/em dashes to the ASCII
+ * hyphen, curly quotes to straight)
  * -- nothing that would merge genuinely different names ("AC/DC" and "ACDC" stay distinct, and a
  * word substitution like "and" vs "&" still does NOT match; this is not a fuzzy-match/edit-distance
  * comparison). Explicitly NOT ASCII-stripping: the issue's own first profiling pass stripped
@@ -47,7 +48,12 @@ public final class ArtistNameNormalizer {
             return "";
         }
         String result = name
-                // en dash, em dash, horizontal bar, minus sign -> hyphen-minus
+                // hyphen, non-breaking hyphen, en dash, em dash, horizontal bar, minus sign
+                // -> hyphen-minus. U+2010/U+2011 were missing until #261: 33 duplicate artist
+                // pairs existed in production purely because they never folded, 10 of them with
+                // both rows active and therefore scanned twice.
+                .replace('\u2010', '-')
+                .replace('\u2011', '-')
                 .replace('–', '-')
                 .replace('—', '-')
                 .replace('―', '-')
@@ -65,7 +71,8 @@ public final class ArtistNameNormalizer {
         result = result.trim().replaceAll("\\s+", " ");
         // Issue #157: collapse whitespace immediately touching a hyphen, so "X - Y", "X- Y",
         // "X -Y", and "X-Y" all reach the same match form. By this point every dash variant this
-        // class folds (en dash, em dash, horizontal bar, minus sign) has already become the ASCII
+        // class folds (hyphen, non-breaking hyphen, en dash, em dash, horizontal bar, minus sign
+        // -- the first two added in #261) has already become the ASCII
         // hyphen-minus above, so this one regex against '-' covers all of them plus a literal
         // hyphen typed to begin with -- not just the ASCII case. Deliberately narrow: this only
         // touches whitespace adjacent to a hyphen, never substitutes or removes any other

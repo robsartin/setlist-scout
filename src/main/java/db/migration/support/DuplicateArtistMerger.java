@@ -92,6 +92,36 @@ public final class DuplicateArtistMerger {
     }
 
     /**
+     * Which row a group keeps when its members disagree on status.
+     *
+     * <p>An explicit policy rather than a change to {@link #statusRank}, because V13 and V21 are
+     * already applied in production and their tests pin the ranking they ran with. Editing that
+     * ranking in place would silently rewrite what those two migrations would do against a fresh
+     * database -- a rebuild would then diverge from the live schema's history.
+     */
+    public enum SurvivorPolicy {
+        /**
+         * {@code REJECTED} outranks everything, so a group containing one keeps it. What V13
+         * (#123) and V21 (#179) ran with: those merged rows whose spellings differed by case or
+         * punctuation the owner could SEE, so a rejection there was a real decision about a
+         * visible row, and resurrecting it would be #118 all over again.
+         */
+        PREFER_REJECTED,
+
+        /**
+         * The active row wins: {@code SEED}/{@code APPROVED} outrank {@code REJECTED}. What V33
+         * (#261) needs, and only defensible because of what that migration merges -- pairs
+         * differing by U+2010/U+2011, characters that render identically to a plain hyphen. The
+         * owner rejected one of those rows without any way to know it duplicated one they had
+         * already approved; the app showed them as two unrelated acts. Honouring that rejection
+         * would drop {@code Blue Note All-Stars} and {@code P-Floyd} off the active list and
+         * demote a hand-added {@code Yo-Yo Ma & Kathryn Stott} seed. Do not reach for this policy
+         * for duplicates the owner could actually tell apart.
+         */
+        PREFER_ACTIVE
+    }
+
+    /**
      * Merge every duplicate group in {@code artist}, keyed per {@code groupKey}.
      *
      * <p>Exposed as a standalone static method (rather than only reachable through a migration's
@@ -100,14 +130,25 @@ public final class DuplicateArtistMerger {
      * migration, so that has to be exercised out-of-band.
      */
     public static void merge(Connection conn, GroupKey groupKey) throws SQLException {
-        for (ArtistGroup group : loadDuplicateGroups(conn, groupKey)) {
+        merge(conn, groupKey, SurvivorPolicy.PREFER_REJECTED);
+    }
+
+    /**
+     * Merge every duplicate group, choosing each group's survivor per {@code policy}. The two-arg
+     * overload keeps {@link SurvivorPolicy#PREFER_REJECTED}, so V13 and V21 are untouched by the
+     * addition of this one.
+     */
+    public static void merge(Connection conn, GroupKey groupKey, SurvivorPolicy policy)
+            throws SQLException {
+        for (ArtistGroup group : loadDuplicateGroups(conn, groupKey, policy)) {
             mergeGroup(conn, group);
         }
     }
 
     // ---- grouping ----
 
-    private static List<ArtistGroup> loadDuplicateGroups(Connection conn, GroupKey groupKey) throws SQLException {
+    private static List<ArtistGroup> loadDuplicateGroups(Connection conn, GroupKey groupKey,
+            SurvivorPolicy policy) throws SQLException {
         boolean stored = groupKey == GroupKey.STORED_NORMALIZED_NAME;
         String sql = stored
                 ? "SELECT id, owner, name, normalized_name, status, created_at FROM artist ORDER BY owner, id"
@@ -129,7 +170,7 @@ public final class DuplicateArtistMerger {
         List<ArtistGroup> groups = new ArrayList<>();
         for (List<ArtistRow> rows : byKey.values()) {
             if (rows.size() > 1) {
-                groups.add(new ArtistGroup(rows));
+                groups.add(new ArtistGroup(rows, policy));
             }
         }
         return groups;
@@ -153,7 +194,19 @@ public final class DuplicateArtistMerger {
      * zero {@code REMOVED} rows exist and the single remaining duplicate group is REJECTED/REJECTED,
      * so this ranking is a guard against a state that does not exist today, not a live behaviour.
      */
-    private static int statusRank(String status) {
+    private static int statusRank(String status, SurvivorPolicy policy) {
+        if (policy == SurvivorPolicy.PREFER_ACTIVE) {
+            // Mirror image of the ranking below: the active statuses outrank the inactive ones,
+            // and the relative order WITHIN each half is unchanged, so the created_at/id
+            // tie-breaks still decide same-status groups exactly as they always have.
+            return switch (status) {
+                case "SEED", "APPROVED" -> 4;
+                case "PENDING_REVIEW" -> 3;
+                case "REMOVED" -> 2;
+                case "REJECTED" -> 1;
+                default -> 0;
+            };
+        }
         return switch (status) {
             case "REJECTED" -> 4;
             case "REMOVED" -> 3;
@@ -337,10 +390,10 @@ public final class DuplicateArtistMerger {
         final ArtistRow survivor;
         final List<ArtistRow> losers;
 
-        ArtistGroup(List<ArtistRow> rows) {
+        ArtistGroup(List<ArtistRow> rows, SurvivorPolicy policy) {
             this.owner = rows.get(0).owner;
             Comparator<ArtistRow> survivorOrder = Comparator
-                    .comparingInt((ArtistRow r) -> -statusRank(r.status))
+                    .comparingInt((ArtistRow r) -> -statusRank(r.status, policy))
                     .thenComparing(ArtistRow::createdAt)
                     .thenComparing(ArtistRow::id);
             this.survivor = rows.stream().min(survivorOrder).orElseThrow();
