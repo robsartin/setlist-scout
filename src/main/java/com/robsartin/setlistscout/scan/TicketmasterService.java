@@ -5,6 +5,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import com.robsartin.setlistscout.shared.SmoothRateLimiter;
+import com.robsartin.setlistscout.shared.TransientSourceException;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
@@ -71,8 +74,17 @@ public class TicketmasterService {
             List.of("songs", "of"),
             List.of("gospel", "of"));
 
+    /**
+     * Ticketmaster's published ceiling, quoted verbatim by its own rejection: {@code
+     * MessageRate{messagesPerPeriod=5, periodInMicroseconds=1000000, maxBurstMessageCount=1.0}}.
+     * One below it (#263) for headroom -- the observed failures were intermittent, i.e. the app was
+     * sitting right at the boundary, so pacing exactly AT 5/sec would keep clipping it.
+     */
+    private static final int PERMITS_PER_SECOND = 4;
+
     private final RestClient restClient;
     private final String apiKey;
+    private final SmoothRateLimiter rateLimiter;
 
     @Autowired
     public TicketmasterService(AppProperties props) {
@@ -81,8 +93,31 @@ public class TicketmasterService {
 
     /** Test seam: points at a local stub server instead of the real Ticketmaster API. */
     TicketmasterService(AppProperties props, String baseUrl) {
+        this(props, baseUrl, new SmoothRateLimiter(PERMITS_PER_SECOND));
+    }
+
+    /**
+     * Test seam for the limiter, so a test can prove this class actually acquires a permit. Worth
+     * the extra constructor: a mutation that deleted the {@code acquire()} call below failed no
+     * test, which would have let the pacing be removed silently and the 429s return.
+     */
+    TicketmasterService(AppProperties props, String baseUrl, SmoothRateLimiter rateLimiter) {
         this.restClient = RestClient.builder().baseUrl(baseUrl).build();
         this.apiKey = props.apis().ticketmasterApiKey();
+        this.rateLimiter = rateLimiter;
+    }
+
+    /**
+     * Whether a failed call is worth retrying: a rate-limit rejection (429) or a server-side error
+     * (5xx). Anything else -- a 4xx from a name Ticketmaster cannot parse, say -- would fail
+     * identically on every retry, so it stays a quiet empty result (#263).
+     */
+    private static boolean isTransient(Exception e) {
+        if (e instanceof HttpStatusCodeException statusError) {
+            int status = statusError.getStatusCode().value();
+            return status == 429 || status >= 500;
+        }
+        return false;
     }
 
     /**
@@ -98,6 +133,10 @@ public class TicketmasterService {
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
         Map<String, Object> response;
+        // #263: paced before the call, not after a rejection. ScanPoller claims a batch (20 by
+        // default) and runs it in a plain loop, so without this the calls land as fast as the
+        // network returns them.
+        rateLimiter.acquire();
         try {
             response = restClient.get()
                     .uri(uriBuilder -> {
@@ -169,6 +208,20 @@ public class TicketmasterService {
                     .addKeyValue("source", "ticketmaster")
                     .addKeyValue("artist", artistName)
                     .log("show search failed");
+            // #263: a TRANSIENT failure must not be reported as "this artist has no shows".
+            // Returning an empty list here made ScanPoller call recordSuccess and re-due the job a
+            // full interval (14d) out, so a rate-limited scan was indistinguishable from a
+            // successful one that found nothing -- and scan_job showed zero failures for
+            // ticketmaster while the logs showed real ones. Rethrowing puts the job on the
+            // existing backoff ladder (recordFailure -> nextDelay), which re-tries in minutes.
+            //
+            // Deliberately narrow: only 429 and 5xx rethrow. A 4xx like a malformed artist name is
+            // a genuine "no results" for this artist and retrying it changes nothing, so those keep
+            // the existing swallow rather than filling the ladder with permanent failures.
+            if (isTransient(e)) {
+                throw new TransientSourceException("ticketmaster rejected the request for "
+                        + artistName, e);
+            }
             response = Map.of();
         }
 

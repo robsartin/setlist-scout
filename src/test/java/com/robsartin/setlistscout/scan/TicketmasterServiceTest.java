@@ -28,6 +28,9 @@ class TicketmasterServiceTest {
     void setUp() throws IOException {
         server = new MockWebServer();
         server.start();
+        // A fresh service per test means each test's single call takes the limiter's first
+        // permit, which is always free -- so #263's pacing adds no wall time here. The limiter's
+        // schedule is proven against a fake clock in SmoothRateLimiterTest.
         service = new TicketmasterService(TestAppProperties.withKeys(), server.url("/").toString());
     }
 
@@ -158,14 +161,16 @@ class TicketmasterServiceTest {
     }
 
     @Test
-    @DisplayName("should return an empty list when the API errors")
-    void shouldReturnEmptyOnServerError() {
+    @DisplayName("issue #263: a 5xx THROWS rather than returning empty -- it used to return empty, "
+            + "which made ScanPoller record success and re-due the job 14 days out as though the "
+            + "artist simply had no shows")
+    void shouldThrowOnServerError() {
         server.enqueue(new MockResponse().setResponseCode(500));
 
-        List<Show> shows = service.searchShows("Dawes", "78701", null, null, 50,
-                LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
-
-        assertThat(shows).isEmpty();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.searchShows("Dawes", "78701", null, null, 50,
+                                LocalDateTime.now(), LocalDateTime.now().plusMonths(1)))
+                .isInstanceOf(com.robsartin.setlistscout.shared.TransientSourceException.class);
     }
 
     @Test
@@ -816,5 +821,68 @@ class TicketmasterServiceTest {
                 LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
 
         assertThat(shows).isEmpty();
+    }
+
+    // ---- #263: a transient failure must not look like "no shows" ---------------------------
+
+    @Test
+    @DisplayName("issue #263: a 429 throws instead of returning empty -- the assertion that pins "
+            + "the defect, since a rate-limited scan and an empty one both used to yield List.of()")
+    void rateLimitedSearchThrowsRatherThanReturningEmpty() {
+        server.enqueue(new MockResponse().setResponseCode(429).setBody(
+                "{\"fault\":{\"faultstring\":\"Spike arrest violation.\"}}"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> search("Tom Petty"))
+                .isInstanceOf(com.robsartin.setlistscout.shared.TransientSourceException.class)
+                .hasMessageContaining("Tom Petty");
+    }
+
+    @Test
+    @DisplayName("issue #263: a 4xx that is NOT a rate limit still returns empty -- retrying a name "
+            + "Ticketmaster cannot parse changes nothing, and failing it would fill the backoff ladder")
+    void nonTransientClientErrorStillReturnsEmpty() {
+        server.enqueue(new MockResponse().setResponseCode(400));
+
+        assertThat(search("Tom Petty")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("issue #263: a 200 with no events still returns empty and does NOT throw -- the "
+            + "guard must not turn a genuine 'no shows near you' into a failure")
+    void genuinelyEmptyResultDoesNotThrow() {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
+
+        assertThat(search("Tom Petty")).isEmpty();
+    }
+
+    private java.util.List<Show> search(String artist) {
+        return service.searchShows(artist, "78701", 30.27, -97.74, 50,
+                java.time.LocalDateTime.now(), java.time.LocalDateTime.now().plusMonths(6));
+    }
+
+    @Test
+    @DisplayName("issue #263: consecutive searches are paced through the rate limiter -- deleting "
+            + "the acquire() call must fail a test, or the pacing can be removed silently")
+    void consecutiveSearchesArePaced() {
+        java.util.List<Long> slept = new java.util.ArrayList<>();
+        // The fake sleeper must ADVANCE the fake clock. With a frozen clock the limiter correctly
+        // compensates for time not moving (250ms, then 500ms...), which is right behaviour but not
+        // the schedule a real caller sees.
+        long[] now = {0L};
+        TicketmasterService paced = new TicketmasterService(TestAppProperties.withKeys(),
+                server.url("/").toString(),
+                new com.robsartin.setlistscout.shared.SmoothRateLimiter(4, () -> now[0], nanos -> {
+                    slept.add(nanos);
+                    now[0] += nanos;
+                }));
+
+        for (int i = 0; i < 3; i++) {
+            server.enqueue(new MockResponse().setHeader("Content-Type", "application/json").setBody("{}"));
+            paced.searchShows("Dawes", "78701", null, null, 50,
+                    LocalDateTime.now(), LocalDateTime.now().plusMonths(1));
+        }
+
+        assertThat(slept).as("first call free, then one 250ms wait per further call at 4/sec")
+                .containsExactly(250_000_000L, 250_000_000L);
     }
 }
