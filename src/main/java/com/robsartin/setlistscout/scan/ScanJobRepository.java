@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 public interface ScanJobRepository extends JobRepository<ScanJob> {
@@ -58,6 +59,62 @@ public interface ScanJobRepository extends JobRepository<ScanJob> {
     List<ScanJob> claimDue(@Param("now") Instant now,
                             @Param("leaseCutoff") Instant leaseCutoff,
                             @Param("batch") int batch);
+
+    /**
+     * {@link #claimDue}, but skipping every source in {@code excluded} (issue #265).
+     *
+     * <p>A source detected dead would otherwise fill every batch with jobs that cannot succeed and
+     * starve the sources that still work -- 3,252 Bandsintown jobs against a batch size in the tens.
+     * Its jobs are instead reached only by {@link #claimProbe}, one at a time.
+     *
+     * <p>{@code excluded} is never empty when this is called; {@code ScanPoller} uses the plain
+     * {@link #claimDue} when every source is healthy, because {@code NOT IN ()} is a syntax error in
+     * Postgres rather than a no-op.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE scan_job SET claimed_at = :now, status = 'RUNNING'
+            WHERE id IN (
+                SELECT id FROM scan_job
+                WHERE next_due_at <= :now AND (claimed_at IS NULL OR claimed_at < :leaseCutoff)
+                  AND source NOT IN (:excluded)
+                ORDER BY next_due_at
+                LIMIT :batch
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+            """, nativeQuery = true)
+    List<ScanJob> claimDueExcludingSources(@Param("now") Instant now,
+                                            @Param("leaseCutoff") Instant leaseCutoff,
+                                            @Param("batch") int batch,
+                                            @Param("excluded") Collection<String> excluded);
+
+    /**
+     * Claim up to {@code batch} due jobs for ONE source -- the probe that lets a source detected
+     * dead prove it is alive again (issue #265).
+     *
+     * <p>Deliberately tiny (one job per tick). The point is to notice recovery, not to drain the
+     * queue: while the source is down, {@code ScanPoller} re-dues its jobs at a short probe interval
+     * rather than the full 14 days, so there is always something due to probe and the fleet drains
+     * on its own the moment health clears.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE scan_job SET claimed_at = :now, status = 'RUNNING'
+            WHERE id IN (
+                SELECT id FROM scan_job
+                WHERE next_due_at <= :now AND (claimed_at IS NULL OR claimed_at < :leaseCutoff)
+                  AND source = :source
+                ORDER BY next_due_at
+                LIMIT :batch
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+            """, nativeQuery = true)
+    List<ScanJob> claimProbe(@Param("now") Instant now,
+                              @Param("leaseCutoff") Instant leaseCutoff,
+                              @Param("batch") int batch,
+                              @Param("source") String source);
 
     /**
      * Version-safe bulk re-due of every one of an owner's scan jobs: make them due-now and cleanly

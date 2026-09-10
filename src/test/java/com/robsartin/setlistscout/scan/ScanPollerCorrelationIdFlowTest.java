@@ -85,8 +85,12 @@ class ScanPollerCorrelationIdFlowTest {
                 artistSiteUrlService, showRepository, settingsRepository, musicBrainz,
                 mock(org.springframework.context.ApplicationEventPublisher.class),
                 new org.springframework.transaction.support.TransactionTemplate(
-                        mock(org.springframework.transaction.PlatformTransactionManager.class)));
+                        mock(org.springframework.transaction.PlatformTransactionManager.class)),
+                mock(SourceHealthService.class));
 
+        SourceHealthService sourceHealth = mock(SourceHealthService.class);
+        when(sourceHealth.unhealthySources()).thenReturn(java.util.Set.of());
+        when(sourceHealth.isHealthy(SOURCE)).thenReturn(true);
         ScanJobRepository scanJobRepository = mock(ScanJobRepository.class);
         ScanJob job = new ScanJob(ARTIST_ID, SOURCE, JobStatus.RUNNING, 0, NOW);
         job.setOwner(OWNER);
@@ -96,7 +100,8 @@ class ScanPollerCorrelationIdFlowTest {
         PollerProperties properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
                 Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(), true, Duration.ofHours(2));
-        poller = new ScanPoller(scanJobRepository, scanUnitRunner, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+        poller = new ScanPoller(scanJobRepository, scanUnitRunner, properties, sourceHealth,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @AfterEach

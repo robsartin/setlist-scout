@@ -47,6 +47,7 @@ class ShowControllerTest {
     private ScanJobRepository scanJobRepository;
     private SettingsService settingsService;
     private ArtistActivationService activationService;
+    private SourceHealthService sourceHealth;
     private ShowController controller;
 
     @BeforeEach
@@ -56,6 +57,7 @@ class ShowControllerTest {
         scanJobRepository = mock(ScanJobRepository.class);
         settingsService = mock(SettingsService.class);
         activationService = mock(ArtistActivationService.class);
+        sourceHealth = mock(SourceHealthService.class);
         CurrentUser currentUser = mock(CurrentUser.class);
         when(currentUser.email()).thenReturn(OWNER);
         // #206 fix round 1 (Important 2): populateShows issues two narrow queries -- this stub
@@ -65,7 +67,7 @@ class ShowControllerTest {
         when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION)).thenReturn(List.of());
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         controller = new ShowController(showRepository, artistRepository, scanJobRepository,
-                settingsService, currentUser, adminGuard, activationService);
+                settingsService, currentUser, adminGuard, activationService, sourceHealth);
     }
 
     // No id is set here (Show's id is JPA-generated, no setter) -- these controller-unit tests
@@ -712,5 +714,63 @@ class ShowControllerTest {
 
         List<CSVRecord> records = parseCsv(response.getBody());
         assertThat(records.get(0).get("artist_name")).isEqualTo(name);
+    }
+
+    // ---- #265: a dead source is visible where a person actually looks ----
+
+    private void showsPageRenders() {
+        when(settingsService.getOrCreateSettings(anyString()))
+                .thenReturn(new SearchSettings(OWNER, "Austin", "TX", 50, 6));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of()));
+    }
+
+    @Test
+    @DisplayName("issue #265: a dead source reaches the Shows page model -- a WARN in the log is "
+            + "exactly what stayed invisible for six hours")
+    void aDeadSourceReachesTheShowsPage() {
+        showsPageRenders();
+        SourceHealth down = mock(SourceHealth.class);
+        when(sourceHealth.unhealthyDetail()).thenReturn(List.of(down));
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        List<?> shown = (List<?>) model.getAttribute("sourcesDown");
+        assertThat(shown).hasSize(1);
+        assertThat(shown.get(0)).isSameAs(down);
+    }
+
+    @Test
+    @DisplayName("issue #265: every source healthy means an empty list, so the banner does not render")
+    void nothingDownMeansNoBanner() {
+        showsPageRenders();
+        when(sourceHealth.unhealthyDetail()).thenReturn(List.of());
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        assertThat((List<?>) model.getAttribute("sourcesDown")).isEmpty();
+    }
+
+    /**
+     * The issue asks for owner scoping to be ASSERTED wherever something surfaces per owner. Source
+     * health deliberately is NOT per owner -- these sources authenticate with one shared credential,
+     * so Bandsintown's 403 was every owner's 403 at once, and keying health per owner would need the
+     * threshold crossed once per owner to notice one broken credential. This pins that decision: the
+     * lookup takes no owner, so it cannot quietly become owner-scoped without failing here.
+     */
+    @Test
+    @DisplayName("issue #265: source health is GLOBAL -- the same list regardless of who is looking")
+    void sourceHealthIsGlobalNotOwnerScoped() {
+        showsPageRenders();
+        SourceHealth down = mock(SourceHealth.class);
+        when(sourceHealth.unhealthyDetail()).thenReturn(List.of(down));
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        verify(sourceHealth).unhealthyDetail();
+        verify(sourceHealth, never()).isHealthy(anyString());
     }
 }

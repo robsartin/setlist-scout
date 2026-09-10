@@ -27,6 +27,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.robsartin.setlistscout.shared.SourceCallFailedException;
+import com.robsartin.setlistscout.shared.TransientSourceException;
 import static org.mockito.Mockito.when;
 
 class ScanUnitRunnerTest {
@@ -41,6 +44,7 @@ class ScanUnitRunnerTest {
     private SearchSettingsRepository settingsRepository;
     private MusicBrainzService musicBrainz;
     private ShowSource showSource;
+    private SourceHealthService sourceHealth;
     private ScanUnitRunner runner;
 
     @BeforeEach
@@ -51,13 +55,15 @@ class ScanUnitRunnerTest {
         settingsRepository = mock(SearchSettingsRepository.class);
         musicBrainz = mock(MusicBrainzService.class);
         showSource = mock(ShowSource.class);
+        sourceHealth = mock(SourceHealthService.class);
         when(showSource.id()).thenReturn(SOURCE_ID);
         when(showSource.search(any())).thenReturn(List.of());
         runner = new ScanUnitRunner(List.of(showSource), artistRepository, artistSiteUrlService, showRepository,
                 settingsRepository, musicBrainz,
                 mock(org.springframework.context.ApplicationEventPublisher.class),
                 new org.springframework.transaction.support.TransactionTemplate(
-                        mock(org.springframework.transaction.PlatformTransactionManager.class)));
+                        mock(org.springframework.transaction.PlatformTransactionManager.class)),
+                sourceHealth);
 
         SearchSettings settings = new SearchSettings(OWNER, "Austin", "TX", 50, 6);
         settings.setPostalCode("78701");
@@ -324,5 +330,56 @@ class ScanUnitRunnerTest {
         verify(showRepository).insertIfAbsent(eq(OWNER), eq("Artist C"), any(), eq("Venue C"),
                 any(), any(), any(), any(), any(), any(), eq(ARTIST_ID));
         verify(showRepository, never()).save(any());
+    }
+
+    // ---- #265: the source call's outcome reaches source health ----
+
+    @Test
+    @DisplayName("issue #265: a successful search reports SUCCESS to source health, which is what "
+            + "clears a streak and recovers a source with no human step")
+    void aSuccessfulSearchRecordsHealthSuccess() {
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER))
+                .thenReturn(Optional.of(seed("Dawes")));
+
+        runner.run(OWNER, ARTIST_ID, SOURCE_ID);
+
+        verify(sourceHealth).recordSuccess(SOURCE_ID);
+        verify(sourceHealth, never()).recordFailure(any(), any(), any());
+    }
+
+    /**
+     * The exact shape of the 2026-08-25 outage. #263 is right that this artist should not go on the
+     * backoff ladder -- but the call still FAILED, and until #265 nothing anywhere recorded that.
+     */
+    @Test
+    @DisplayName("issue #265: a non-transient call failure is still a QUIET empty result for this "
+            + "artist, but it is now counted against the source")
+    void aCallFailureIsRecordedButStaysQuietForTheArtist() {
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER))
+                .thenReturn(Optional.of(seed("Dawes")));
+        when(showSource.search(any()))
+                .thenThrow(new SourceCallFailedException("403", "forbidden", null));
+
+        int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
+
+        assertThat(saved).isZero();
+        verify(sourceHealth).recordFailure(eq(SOURCE_ID), eq(ARTIST_ID), any());
+        verify(sourceHealth, never()).recordSuccess(any());
+    }
+
+    @Test
+    @DisplayName("issue #265: a transient failure is counted against the source AND still thrown, "
+            + "so #263's backoff ladder keeps working")
+    void aTransientFailureIsRecordedAndStillThrown() {
+        when(artistRepository.findByIdAndOwner(ARTIST_ID, OWNER))
+                .thenReturn(Optional.of(seed("Dawes")));
+        when(showSource.search(any()))
+                .thenThrow(new TransientSourceException("rate limited", null));
+
+        assertThatThrownBy(() -> runner.run(OWNER, ARTIST_ID, SOURCE_ID))
+                .isInstanceOf(TransientSourceException.class);
+
+        verify(sourceHealth).recordFailure(eq(SOURCE_ID), eq(ARTIST_ID), any());
+        verify(sourceHealth, never()).recordSuccess(any());
     }
 }

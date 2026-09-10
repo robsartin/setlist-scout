@@ -128,7 +128,8 @@ class HideAndCancelFlowTest extends AbstractPostgresIntegrationTest {
     private ShowController controller() {
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         return new ShowController(showRepository, artistRepository, scanJobRepository,
-                settingsService, currentUser, adminGuard, artistActivationService);
+                settingsService, currentUser, adminGuard, artistActivationService,
+                mock(SourceHealthService.class));
     }
 
     private Long seedArtist(String name) {
