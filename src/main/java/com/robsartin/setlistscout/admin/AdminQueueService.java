@@ -10,6 +10,8 @@ import com.robsartin.setlistscout.expansion.ExpandJob;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.scan.ScanJob;
 import com.robsartin.setlistscout.scan.ScanJobRepository;
+import com.robsartin.setlistscout.scan.SourceHealthService;
+import com.robsartin.setlistscout.scan.SourceStatusRow;
 import com.robsartin.setlistscout.shared.AbstractJob;
 import com.robsartin.setlistscout.shared.JobRepository;
 import com.robsartin.setlistscout.shared.JobStatus;
@@ -47,13 +49,16 @@ public class AdminQueueService {
     private final ExpandJobRepository expandJobRepository;
     private final ArtistImportRepository artistImportRepository;
     private final ArtistRepository artistRepository;
+    private final SourceHealthService sourceHealth;
 
     public AdminQueueService(ScanJobRepository scanJobRepository, ExpandJobRepository expandJobRepository,
-                              ArtistImportRepository artistImportRepository, ArtistRepository artistRepository) {
+                              ArtistImportRepository artistImportRepository, ArtistRepository artistRepository,
+                              SourceHealthService sourceHealth) {
         this.scanJobRepository = scanJobRepository;
         this.expandJobRepository = expandJobRepository;
         this.artistImportRepository = artistImportRepository;
         this.artistRepository = artistRepository;
+        this.sourceHealth = sourceHealth;
     }
 
     public AdminQueueSnapshot snapshot() {
@@ -62,7 +67,10 @@ public class AdminQueueService {
                 queueCounts(scanJobRepository, now),
                 queueCounts(expandJobRepository, now),
                 importCounts(),
-                failedWork());
+                failedWork(),
+                // #273: every source, not just the dead ones. Cheap -- one row per source (three),
+                // not an aggregate over the ~18,000 job rows.
+                sourceHealth.allSourceStatus());
     }
 
     /**
