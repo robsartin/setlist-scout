@@ -7,6 +7,7 @@ import com.robsartin.setlistscout.expansion.ExpandUnitRunner;
 import com.robsartin.setlistscout.scan.ScanJobRepository;
 import com.robsartin.setlistscout.scan.ScanPoller;
 import com.robsartin.setlistscout.scan.ScanUnitRunner;
+import com.robsartin.setlistscout.scan.SourceHealthService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -35,6 +36,9 @@ class PollerConditionalWiringTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withBean(ScanJobRepository.class, () -> mock(ScanJobRepository.class))
             .withBean(ScanUnitRunner.class, () -> mock(ScanUnitRunner.class))
+            // #265: ScanPoller now consults source health to decide whether a source is
+            // being probed rather than scanned normally.
+            .withBean(SourceHealthService.class, () -> mock(SourceHealthService.class))
             .withBean(ExpandJobRepository.class, () -> mock(ExpandJobRepository.class))
             .withBean(ExpandUnitRunner.class, () -> mock(ExpandUnitRunner.class))
             .withBean(ArtistRepository.class, () -> mock(ArtistRepository.class))
