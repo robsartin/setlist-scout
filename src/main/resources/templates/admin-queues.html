@@ -38,6 +38,68 @@
         </div>
     </div>
 
+    <!--/* #273: the status board that #265's Shows banner deliberately is not. That banner is an
+           ALARM -- it appears only once a source is already dead, and only for enabled sources. This
+           lists EVERY source, healthy ones included, so "is Bandsintown working right now?" is
+           answerable when the answer is yes. After the 2026-08-25 outage the only way to confirm
+           recovery was to read the logs, which is where the failure had hidden for six hours.
+
+           Read-only on purpose: no "clear health", no "force retry". #265 has no button anywhere,
+           because recovery is automatic and a manual clear would reintroduce the step nobody knew to
+           take -- the thing that turned a broken credential into a two-week outage.
+
+           Health is GLOBAL, not per owner (one shared credential per provider), so nothing here is
+           owner-scoped and nothing here may be worded as though it were. */-->
+    <div class="card">
+        <h2>Source health</h2>
+        <div class="table-scroll">
+            <table>
+                <caption class="visually-hidden">Every show source, its state, and its last success and failure</caption>
+                <thead>
+                <tr>
+                    <th scope="col">Source</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Last success</th>
+                    <th scope="col">Last failure</th>
+                    <th scope="col">Streak</th>
+                    <th scope="col">Last error</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="src : ${snapshot.sourceHealth}">
+                    <td th:text="${src.source}">bandsintown</td>
+                    <td>
+                        <span class="chip" th:classappend="${src.state == 'Down'} ? 'state-down'
+                                                          : (${src.state == 'Off'} ? 'state-off' : 'state-on')"
+                              th:text="${src.state}">On</span>
+                    </td>
+                    <td>
+                        <span th:if="${src.lastSuccessAt != null}"
+                              th:text="${#temporals.format(src.lastSuccessAt, 'yyyy-MM-dd HH:mm')}">2026-09-10 14:02</span>
+                        <span class="note" th:if="${src.lastSuccessAt == null}">never</span>
+                    </td>
+                    <td>
+                        <span th:if="${src.lastFailureAt != null}"
+                              th:text="${#temporals.format(src.lastFailureAt, 'yyyy-MM-dd HH:mm')}">2026-08-25 09:12</span>
+                        <span class="note" th:if="${src.lastFailureAt == null}">never</span>
+                    </td>
+                    <td>
+                        <span th:if="${src.hasStreak()}"
+                              th:text="${src.consecutiveFailures} + ' x ' + ${src.streakSignature}">7 x 403</span>
+                        <span class="note" th:unless="${src.hasStreak()}">--</span>
+                    </td>
+                    <td th:text="${src.lastError}">403 Forbidden</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="note">
+            <strong>Off</strong> means the source is switched off in configuration, so it is not
+            being called at all -- not that it is broken. A source that is down resumes on its own
+            as soon as one retry succeeds; there is nothing to clear here.
+        </p>
+    </div>
+
     <!--/* #201 items 2 and 4: counts by status, due-now, and the oldest next_due_at -- "is it
            stuck or just busy" and "how far behind is it", per queue. Every number here is an
            aggregate query (COUNT/MIN ... GROUP BY), never a loaded entity list -- see

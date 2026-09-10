@@ -207,4 +207,96 @@ class SourceHealthServiceTest extends AbstractPostgresIntegrationTest {
         assertThat(withSourceOn.isHealthy(SOURCE)).isFalse();
         assertThat(withSourceOn.unhealthyDetail()).hasSize(1);
     }
+
+    // ---- #273: the status board, as opposed to the alarm ----
+
+    private SourceHealthService withEnabled(String... ids) {
+        SourceHealthService svc = new SourceHealthService(repository, Set.of(ids), Clock.systemUTC());
+        svc.refresh();
+        return svc;
+    }
+
+    @Test
+    @DisplayName("issue #273: every ENABLED source appears, including one that has never run -- "
+            + "'is it working?' must be answerable when the answer is yes")
+    void everyEnabledSourceAppearsIncludingOneThatNeverRan() {
+        service.recordSuccess("ticketmaster");
+
+        SourceHealthService svc = withEnabled("ticketmaster", "bandsintown", "band-site");
+
+        assertThat(svc.allSourceStatus()).extracting(SourceStatusRow::source)
+                .containsExactly("band-site", "bandsintown", "ticketmaster");
+        assertThat(svc.allSourceStatus()).extracting(SourceStatusRow::state)
+                .containsOnly("On");
+        assertThat(svc.allSourceStatus())
+                .filteredOn(r -> r.source().equals("band-site"))
+                .singleElement()
+                .satisfies(r -> assertThat(r.lastSuccessAt()).isNull());
+    }
+
+    /**
+     * #265's stuck-row case seen from the other side: a source switched off with
+     * {@code setlistscout.sources.<id>=false} (#139) can hold a stale unhealthy row forever, because
+     * with no bean it can record neither a failure nor a success. Reporting that as "Down" would
+     * describe a source that is not even being called.
+     */
+    @Test
+    @DisplayName("issue #273: a DISABLED source reads Off, never Down -- even when its stored row "
+            + "says unhealthy")
+    void aDisabledSourceReadsOffNotDown() {
+        failFor(N);
+        assertThat(service.isHealthy(SOURCE)).isFalse();
+
+        SourceHealthService svc = withEnabled("ticketmaster");
+
+        assertThat(svc.allSourceStatus())
+                .filteredOn(r -> r.source().equals(SOURCE))
+                .singleElement()
+                .satisfies(r -> {
+                    assertThat(r.state()).isEqualTo("Off");
+                    assertThat(r.enabled()).isFalse();
+                });
+    }
+
+    @Test
+    @DisplayName("issue #273: an enabled source past the threshold reads Down")
+    void anEnabledDeadSourceReadsDown() {
+        failFor(N);
+
+        SourceHealthService svc = withEnabled(SOURCE);
+
+        assertThat(svc.allSourceStatus()).singleElement().satisfies(r -> {
+            assertThat(r.state()).isEqualTo("Down");
+            assertThat(r.unhealthySince()).isNotNull();
+            assertThat(r.streakSignature()).isEqualTo("403");
+        });
+    }
+
+    @Test
+    @DisplayName("issue #273: a source MID-STREAK still reads On, but shows the streak -- that is "
+            + "exactly the moment an operator would want to look")
+    void aSourceMidStreakReadsOnButShowsTheStreak() {
+        failFor(N - 1);
+
+        SourceHealthService svc = withEnabled(SOURCE);
+
+        assertThat(svc.allSourceStatus()).singleElement().satisfies(r -> {
+            assertThat(r.state()).isEqualTo("On");
+            assertThat(r.consecutiveFailures()).isEqualTo(N - 1);
+            assertThat(r.streakSignature()).isEqualTo("403");
+            assertThat(r.lastFailureAt()).isNotNull();
+        });
+    }
+
+    @Test
+    @DisplayName("issue #273: a stored row for a source that is neither enabled nor known still "
+            + "appears -- it must not vanish from the page the moment someone disables it")
+    void aStoredRowForADisabledSourceStillAppears() {
+        failFor(N);
+
+        SourceHealthService svc = withEnabled("ticketmaster");
+
+        assertThat(svc.allSourceStatus()).extracting(SourceStatusRow::source)
+                .containsExactly(SOURCE, "ticketmaster");
+    }
 }

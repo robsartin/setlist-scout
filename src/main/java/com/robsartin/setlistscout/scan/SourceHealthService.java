@@ -11,7 +11,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -142,6 +144,43 @@ public class SourceHealthService {
         return repository.findByHealthyFalse().stream()
                 .filter(h -> enabledSources.contains(h.getSource()))
                 .toList();
+    }
+
+    /**
+     * Every source's current state, for the admin queues page (issue #273).
+     *
+     * <p>The row set is the UNION of the enabled source ids and whatever health rows are stored,
+     * which is what makes the two states that were previously unknowable visible:
+     * <ul>
+     *   <li>an enabled source that has <b>never run</b> still appears (no stored row yet), rather
+     *       than being absent from a page whose whole job is to say what the queues are doing;</li>
+     *   <li>a source someone <b>switched off</b> (#139) still appears, labelled {@code Off}, rather
+     *       than vanishing the moment it is disabled -- which is exactly the state nothing in the
+     *       app reported before, and the reason #265's stale-unhealthy-row case was hard to reason
+     *       about.</li>
+     * </ul>
+     *
+     * <p>Sorted by source id so the page does not reshuffle between reloads.
+     */
+    public List<SourceStatusRow> allSourceStatus() {
+        Map<String, SourceHealth> stored = repository.findAll().stream()
+                .collect(Collectors.toMap(SourceHealth::getSource, h -> h));
+
+        return Stream.concat(enabledSources.stream(), stored.keySet().stream())
+                .distinct()
+                .sorted()
+                .map(id -> toRow(id, stored.get(id)))
+                .toList();
+    }
+
+    private SourceStatusRow toRow(String id, SourceHealth health) {
+        if (health == null) {
+            // Enabled but never run: no stored row exists until the first call resolves either way.
+            return new SourceStatusRow(id, true, true, null, null, 0, null, null, null);
+        }
+        return new SourceStatusRow(id, enabledSources.contains(id), health.isHealthy(),
+                health.getLastSuccessAt(), health.getLastFailureAt(), health.getConsecutiveFailures(),
+                health.getStreakSignature(), health.getUnhealthySince(), health.getLastError());
     }
 
     /**

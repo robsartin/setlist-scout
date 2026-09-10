@@ -10,6 +10,7 @@ import com.robsartin.setlistscout.expansion.ExpandJob;
 import com.robsartin.setlistscout.expansion.ExpandJobRepository;
 import com.robsartin.setlistscout.scan.ScanJob;
 import com.robsartin.setlistscout.scan.ScanJobRepository;
+import com.robsartin.setlistscout.scan.SourceHealthService;
 import com.robsartin.setlistscout.shared.JobStatus;
 import com.robsartin.setlistscout.shared.JobStatusCount;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +45,7 @@ class AdminQueueServiceTest {
     private ExpandJobRepository expandJobRepository;
     private ArtistImportRepository artistImportRepository;
     private ArtistRepository artistRepository;
+    private SourceHealthService sourceHealth;
     private AdminQueueService service;
 
     @BeforeEach
@@ -52,7 +54,9 @@ class AdminQueueServiceTest {
         expandJobRepository = mock(ExpandJobRepository.class);
         artistImportRepository = mock(ArtistImportRepository.class);
         artistRepository = mock(ArtistRepository.class);
-        service = new AdminQueueService(scanJobRepository, expandJobRepository, artistImportRepository, artistRepository);
+        sourceHealth = mock(SourceHealthService.class);
+        service = new AdminQueueService(scanJobRepository, expandJobRepository, artistImportRepository,
+                artistRepository, sourceHealth);
 
         // Empty-queue defaults so each test below only has to stub what it actually cares about.
         when(scanJobRepository.countGroupedByStatus()).thenReturn(List.of());

@@ -312,3 +312,9 @@ form.inline { display:inline; }
 .source-down li { margin:.15rem 0; }
 .source-down .note { margin:0; }
 
+/* #273: source-state chips on the admin queues page. Reuses the palette's existing good/bad pairs
+   plus the neutral surface for "switched off", rather than inventing a third status colour. */
+.chip.state-on { background:var(--good-bg); color:var(--good); }
+.chip.state-down { background:var(--bad-bg); color:var(--bad); }
+.chip.state-off { background:var(--surface-2); color:var(--muted); border:1px solid var(--border); }
+
