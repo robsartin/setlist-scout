@@ -13,6 +13,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.Clock;
+
+import java.util.Set;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -163,5 +167,44 @@ class SourceHealthServiceTest extends AbstractPostgresIntegrationTest {
         assertThat(service.isHealthy(SOURCE)).isFalse();
         assertThat(service.isHealthy("ticketmaster")).isTrue();
         assertThat(service.isHealthy("band-site")).isTrue();
+    }
+
+    /**
+     * A source switched off with {@code setlistscout.sources.<id>=false} (#139) has no
+     * {@link com.robsartin.setlistscout.scan.source.ShowSource} bean, so {@code ScanUnitRunner}
+     * returns early without ever making the call -- it can record neither a failure nor a success,
+     * and a stale unhealthy row would therefore be uncleanable. Bandsintown is switched off in
+     * production right now for exactly the reason this issue exists, so this is the live case: the
+     * banner must not be permanent and the jobs must not churn on the probe interval forever.
+     */
+    @Test
+    @DisplayName("issue #265: a DISABLED source is treated as healthy -- its unhealthy row can "
+            + "never be cleared, so it must not produce an undismissable banner")
+    void aDisabledSourceIsTreatedAsHealthy() {
+        failFor(N);
+        assertThat(service.isHealthy(SOURCE)).isFalse();
+
+        // The same stored state, seen by an app where this source is switched off.
+        SourceHealthService withSourceOff = new SourceHealthService(repository, Set.of("ticketmaster"),
+                Clock.systemUTC());
+        withSourceOff.refresh();
+
+        assertThat(withSourceOff.unhealthyDetail()).isEmpty();
+        assertThat(withSourceOff.isHealthy(SOURCE)).isTrue();
+        assertThat(withSourceOff.unhealthySources()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("issue #265: re-enabling the source resumes exactly where it left off -- the row "
+            + "is filtered from view, never deleted")
+    void reEnablingResumesFromTheStoredRow() {
+        failFor(N);
+
+        SourceHealthService withSourceOn = new SourceHealthService(repository, Set.of(SOURCE),
+                Clock.systemUTC());
+        withSourceOn.refresh();
+
+        assertThat(withSourceOn.isHealthy(SOURCE)).isFalse();
+        assertThat(withSourceOn.unhealthyDetail()).hasSize(1);
     }
 }

@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.shared.SourceFailures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +62,7 @@ public class SourceHealthService {
     static final int MIN_DISTINCT_ARTISTS = 2;
 
     private final SourceHealthRepository repository;
+    private final Set<String> enabledSources;
     private final Clock clock;
 
     /**
@@ -74,19 +76,21 @@ public class SourceHealthService {
     // so Spring's implicit single-constructor autowiring does not apply -- without this, startup
     // fails looking for a no-arg constructor. Same pitfall ScanPoller documents.
     @Autowired
-    public SourceHealthService(SourceHealthRepository repository) {
-        this(repository, Clock.systemUTC());
+    public SourceHealthService(SourceHealthRepository repository, List<ShowSource> showSources) {
+        this(repository, showSources.stream().map(ShowSource::id).collect(Collectors.toUnmodifiableSet()),
+                Clock.systemUTC());
     }
 
-    /** Test seam: a fixed clock so timestamp assertions are not racy. */
-    SourceHealthService(SourceHealthRepository repository, Clock clock) {
+    /** Test seam: a fixed clock and an explicit enabled-source set. */
+    SourceHealthService(SourceHealthRepository repository, Set<String> enabledSources, Clock clock) {
         this.repository = repository;
+        this.enabledSources = enabledSources;
         this.clock = clock;
     }
 
     /** Re-read which sources are down. Called once per poller tick, not per job. */
     public void refresh() {
-        unhealthy.set(repository.findByHealthyFalse().stream()
+        unhealthy.set(unhealthyDetail().stream()
                 .map(SourceHealth::getSource)
                 .collect(Collectors.toUnmodifiableSet()));
     }
@@ -101,9 +105,27 @@ public class SourceHealthService {
         return unhealthy.get();
     }
 
-    /** Full rows for display -- the admin queues page and the Shows banner. */
+    /**
+     * Full rows for display -- the Shows banner.
+     *
+     * <p>Filtered to sources that are actually ENABLED right now. A source switched off with
+     * {@code setlistscout.sources.<id>=false} (#139) has no {@link ShowSource} bean, so
+     * {@code ScanUnitRunner} returns early for it without ever reaching the call -- meaning it can
+     * record neither a failure nor a success, and a stale unhealthy row could never be cleared. That
+     * is not hypothetical: Bandsintown is switched off in production right now, precisely BECAUSE it
+     * was returning 403 to everything. Without this filter, re-enabling it, watching it fail, then
+     * switching it off again would leave a banner nobody could dismiss and its jobs churning on the
+     * 30-minute probe re-due forever.
+     *
+     * <p>A disabled source is therefore treated as healthy everywhere: not banner-worthy (the owner
+     * turned it off deliberately -- that is not news), and not excluded from scheduling (its jobs
+     * cost one early return each and re-due on the normal interval). The row is left in place, so
+     * re-enabling the source resumes exactly where it left off until the next call decides.
+     */
     public List<SourceHealth> unhealthyDetail() {
-        return repository.findByHealthyFalse();
+        return repository.findByHealthyFalse().stream()
+                .filter(h -> enabledSources.contains(h.getSource()))
+                .toList();
     }
 
     /**
