@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -77,8 +78,23 @@ public class SourceHealthService {
     // fails looking for a no-arg constructor. Same pitfall ScanPoller documents.
     @Autowired
     public SourceHealthService(SourceHealthRepository repository, List<ShowSource> showSources) {
-        this(repository, showSources.stream().map(ShowSource::id).collect(Collectors.toUnmodifiableSet()),
-                Clock.systemUTC());
+        this(repository, enabledIds(showSources), Clock.systemUTC());
+    }
+
+    /**
+     * The ids of the sources actually wired into this application context -- which is exactly the
+     * set that {@code setlistscout.sources.<id>=false} (#139) removes from, since that flag drops
+     * the bean entirely.
+     *
+     * <p>Null ids are skipped rather than collected: {@code Collectors.toUnmodifiableSet} rejects
+     * null, and a source without an id is unusable regardless -- {@code ScanUnitRunner} matches jobs
+     * with {@code s.id().equals(sourceId)} and would never select it.
+     */
+    private static Set<String> enabledIds(List<ShowSource> showSources) {
+        return showSources.stream()
+                .map(ShowSource::id)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /** Test seam: a fixed clock and an explicit enabled-source set. */
