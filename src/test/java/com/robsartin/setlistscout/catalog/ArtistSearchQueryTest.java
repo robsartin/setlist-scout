@@ -52,8 +52,21 @@ class ArtistSearchQueryTest extends AbstractPostgresIntegrationTest {
     @DisplayName("a case-different query finds the artist")
     void foldsCase() {
         assertThat(names(search("tom petty"))).containsExactly("Tom Petty");
-        assertThat(names(search("BEYONCE"))).isEmpty();      // accents are not stripped, by design
         assertThat(names(search("beyoncÉ"))).containsExactly("Beyoncé");
+    }
+
+    /**
+     * Until #268 this test asserted {@code search("BEYONCE")} was EMPTY, commented "accents are not
+     * stripped, by design". That was the design, and it meant anyone without an accented keyboard
+     * could not reach the artist at all. This is the same assertion inverted, and it is the
+     * end-to-end proof of #268's search half -- the normalizer folds the query, V36 backfills the
+     * column to the same form, and the two meet.
+     */
+    @Test
+    @DisplayName("issue #268: a query typed without accents finds the accented artist")
+    void unaccentedQueryFindsAnAccentedArtist() {
+        assertThat(names(search("BEYONCE"))).containsExactly("Beyoncé");
+        assertThat(names(search("beyonce"))).containsExactly("Beyoncé");
     }
 
     @Test

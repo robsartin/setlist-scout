@@ -17,9 +17,10 @@ class ArtistSearchTermTest {
     }
 
     @Test
-    @DisplayName("matches on ArtistNameNormalizer's form, not raw text -- case folds")
+    @DisplayName("matches on ArtistNameNormalizer's form, not raw text -- case folds, and since "
+            + "#268 the accent folds with it")
     void foldsCase() {
-        assertThat(ArtistSearchTerm.likePattern("BeyoncÉ")).isEqualTo("%beyoncé%");
+        assertThat(ArtistSearchTerm.likePattern("BeyoncÉ")).isEqualTo("%beyonce%");
     }
 
     @Test
@@ -59,5 +60,24 @@ class ArtistSearchTermTest {
     @DisplayName("surrounding whitespace is trimmed rather than searched for")
     void trimsSurroundingWhitespace() {
         assertThat(ArtistSearchTerm.likePattern("  petty  ")).isEqualTo("%petty%");
+    }
+
+    @Test
+    @DisplayName("issue #268: a query typed without an accented keyboard reaches the accented "
+            + "artist -- 'beyonce' and 'beyonce\u0301' build the same pattern, and it is the "
+            + "pattern V36 backfills the column to")
+    void unaccentedQueryFindsAnAccentedArtist() {
+        assertThat(ArtistSearchTerm.likePattern("beyonce")).isEqualTo("%beyonce%");
+        assertThat(ArtistSearchTerm.likePattern("Beyonc\u00e9")).isEqualTo("%beyonce%");
+        assertThat(ArtistSearchTerm.likePattern("celine"))
+                .isEqualTo(ArtistSearchTerm.likePattern("c\u00e9line"));
+    }
+
+    @Test
+    @DisplayName("issue #268: a non-Latin query is NOT mangled -- searching for the Japanese "
+            + "spelling still builds a pattern containing it verbatim")
+    void nonLatinQueryIsNotMangled() {
+        assertThat(ArtistSearchTerm.likePattern("\u30df\u30c9\u30ea")).isEqualTo("%\u30df\u30c9\u30ea%");
+        assertThat(ArtistSearchTerm.likePattern("\uae40\uc9c0\ud604")).isEqualTo("%\uae40\uc9c0\ud604%");
     }
 }
