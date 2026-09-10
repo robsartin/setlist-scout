@@ -85,7 +85,9 @@ class NormalizedNameColumnTest extends AbstractPostgresIntegrationTest {
 
         assertThat(storedNormalizedName(name)).isEqualTo(ArtistNameNormalizer.normalize(name));
         // The hyphen-spacing fold (#157) is what makes this differ from a plain lowercase.
-        assertThat(storedNormalizedName(name)).isEqualTo("paul quinichette-john coltrane quintet");
+        // #266 folds the hyphen to a space; the point of this test is that the NATIVE insert path
+        // stores a normalized value at all, which is unchanged.
+        assertThat(storedNormalizedName(name)).isEqualTo("paul quinichette john coltrane quintet");
     }
 
     @Test
@@ -102,7 +104,9 @@ class NormalizedNameColumnTest extends AbstractPostgresIntegrationTest {
         assertThat(storedNormalizedName(enDash)).isEqualTo(ArtistNameNormalizer.normalize(enDash));
         assertThat(storedNormalizedName(curly)).isEqualTo(ArtistNameNormalizer.normalize(curly));
         // Proof it is not merely a lowercase copy: the en dash became a hyphen.
-        assertThat(storedNormalizedName(enDash)).contains("-cast").doesNotContain("–");
+        // The en dash still folds -- #266 then turns the resulting hyphen into a space, so the
+        // assertion moves from "-cast" to " cast" while still proving the en dash did not survive.
+        assertThat(storedNormalizedName(enDash)).contains(" cast").doesNotContain("–");
     }
 
     @Test

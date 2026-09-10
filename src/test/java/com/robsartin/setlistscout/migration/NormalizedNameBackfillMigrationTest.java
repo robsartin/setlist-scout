@@ -95,9 +95,9 @@ class NormalizedNameBackfillMigrationTest {
         // 5. Every pre-existing row now carries the REAL normalizer's output.
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
             String enDashStored = storedNormalizedName(s, enDashName);
-            assertThat(enDashStored).as("en dash folded to hyphen, whitespace around it collapsed")
+            assertThat(enDashStored).as("en dash folded, whitespace around it collapsed (#266 makes the result a space)")
                     .isEqualTo(ArtistNameNormalizer.normalize(enDashName));
-            assertThat(enDashStored).as("not merely lowercased").doesNotContain("–").contains("lake-palmer");
+            assertThat(enDashStored).as("not merely lowercased").doesNotContain("–").contains("lake palmer");
 
             String curlyStored = storedNormalizedName(s, curlyApostropheName);
             assertThat(curlyStored).as("curly apostrophe folded to straight")
@@ -105,10 +105,10 @@ class NormalizedNameBackfillMigrationTest {
             assertThat(curlyStored).as("not merely lowercased").doesNotContain("’").contains("n' roses");
 
             String hyphenSpacingStored = storedNormalizedName(s, hyphenSpacingName);
-            assertThat(hyphenSpacingStored).as("whitespace touching a hyphen collapsed (#157)")
+            assertThat(hyphenSpacingStored).as("whitespace touching a hyphen collapsed (#157), hyphen now a space (#266)")
                     .isEqualTo(ArtistNameNormalizer.normalize(hyphenSpacingName));
             assertThat(hyphenSpacingStored).as("not merely lowercased")
-                    .doesNotContain(" - ").contains("lake-palmer");
+                    .doesNotContain(" - ").contains("lake palmer");
 
             String nonLatinStored = storedNormalizedName(s, nonLatinName);
             assertThat(nonLatinStored)

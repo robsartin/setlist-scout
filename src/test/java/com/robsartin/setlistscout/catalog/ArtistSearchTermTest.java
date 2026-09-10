@@ -24,9 +24,10 @@ class ArtistSearchTermTest {
 
     @Test
     @DisplayName("hyphen spacing folds the same way stored normalized_name does -- 'foo - bar' "
-            + "reaches 'foo-bar' (#157). This is the assertion a naive lower() would fail.")
+            + "reaches the same form as 'foo-bar' and 'foo bar' (#157, widened by #266). This is "
+            + "the assertion a naive lower() would fail.")
     void foldsHyphenSpacingLikeTheNormalizer() {
-        assertThat(ArtistSearchTerm.likePattern("Foo - Bar")).isEqualTo("%foo-bar%");
+        assertThat(ArtistSearchTerm.likePattern("Foo - Bar")).isEqualTo("%foo bar%");
         assertThat(ArtistSearchTerm.likePattern("Foo - Bar"))
                 .isEqualTo("%" + ArtistNameNormalizer.normalize("Foo-Bar") + "%");
     }
@@ -35,7 +36,7 @@ class ArtistSearchTermTest {
     @DisplayName("curly quotes and unicode dashes fold, so a pasted name still finds the row")
     void foldsUnicodePunctuation() {
         assertThat(ArtistSearchTerm.likePattern("Guns ‘n’ Roses")).isEqualTo("%guns 'n' roses%");
-        assertThat(ArtistSearchTerm.likePattern("X – Y")).isEqualTo("%x-y%");
+        assertThat(ArtistSearchTerm.likePattern("X – Y")).isEqualTo("%x y%");
     }
 
     @Test
