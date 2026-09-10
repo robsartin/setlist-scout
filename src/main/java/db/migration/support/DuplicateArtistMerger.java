@@ -109,14 +109,22 @@ public final class DuplicateArtistMerger {
         PREFER_REJECTED,
 
         /**
-         * The active row wins: {@code SEED}/{@code APPROVED} outrank {@code REJECTED}. What V33
-         * (#261) needs, and only defensible because of what that migration merges -- pairs
-         * differing by U+2010/U+2011, characters that render identically to a plain hyphen. The
-         * owner rejected one of those rows without any way to know it duplicated one they had
-         * already approved; the app showed them as two unrelated acts. Honouring that rejection
-         * would drop {@code Blue Note All-Stars} and {@code P-Floyd} off the active list and
-         * demote a hand-added {@code Yo-Yo Ma & Kathryn Stott} seed. Do not reach for this policy
-         * for duplicates the owner could actually tell apart.
+         * The active row wins: {@code SEED}/{@code APPROVED} outrank {@code REJECTED}. Used by V33
+         * (#261), V34 (#266) and V35 (#267).
+         *
+         * <p>The test is whether the rejection was a judgement about the ARTIST or about the
+         * DUPLICATE. V33 is the clearest case: its pairs differ by U+2010/U+2011, characters that
+         * render identically to a plain hyphen, so the owner rejected a row with no way to know it
+         * duplicated one they had already approved -- the app showed them as two unrelated acts.
+         * Honouring that rejection would drop {@code Blue Note All-Stars} and {@code P-Floyd} off
+         * the active list and demote a hand-added {@code Yo-Yo Ma & Kathryn Stott} seed.
+         *
+         * <p>V35's duplicates ARE visible to the owner ({@code The Bill Evans Trio} beside
+         * {@code Bill Evans Trio}), so its own javadoc records that all 36 of its mixed groups were
+         * read individually first: each is one act under two billings, and each rejection means "I
+         * already have this one". Same conclusion, reached by evidence rather than by the
+         * invisibility argument -- which is the point. Do not reach for this policy on the
+         * assumption that a duplicate rejection is never a real one; establish it.
          */
         PREFER_ACTIVE
     }

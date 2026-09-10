@@ -219,4 +219,65 @@ class ArtistNameNormalizerTest {
                     .hasSameSizeAs(name);
         }
     }
+
+    // ---- #267: a leading definite article ----------------------------------------------------
+
+    @Test
+    @DisplayName("issue #267: a leading 'The' is dropped -- 'The Grateful Dead' and 'Grateful Dead' "
+            + "are one band")
+    void leadingTheIsDropped() {
+        assertThat(ArtistNameNormalizer.normalize("The Grateful Dead"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Grateful Dead"));
+        assertThat(ArtistNameNormalizer.normalize("The Avett Brothers"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Avett Brothers"));
+    }
+
+    @Test
+    @DisplayName("issue #267: an INTERNAL 'The' survives -- only a string-initial article goes")
+    void internalTheSurvives() {
+        assertThat(ArtistNameNormalizer.normalize("Bruce Springsteen & The E Street Band"))
+                .contains("the e street band");
+        assertThat(ArtistNameNormalizer.normalize("Bruce Springsteen & The E Street Band"))
+                .isNotEqualTo(ArtistNameNormalizer.normalize("Bruce Springsteen & E Street Band"));
+    }
+
+    @Test
+    @DisplayName("issue #267: the match is on the WORD 'the' plus a separator, not a 4-char prefix "
+            + "-- 56 names in production begin 'the' with no space and must not be truncated")
+    void onlyStripsTheAsAWholeWord() {
+        for (String name : java.util.List.of("Theremin Ensemble", "Thee Oh Sees", "TheEllenShow",
+                "Theatre Of Eternal Music", "Thelonious Monk")) {
+            assertThat(ArtistNameNormalizer.normalize(name))
+                    .as("%s must not lose its leading characters", name)
+                    .isEqualTo(name.toLowerCase(java.util.Locale.ROOT));
+        }
+    }
+
+    @Test
+    @DisplayName("issue #267: 'The Thelonious Monk Quartet' strips correctly -- the next word also "
+            + "starting with 'the' must not confuse the rule")
+    void stripsWhenTheNextWordAlsoStartsWithThe() {
+        assertThat(ArtistNameNormalizer.normalize("The Thelonious Monk Quartet"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Thelonious Monk Quartet"));
+        assertThat(ArtistNameNormalizer.normalize("The Theatre of Eternal Music"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Theatre Of Eternal Music"));
+    }
+
+    @Test
+    @DisplayName("issue #267: a SINGLE-WORD name keeps its 'The' -- 'The Beat' and 'BEAT' are "
+            + "plausibly different acts, so the rule is deliberately narrowed and this pins it")
+    void singleWordNamesKeepTheirArticle() {
+        assertThat(ArtistNameNormalizer.normalize("The Beat"))
+                .isNotEqualTo(ArtistNameNormalizer.normalize("BEAT"));
+        assertThat(ArtistNameNormalizer.normalize("The Smile"))
+                .isNotEqualTo(ArtistNameNormalizer.normalize("Smile"));
+        assertThat(ArtistNameNormalizer.normalize("The Beat")).isEqualTo("the beat");
+    }
+
+    @Test
+    @DisplayName("issue #267: a name that is only 'The' is left alone, never emptied")
+    void bareArticleIsNotEmptied() {
+        assertThat(ArtistNameNormalizer.normalize("The")).isEqualTo("the");
+        assertThat(ArtistNameNormalizer.normalize("The ")).isEqualTo("the");
+    }
 }

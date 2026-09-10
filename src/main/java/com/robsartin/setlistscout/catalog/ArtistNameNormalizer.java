@@ -37,12 +37,13 @@ public final class ArtistNameNormalizer {
     }
 
     /**
-     * @return the match form of {@code name}: trimmed, internal whitespace collapsed to a single
-     * space, unicode dashes folded to {@code -} and then any whitespace touching a hyphen removed
-     * (so {@code "X - Y"} and {@code "X-Y"} reach the same form, issue #157), curly quotes folded
-     * to straight quotes, lowercased with {@link Locale#ROOT} (not the default locale, so this is
-     * stable across JVMs/deployments regardless of the server's locale -- avoids the Turkish-I
-     * class of bugs).
+     * @return the match form of {@code name}: unicode dashes folded to {@code -} and every hyphen
+     * then folded to a space (so {@code "X-Y"}, {@code "X - Y"} and {@code "X Y"} all reach the
+     * same form, issue #266, subsuming #157), trimmed with internal whitespace collapsed to a
+     * single space, curly quotes folded to straight quotes, lowercased with {@link Locale#ROOT}
+     * (not the default locale, so this is stable across JVMs/deployments regardless of the
+     * server's locale -- avoids the Turkish-I class of bugs), and finally a leading definite
+     * article dropped when the name has another word after it (issue #267).
      */
     public static String normalize(String name) {
         if (name == null) {
@@ -87,6 +88,33 @@ public final class ArtistNameNormalizer {
         // distinction is the class's conservative philosophy and ArtistNameNormalizerTest pins it.
         result = result.replace('-', ' ');
         result = result.trim().replaceAll("\\s+", " ");
-        return result.toLowerCase(Locale.ROOT);
+        String lower = result.toLowerCase(Locale.ROOT);
+
+        // Issue #267: drop a leading definite article. "The Grateful Dead" and "Grateful Dead" are
+        // one band, and 132 such groups existed in production. Rob's segue project reached the same
+        // conclusion independently for the same reason.
+        //
+        // Three deliberate narrowings, each pinned by a test:
+        //
+        //  1. Matches the WORD "the" plus its separator, never a four-character prefix. 56 names in
+        //     production begin with "the" and no space -- Thee Oh Sees, TheEllenShow, Theatre Of
+        //     Eternal Music, Thelonious Monk -- and truncating those would invent new artists.
+        //  2. Only a STRING-INITIAL article. "Bruce Springsteen & The E Street Band" keeps its
+        //     "The"; stripping internal ones would merge it with a different billing.
+        //  3. Only when a word REMAINS. "The Beat"/"BEAT", "The Smile"/"Smile" and "The Herd"/"Herd"
+        //     are plausibly different acts, so single-word names keep their article. 29 such groups
+        //     exist and are deliberately left unmerged -- unlike #266's 18 pairs, they could not be
+        //     verified one by one. Widening this later is a decision with its own evidence, not a
+        //     tidy-up.
+        //
+        // A name that is only "the" therefore survives untouched rather than normalizing to empty,
+        // which would collide every such row onto one key.
+        if (lower.startsWith("the ")) {
+            String withoutArticle = lower.substring(4).trim();
+            if (withoutArticle.contains(" ")) {
+                return withoutArticle;
+            }
+        }
+        return lower;
     }
 }
