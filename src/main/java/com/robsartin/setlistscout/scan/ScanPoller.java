@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Paced claim-lease poller for {@code scan_job} (Phase B PR4a/PR4b) -- on by default via
@@ -52,9 +53,19 @@ public class ScanPoller {
     /** First backoff step on failure; doubles per attempt up to the source's own interval. */
     static final Duration BACKOFF_BASE = Duration.ofMinutes(10);
 
+    /**
+     * How soon a job re-dues while its source is considered dead (#265) -- short enough that
+     * recovery is noticed in minutes, long enough not to hammer a provider that is refusing us.
+     */
+    static final Duration PROBE_INTERVAL = Duration.ofMinutes(30);
+
+    /** Jobs allowed through per tick for a source that is down: just enough to detect recovery. */
+    static final int PROBE_BATCH = 1;
+
     private final ScanJobRepository scanJobRepository;
     private final ScanUnitRunner scanUnitRunner;
     private final PollerProperties properties;
+    private final SourceHealthService sourceHealth;
     private final Clock clock;
 
     // Explicit @Autowired: there are two constructors here (this one plus the Clock test seam
@@ -63,16 +74,17 @@ public class ScanPoller {
     // pitfall ServiceBeanWiringTest guards against for the RestClient-backed services.
     @Autowired
     public ScanPoller(ScanJobRepository scanJobRepository, ScanUnitRunner scanUnitRunner,
-                       PollerProperties properties) {
-        this(scanJobRepository, scanUnitRunner, properties, Clock.systemUTC());
+                       PollerProperties properties, SourceHealthService sourceHealth) {
+        this(scanJobRepository, scanUnitRunner, properties, sourceHealth, Clock.systemUTC());
     }
 
     /** Test seam: a fixed/controllable clock so reschedule-time assertions aren't racy. */
     ScanPoller(ScanJobRepository scanJobRepository, ScanUnitRunner scanUnitRunner,
-               PollerProperties properties, Clock clock) {
+               PollerProperties properties, SourceHealthService sourceHealth, Clock clock) {
         this.scanJobRepository = scanJobRepository;
         this.scanUnitRunner = scanUnitRunner;
         this.properties = properties;
+        this.sourceHealth = sourceHealth;
         this.clock = clock;
     }
 
@@ -86,9 +98,27 @@ public class ScanPoller {
     public void tick() {
         Instant now = clock.instant();
         Instant leaseCutoff = now.minus(Duration.ofMillis(properties.jobLeaseMs()));
-        List<ScanJob> claimed = scanJobRepository.claimDue(now, leaseCutoff, properties.scanBatchSize());
+
+        // #265: one read per tick, not per job -- the hot path below only asks the cached set.
+        sourceHealth.refresh();
+        Set<String> down = sourceHealth.unhealthySources();
+
+        List<ScanJob> claimed = down.isEmpty()
+                ? scanJobRepository.claimDue(now, leaseCutoff, properties.scanBatchSize())
+                : scanJobRepository.claimDueExcludingSources(now, leaseCutoff,
+                        properties.scanBatchSize(), down);
         for (ScanJob job : claimed) {
             runOne(job, now);
+        }
+
+        // A dead source still gets ONE job per tick, so it can prove it is alive again. Without
+        // this it would simply never run: excluded above, and therefore never able to recover.
+        // With it, recovery needs no human -- which is the point, since the manual whole-fleet
+        // re-due nobody knew to run is what turned a broken credential into a two-week outage.
+        for (String deadSource : down) {
+            for (ScanJob probe : scanJobRepository.claimProbe(now, leaseCutoff, PROBE_BATCH, deadSource)) {
+                runOne(probe, now);
+            }
         }
     }
 
@@ -122,7 +152,14 @@ public class ScanPoller {
 
     private void recordSuccess(ScanJob job, Instant now) {
         job.setLastRunAt(now);
-        job.setNextDueAt(now.plus(interval(job.getSource())));
+        // #265: while a source is down, its jobs re-due in minutes rather than the full interval.
+        // This is the half of the 2026-08-25 outage that cost the most: every 403 was recorded as a
+        // success and pushed 14 days out, so once the fleet had drained once, NOTHING would retry
+        // Bandsintown for a fortnight even after the credential was fixed. A short re-due keeps
+        // work due for the probe above, and means the whole fleet drains by itself on recovery.
+        job.setNextDueAt(now.plus(sourceHealth.isHealthy(job.getSource())
+                ? interval(job.getSource())
+                : PROBE_INTERVAL));
         job.setAttempts(0);
         job.setClaimedAt(null);
         job.setStatus(JobStatus.SCHEDULED);

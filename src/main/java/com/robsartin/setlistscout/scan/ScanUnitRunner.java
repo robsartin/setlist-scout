@@ -8,6 +8,8 @@ import com.robsartin.setlistscout.scan.source.ShowSource;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SearchSettingsRepository;
 import com.robsartin.setlistscout.shared.MusicBrainzService;
+import com.robsartin.setlistscout.shared.SourceCallFailedException;
+import com.robsartin.setlistscout.shared.TransientSourceException;
 import com.robsartin.setlistscout.shared.events.ArtistShowsFound;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -38,6 +40,7 @@ public class ScanUnitRunner {
     private final MusicBrainzService musicBrainz;
     private final ApplicationEventPublisher publisher;
     private final TransactionTemplate transactionTemplate;
+    private final SourceHealthService sourceHealth;
 
     public ScanUnitRunner(List<ShowSource> showSources,
                            ArtistRepository artistRepository,
@@ -46,7 +49,8 @@ public class ScanUnitRunner {
                            SearchSettingsRepository settingsRepository,
                            MusicBrainzService musicBrainz,
                            ApplicationEventPublisher publisher,
-                           TransactionTemplate transactionTemplate) {
+                           TransactionTemplate transactionTemplate,
+                           SourceHealthService sourceHealth) {
         this.showSources = showSources;
         this.artistRepository = artistRepository;
         this.artistSiteUrlService = artistSiteUrlService;
@@ -55,6 +59,7 @@ public class ScanUnitRunner {
         this.musicBrainz = musicBrainz;
         this.publisher = publisher;
         this.transactionTemplate = transactionTemplate;
+        this.sourceHealth = sourceHealth;
     }
 
     /**
@@ -104,7 +109,28 @@ public class ScanUnitRunner {
         // which is the whole of ADR-0024: @ApplicationModuleListener is AFTER_COMMIT, so a publish
         // with no committing transaction around it is silently dropped and expansion would never
         // fire -- architecturally present, functionally dead, exactly the shape of #211 and #230.
-        List<Show> found = source.search(query);
+        // #265: the source call's OUTCOME, not just its result. Until now a failed call and an
+        // artist with no upcoming shows were the same value -- an empty list -- so ScanPoller
+        // recorded a 403 as a success and re-dued the job 14 days out. 2,857 times.
+        List<Show> found;
+        try {
+            found = source.search(query);
+            sourceHealth.recordSuccess(sourceId);
+        } catch (TransientSourceException transient_) {
+            // #263: 429/5xx retry the artist. Still a failed call, so health counts it -- a source
+            // rate-limiting every request is as dead, from the catalog's point of view, as one
+            // rejecting every request.
+            sourceHealth.recordFailure(sourceId, artistId, transient_);
+            throw transient_;
+        } catch (SourceCallFailedException failed) {
+            // Deliberately swallowed into an empty result for THIS artist, preserving #263's
+            // reasoning exactly: a 4xx from a name the provider cannot parse would fail identically
+            // on every retry, and failing the job would fill the backoff ladder with permanent
+            // failures. What changes is that it is no longer SILENT -- it counts against the
+            // source, and enough of them in a row flips the source unhealthy.
+            sourceHealth.recordFailure(sourceId, artistId, failed);
+            return 0;
+        }
         int saved = persistNew(owner, artistId, found);
 
         // #254: shows are the evidence that lets expansion recurse from this artist. Published on

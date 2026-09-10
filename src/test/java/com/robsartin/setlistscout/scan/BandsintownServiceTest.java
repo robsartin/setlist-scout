@@ -1,6 +1,8 @@
 package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.service.TestAppProperties;
+import com.robsartin.setlistscout.shared.SourceCallFailedException;
+import com.robsartin.setlistscout.shared.TransientSourceException;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -14,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BandsintownServiceTest {
 
@@ -99,14 +102,20 @@ class BandsintownServiceTest {
         assertThat(shows).extracting(Show::getVenueName).containsExactly("In Window");
     }
 
+    /**
+     * Until #265 this asserted a 500 returned an EMPTY LIST. That was the behaviour, and it is
+     * precisely the defect: an empty list is what a successful search of an artist with no upcoming
+     * shows returns, so ScanPoller could not tell the two apart and recorded the failure as a
+     * success. A 500 is now transient (#263's ladder, which Bandsintown never had), and the
+     * assertion is inverted to say so.
+     */
     @Test
-    @DisplayName("returns an empty list when the API errors")
-    void returnsEmptyOnServerError() {
+    @DisplayName("issue #265: a server error is no longer reported as an empty list")
+    void aServerErrorIsNotAnEmptyList() {
         server.enqueue(new MockResponse().setResponseCode(500));
 
-        List<Show> shows = service.searchShows("Dawes", LAT, LON, RADIUS, START, END);
-
-        assertThat(shows).isEmpty();
+        assertThatThrownBy(() -> service.searchShows("Dawes", LAT, LON, RADIUS, START, END))
+                .isInstanceOf(TransientSourceException.class);
     }
 
     @Test
@@ -202,5 +211,46 @@ class BandsintownServiceTest {
 
     private static MockResponse jsonEvents(String body) {
         return new MockResponse().setHeader("Content-Type", "application/json").setBody(body);
+    }
+
+    @Test
+    @DisplayName("issue #265: a 403 THROWS rather than returning an empty list -- swallowing it is "
+            + "how 2,857 consecutive 403s were recorded as 2,857 successful scans")
+    void a403ThrowsSourceCallFailed() {
+        server.enqueue(new MockResponse().setResponseCode(403)
+                .setBody("{\"Message\":\"User is not authorized to access this resource\"}"));
+
+        assertThatThrownBy(() -> service.searchShows("Dawes", LAT, LON, RADIUS, START, END))
+                .isInstanceOf(SourceCallFailedException.class)
+                .extracting(e -> ((SourceCallFailedException) e).signature())
+                .isEqualTo("403");
+    }
+
+    @Test
+    @DisplayName("issue #265: a 429 stays a TransientSourceException -- #263's retry ladder must "
+            + "keep working, and Bandsintown never had it because it swallowed everything")
+    void a429IsTransient() {
+        server.enqueue(new MockResponse().setResponseCode(429));
+
+        assertThatThrownBy(() -> service.searchShows("Dawes", LAT, LON, RADIUS, START, END))
+                .isInstanceOf(TransientSourceException.class);
+    }
+
+    @Test
+    @DisplayName("issue #265: a 5xx stays a TransientSourceException")
+    void a5xxIsTransient() {
+        server.enqueue(new MockResponse().setResponseCode(503));
+
+        assertThatThrownBy(() -> service.searchShows("Dawes", LAT, LON, RADIUS, START, END))
+                .isInstanceOf(TransientSourceException.class);
+    }
+
+    @Test
+    @DisplayName("issue #265: an empty result is still an empty result -- a source that legitimately "
+            + "finds nothing must NOT look like a failure")
+    void anEmptyResultIsNotAFailure() {
+        server.enqueue(jsonEvents("[]"));
+
+        assertThat(service.searchShows("Dawes", LAT, LON, RADIUS, START, END)).isEmpty();
     }
 }

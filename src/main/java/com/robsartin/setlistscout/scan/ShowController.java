@@ -53,6 +53,7 @@ public class ShowController {
     private final CurrentUser currentUser;
     private final AdminGuard adminGuard;
     private final ArtistActivationService activationService;
+    private final SourceHealthService sourceHealth;
 
     public ShowController(ShowRepository showRepository,
                            ArtistRepository artistRepository,
@@ -60,7 +61,8 @@ public class ShowController {
                            SettingsService settingsService,
                            CurrentUser currentUser,
                            AdminGuard adminGuard,
-                           ArtistActivationService activationService) {
+                           ArtistActivationService activationService,
+                           SourceHealthService sourceHealth) {
         this.showRepository = showRepository;
         this.artistRepository = artistRepository;
         this.scanJobRepository = scanJobRepository;
@@ -68,6 +70,7 @@ public class ShowController {
         this.currentUser = currentUser;
         this.adminGuard = adminGuard;
         this.activationService = activationService;
+        this.sourceHealth = sourceHealth;
     }
 
     @GetMapping("/")
@@ -148,6 +151,13 @@ public class ShowController {
         model.addAttribute("hiddenCount", hiddenCount);
         model.addAttribute("settings", settings);
         model.addAttribute("tributeArtistNames", tributeArtistNames);
+
+        // #265: a source that has stopped answering is shown here because a WARN in the log was
+        // exactly what stayed invisible for days while Bandsintown returned 403 to every call.
+        // Deliberately NOT owner-scoped and never presented as such: these sources authenticate
+        // with one shared credential, so a dead source is dead for everyone at once. Every owner
+        // sees the same list -- ShowControllerSourceHealthTest asserts that.
+        model.addAttribute("sourcesDown", sourceHealth.unhealthyDetail());
 
         ShowActionOutcome resolved = focusable(outcome, shows);
         if (resolved != null) {

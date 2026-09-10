@@ -12,6 +12,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
 
+import static org.mockito.Mockito.lenient;
+import static org.mockito.ArgumentMatchers.anyString;
+import java.util.Set;
+import static org.mockito.Mockito.never;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -48,6 +52,7 @@ class ScanPollerTest {
 
     @Mock private ScanJobRepository scanJobRepository;
     @Mock private ScanUnitRunner scanUnitRunner;
+    @Mock private SourceHealthService sourceHealth;
 
     private PollerProperties properties;
     private ScanPoller poller;
@@ -57,8 +62,12 @@ class ScanPollerTest {
         properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
                 Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(), true, Duration.ofHours(2));
+        // Healthy by default: Mockito's default boolean is FALSE, which would silently put every
+        // test on #265's probe path and reschedule at PROBE_INTERVAL instead of the real interval.
+        lenient().when(sourceHealth.isHealthy(anyString())).thenReturn(true);
+        lenient().when(sourceHealth.unhealthySources()).thenReturn(Set.of());
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        poller = new ScanPoller(scanJobRepository, scanUnitRunner, properties, clock);
+        poller = new ScanPoller(scanJobRepository, scanUnitRunner, properties, sourceHealth, clock);
     }
 
     private static ScanJob job(int attempts) {
@@ -150,7 +159,8 @@ class ScanPollerTest {
         properties = new PollerProperties(
                 20, 20, Duration.ofMinutes(5).toMillis(),
                 Duration.ofDays(14), Duration.ofDays(28), 6, Map.of(SOURCE, Duration.ofDays(3)), true, Duration.ofHours(2));
-        poller = new ScanPoller(scanJobRepository, scanUnitRunner, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+        poller = new ScanPoller(scanJobRepository, scanUnitRunner, properties, sourceHealth,
+                Clock.fixed(NOW, ZoneOffset.UTC));
         ScanJob job = job(0);
         when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
         when(scanUnitRunner.run(OWNER, ARTIST_ID, SOURCE)).thenReturn(0);
@@ -296,5 +306,85 @@ class ScanPollerTest {
 
         assertThat(observedCids).hasSize(2);
         assertThat(observedCids.get(0)).isNotEqualTo(observedCids.get(1));
+    }
+
+    // ---- #265: a source detected dead ----
+
+    @Test
+    @DisplayName("issue #265: a dead source is EXCLUDED from the normal claim -- 3,252 jobs that "
+            + "cannot succeed must not fill every batch and starve the sources that still work")
+    void aDeadSourceIsExcludedFromTheNormalClaim() {
+        when(sourceHealth.unhealthySources()).thenReturn(Set.of("bandsintown"));
+        when(scanJobRepository.claimDueExcludingSources(any(), any(), anyInt(), any()))
+                .thenReturn(List.of());
+        when(scanJobRepository.claimProbe(any(), any(), anyInt(), eq("bandsintown")))
+                .thenReturn(List.of());
+
+        poller.tick();
+
+        verify(scanJobRepository).claimDueExcludingSources(eq(NOW), any(), eq(20),
+                eq(Set.of("bandsintown")));
+        verify(scanJobRepository, never()).claimDue(any(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("issue #265: a dead source still gets exactly ONE probe per tick -- without it the "
+            + "source could never prove it recovered, and would stay excluded forever")
+    void aDeadSourceStillGetsOneProbe() {
+        ScanJob probe = job(0);
+        when(sourceHealth.unhealthySources()).thenReturn(Set.of("bandsintown"));
+        when(scanJobRepository.claimDueExcludingSources(any(), any(), anyInt(), any()))
+                .thenReturn(List.of());
+        when(scanJobRepository.claimProbe(any(), any(), anyInt(), eq("bandsintown")))
+                .thenReturn(List.of(probe));
+
+        poller.tick();
+
+        verify(scanJobRepository).claimProbe(eq(NOW), any(), eq(ScanPoller.PROBE_BATCH),
+                eq("bandsintown"));
+        verify(scanUnitRunner).run(OWNER, ARTIST_ID, SOURCE);
+    }
+
+    @Test
+    @DisplayName("issue #265: every source healthy means the plain claim, because Postgres treats "
+            + "NOT IN () as a syntax error rather than a no-op")
+    void allHealthyUsesThePlainClaim() {
+        when(sourceHealth.unhealthySources()).thenReturn(Set.of());
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of());
+
+        poller.tick();
+
+        verify(scanJobRepository).claimDue(eq(NOW), any(), eq(20));
+        verify(scanJobRepository, never()).claimDueExcludingSources(any(), any(), anyInt(), any());
+    }
+
+    /**
+     * The half of the 2026-08-25 outage that cost the most. Every 403 was recorded as a success and
+     * pushed a full 14-day interval out, so once the fleet had drained once, nothing would retry
+     * Bandsintown for a fortnight -- even after the credential was fixed.
+     */
+    @Test
+    @DisplayName("issue #265: while its source is down a job re-dues in MINUTES, not the full "
+            + "interval -- otherwise nothing retries for 14 days after the credential is fixed")
+    void aDeadSourcesJobRedeuesAtTheProbeInterval() {
+        when(sourceHealth.isHealthy(SOURCE)).thenReturn(false);
+        ScanJob job = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+
+        poller.tick();
+
+        assertThat(job.getNextDueAt()).isEqualTo(NOW.plus(ScanPoller.PROBE_INTERVAL));
+        assertThat(job.getNextDueAt()).isBefore(NOW.plus(Duration.ofDays(1)));
+    }
+
+    @Test
+    @DisplayName("issue #265: a healthy source's job still re-dues at its normal interval")
+    void aHealthySourcesJobKeepsTheNormalInterval() {
+        ScanJob job = job(0);
+        when(scanJobRepository.claimDue(any(), any(), anyInt())).thenReturn(List.of(job));
+
+        poller.tick();
+
+        assertThat(job.getNextDueAt()).isEqualTo(NOW.plus(Duration.ofDays(14)));
     }
 }

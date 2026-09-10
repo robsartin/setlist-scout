@@ -6,6 +6,38 @@
     <h1>Upcoming Shows</h1>
     <p class="page-sub">Artists you follow, playing near you.</p>
 
+    <!--/* #265: a source that has stopped answering. This is the whole point of the issue -- for
+           six hours Bandsintown returned 403 to every one of 2,857 calls and NOTHING said so
+           anywhere a person would look, because a WARN in the log is not a place a person looks.
+
+           Not owner-scoped, and worded so it cannot be misread as such: these sources use one
+           shared credential, so a dead source is dead for every owner at once.
+
+           No JavaScript (project rule) -- a plain conditional block, no dismiss control. It clears
+           itself the moment a probe succeeds. */-->
+    <div class="source-down" role="status" th:if="${!#lists.isEmpty(sourcesDown)}">
+        <p class="source-down-head">
+            <span th:text="${#lists.size(sourcesDown)} == 1 ? 'A show source has stopped responding'
+                                                           : 'Show sources have stopped responding'">
+                A show source has stopped responding</span>
+        </p>
+        <ul>
+            <li th:each="down : ${sourcesDown}">
+                <strong th:text="${down.source}">bandsintown</strong>
+                <span th:text="'failing since ' + ${#temporals.format(down.unhealthySince, 'd MMM, HH:mm')}">
+                    failing since 25 Aug, 09:12</span>
+                <span class="note" th:if="${down.streakSignature != null}"
+                      th:text="'(' + ${down.streakSignature} + ')'">(403)</span>
+            </li>
+        </ul>
+        <p class="note">
+            Scanning for these sources is paused apart from a periodic retry, so nothing is
+            hammering them and no scan is silently recorded as successful. They will start again on
+            their own as soon as one retry succeeds -- there is nothing to click. Shows already
+            found are unaffected.
+        </p>
+    </div>
+
     <!--/* #235: the scope bar replaces the old settings-sentence + button row with a labelled,
            scannable definition list (issue's item 3). id="settings" is preserved here (not one of
            the issue's pinned ids, but fragments/layout.html's nav "Settings" link still jumps to

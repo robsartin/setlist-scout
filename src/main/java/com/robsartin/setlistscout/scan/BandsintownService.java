@@ -1,5 +1,6 @@
 package com.robsartin.setlistscout.scan;
 
+import com.robsartin.setlistscout.shared.SourceFailures;
 import com.robsartin.setlistscout.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +62,14 @@ public class BandsintownService {
                     .addKeyValue("source", "bandsintown")
                     .addKeyValue("artist", artistName)
                     .log("show search failed");
-            events = List.of();
+            // #265: this used to swallow everything into an empty list, which meant a failed call
+            // and "this artist has no upcoming shows" were the SAME VALUE to everything upstream.
+            // ScanPoller therefore called recordSuccess on a 403 -- 2,857 times in six hours,
+            // re-duing every job 14 days out while the source was completely dead.
+            //
+            // It also meant Bandsintown never got #263's transient retry: a 429 was swallowed here
+            // exactly like a 403. SourceFailures now decides both, identically to Ticketmaster.
+            throw SourceFailures.classify("bandsintown", artistName, e);
         }
 
         if (events == null) return shows;

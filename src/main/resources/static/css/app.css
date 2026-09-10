@@ -302,3 +302,13 @@ form.inline { display:inline; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; } .htmx-request::after { animation:none; } .acts { opacity:1; } }
+
+/* #265: dead-source banner. Uses the existing --bad pair, so it inherits the light/dark palette
+   and the documented AA contrast rather than introducing a fourth alert colour. */
+.source-down { border:1px solid var(--bad); background:var(--bad-bg); color:var(--text);
+  border-radius:10px; padding:.85rem 1rem; margin:0 0 1.4rem; }
+.source-down-head { margin:0 0 .35rem; font-weight:700; color:var(--bad); }
+.source-down ul { margin:0 0 .5rem; padding-left:1.15rem; }
+.source-down li { margin:.15rem 0; }
+.source-down .note { margin:0; }
+
