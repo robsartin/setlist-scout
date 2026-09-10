@@ -24,6 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Rows are seeded BETWEEN V32 and V33, so they exist under the old folding -- the only state
  * from which the merge is observable. Migrating an empty database proves nothing.
  *
+ * <p>The normalized_name values asserted below carry SPACES where this test originally used
+ * hyphens: #266 (V34) later folds a hyphen to a space, and "latest" runs it. What V33 does is
+ * unchanged -- only the spelling of the key it lands on moved.
+ *
  * <p>All four live status shapes are covered, because the survivor policy is the decision this
  * migration turns on: APPROVED+REJECTED, SEED+REJECTED, SEED+APPROVED, and same-status.
  */
@@ -71,21 +75,21 @@ class FoldUnicodeHyphensMigrationTest {
         assertThat(migrateTo("latest").success).isTrue();
 
         try (Connection c = postgres.createConnection(""); Statement s = c.createStatement()) {
-            assertThat(namesFor(s, OWNER, "blue note all-stars")).containsExactly("Blue Note All-Stars");
+            assertThat(namesFor(s, OWNER, "blue note all stars")).containsExactly("Blue Note All-Stars");
             assertThat(statusOf(s, OWNER, "Blue Note All-Stars")).isEqualTo("APPROVED");
 
-            assertThat(namesFor(s, OWNER, "yo-yo ma & kathryn stott"))
+            assertThat(namesFor(s, OWNER, "yo yo ma & kathryn stott"))
                     .containsExactly("Yo-Yo Ma & Kathryn Stott");
             assertThat(statusOf(s, OWNER, "Yo-Yo Ma & Kathryn Stott")).isEqualTo("SEED");
 
-            assertThat(namesFor(s, OWNER, "pousette-dart band")).containsExactly("Pousette-Dart Band");
+            assertThat(namesFor(s, OWNER, "pousette dart band")).containsExactly("Pousette-Dart Band");
             assertThat(statusOf(s, OWNER, "Pousette-Dart Band")).isEqualTo("SEED");
 
-            assertThat(namesFor(s, OWNER, "drive-by truckers")).hasSize(1);
+            assertThat(namesFor(s, OWNER, "drive by truckers")).hasSize(1);
 
-            assertThat(namesFor(s, OWNER, "lone-wolf")).containsExactly("Lone" + NB_HYPHEN + "Wolf");
-            assertThat(namesFor(s, OWNER, "blue note all-stars revisited")).hasSize(1);
-            assertThat(namesFor(s, OTHER, "blue note all-stars")).containsExactly("Blue Note All-Stars");
+            assertThat(namesFor(s, OWNER, "lone wolf")).containsExactly("Lone" + NB_HYPHEN + "Wolf");
+            assertThat(namesFor(s, OWNER, "blue note all stars revisited")).hasSize(1);
+            assertThat(namesFor(s, OTHER, "blue note all stars")).containsExactly("Blue Note All-Stars");
 
             ResultSet rs = s.executeQuery("SELECT name, normalized_name FROM artist");
             while (rs.next()) {

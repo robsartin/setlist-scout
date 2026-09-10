@@ -12,8 +12,9 @@ import java.util.Locale;
  * {@code ArtistRepositoryTest#caseVariantIsAbsorbedByTheNormalizedNameConstraint}) let through
  * (issue #118: a rejected artist reappearing under a slightly different spelling).
  * <p>
- * Deliberately conservative: only folds case, collapses whitespace (including whitespace touching
- * a hyphen/dash, issue #157 -- {@code "X - Y"} and {@code "X-Y"} match), and maps the specific
+ * Deliberately conservative: only folds case, treats a hyphen and a space as the same separator
+ * (issue #266, which subsumes #157 -- {@code "X - Y"}, {@code "X-Y"} and {@code "X Y"} all match),
+ * and maps the specific
  * unicode punctuation variants seen in the wild (unicode hyphens and en/em dashes to the ASCII
  * hyphen, curly quotes to straight)
  * -- nothing that would merge genuinely different names ("AC/DC" and "ACDC" stay distinct, and a
@@ -68,17 +69,24 @@ public final class ArtistNameNormalizer {
                 .replace('”', '"')
                 .replace('„', '"')
                 .replace('″', '"');
+        // Issue #266: a hyphen and a space are the same SEPARATOR. "Yo-Yo Ma" and "Yo Yo Ma",
+        // "Jean-Michel Jarre" and "Jean Michel Jarre" are one artist each; 18 such pairs existed in
+        // production, six of them active rows that were really three artists being scanned twice.
+        //
+        // Folded to a space rather than to a hyphen so the stored normalized_name stays readable
+        // ("yo yo ma", not "yo-yo-ma") -- it is what #250's search matches against and what a
+        // human reads when diagnosing a match.
+        //
+        // This runs BEFORE the whitespace collapse below, which is what makes #157 fall out for
+        // free: "X - Y" becomes "X   Y" and collapses to "X Y", the same form "X-Y" reaches. That
+        // is why #157's own \s*-\s* regex is gone -- after this line there are no hyphens left
+        // for it to match, so keeping it would be dead code, not a safety net.
+        //
+        // Deliberately a SUBSTITUTION, not a deletion: the token boundary survives, so "AC/DC"
+        // still cannot collapse into "ACDC" and "YoYo Ma" stays distinct from "Yo-Yo Ma". That
+        // distinction is the class's conservative philosophy and ArtistNameNormalizerTest pins it.
+        result = result.replace('-', ' ');
         result = result.trim().replaceAll("\\s+", " ");
-        // Issue #157: collapse whitespace immediately touching a hyphen, so "X - Y", "X- Y",
-        // "X -Y", and "X-Y" all reach the same match form. By this point every dash variant this
-        // class folds (hyphen, non-breaking hyphen, en dash, em dash, horizontal bar, minus sign
-        // -- the first two added in #261) has already become the ASCII
-        // hyphen-minus above, so this one regex against '-' covers all of them plus a literal
-        // hyphen typed to begin with -- not just the ASCII case. Deliberately narrow: this only
-        // touches whitespace adjacent to a hyphen, never substitutes or removes any other
-        // character, so it cannot merge names that differ by a word substitution (e.g. "and" vs
-        // "&" -- see the class doc's conservative-by-design philosophy).
-        result = result.replaceAll("\\s*-\\s*", "-");
         return result.toLowerCase(Locale.ROOT);
     }
 }

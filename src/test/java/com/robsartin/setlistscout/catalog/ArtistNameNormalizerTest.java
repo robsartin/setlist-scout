@@ -168,4 +168,55 @@ class ArtistNameNormalizerTest {
         assertThat(ArtistNameNormalizer.normalize("Yo\u2011Yo Ma & Kathryn Stott"))
                 .isEqualTo(ArtistNameNormalizer.normalize("Yo-Yo Ma & Kathryn Stott"));
     }
+
+    // ---- #266: a hyphen and a space are the same separator ----------------------------------
+
+    @Test
+    @DisplayName("issue #266: hyphen and space are the same separator -- 'X Y', 'X-Y' and 'X - Y' "
+            + "all reach one form")
+    void hyphenAndSpaceAreTheSameSeparator() {
+        String target = ArtistNameNormalizer.normalize("X Y");
+        for (String variant : java.util.List.of("X-Y", "X - Y", "X- Y", "X -Y",
+                "X\u2010Y", "X\u2011Y", "X\u2013Y", "X\u2014Y")) {
+            assertThat(ArtistNameNormalizer.normalize(variant))
+                    .as("%s should normalize to the same form as 'X Y'", variant)
+                    .isEqualTo(target);
+        }
+    }
+
+    @Test
+    @DisplayName("issue #266: the real production pairs collapse -- these are rows being scanned twice")
+    void realProductionHyphenSpacePairsCollapse() {
+        assertThat(ArtistNameNormalizer.normalize("Yo-Yo Ma"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Yo Yo Ma"));
+        assertThat(ArtistNameNormalizer.normalize("Jean-Michel Jarre"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Jean Michel Jarre"));
+        assertThat(ArtistNameNormalizer.normalize("Jasmine Cephas-Jones"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Jasmine Cephas Jones"));
+        assertThat(ArtistNameNormalizer.normalize("The E-Street Band"))
+                .isEqualTo(ArtistNameNormalizer.normalize("The E Street Band"));
+    }
+
+    @Test
+    @DisplayName("issue #266: this widens the SEPARATOR rule, it does not delete separators -- "
+            + "'AC/DC' and 'ACDC' must still differ, or the class's conservative philosophy is gone")
+    void doesNotDeleteSeparators() {
+        assertThat(ArtistNameNormalizer.normalize("AC/DC"))
+                .isNotEqualTo(ArtistNameNormalizer.normalize("ACDC"));
+        assertThat(ArtistNameNormalizer.normalize("Yo-Yo Ma"))
+                .isNotEqualTo(ArtistNameNormalizer.normalize("YoYo Ma"));
+    }
+
+    @Test
+    @DisplayName("issue #266: non-Latin names keep a non-empty key of unchanged length -- the "
+            + "#118 ASCII-stripping guard, since this edits the same method")
+    void nonLatinNamesAreUnaffected() {
+        for (String name : java.util.List.of("\u30a2\u30b3\u30fc\u30b9\u30d5\u30a3\u30a2",
+                "\u05e9\u05dc\u05d5\u05dd", "\u0417\u0430\u0433\u0430\u0434\u043a\u0430")) {
+            assertThat(ArtistNameNormalizer.normalize(name))
+                    .as("non-Latin name %s must survive", name)
+                    .isNotEmpty()
+                    .hasSameSizeAs(name);
+        }
+    }
 }
