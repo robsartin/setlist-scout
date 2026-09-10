@@ -280,4 +280,113 @@ class ArtistNameNormalizerTest {
         assertThat(ArtistNameNormalizer.normalize("The")).isEqualTo("the");
         assertThat(ArtistNameNormalizer.normalize("The ")).isEqualTo("the");
     }
+
+    @Test
+    @DisplayName("issue #268: a Latin accent folds away -- the three live duplicate pairs reach "
+            + "one key each")
+    void latinAccentsFold() {
+        assertThat(ArtistNameNormalizer.normalize("Céline Dion"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Celine Dion"));
+        assertThat(ArtistNameNormalizer.normalize("Sinéad O'Connor"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Sinead O'Connor"));
+        assertThat(ArtistNameNormalizer.normalize("Jorge Calderón"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Jorge Calderon"));
+        assertThat(ArtistNameNormalizer.normalize("Béla Bartók")).isEqualTo("bela bartok");
+    }
+
+    @Test
+    @DisplayName("issue #268: the search complaint -- 'beyonce' typed without an accented keyboard "
+            + "reaches the same key as 'Beyoncé'")
+    void unaccentedTypingFindsAnAccentedArtist() {
+        assertThat(ArtistNameNormalizer.normalize("beyonce"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Beyoncé"));
+    }
+
+    @Test
+    @DisplayName("issue #268: a STROKE letter folds -- it has no canonical decomposition, so "
+            + "decompose-then-drop-marks alone DELETES it and 'Michał' would fold one letter short")
+    void strokeLettersFold() {
+        assertThat(ArtistNameNormalizer.normalize("Michał"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Michal"));
+        assertThat(ArtistNameNormalizer.normalize("Øystein Sevåg"))
+                .isEqualTo(ArtistNameNormalizer.normalize("Oystein Sevag"));
+        assertThat(ArtistNameNormalizer.normalize("Michał")).isEqualTo("michal");
+        assertThat(ArtistNameNormalizer.normalize("Stanisław Lem")).isEqualTo("stanislaw lem");
+    }
+
+    /**
+     * The assertion this whole issue turns on. A combining mark is dropped ONLY when its base is an
+     * ASCII letter. Japanese katakana encodes a voiced sound as base + U+3099/U+309A, both category
+     * NON_SPACING_MARK, so an unconditional mark-drop rewrites the word: the violinist
+     * {@code ミドリ} becomes {@code ミトリ} and {@code ガンダム} becomes {@code カンタム}. That is the
+     * ASCII-stripping bug of #118 in a different costume, and it corrupted 9 real catalog rows in
+     * the first implementation profiled for this issue.
+     *
+     * <p>Every name here is taken verbatim from Rob's production catalog, not invented.
+     */
+    @Test
+    @DisplayName("issue #268: a NON-LATIN name is left EXACTLY as it was -- dropping a Japanese "
+            + "dakuten would rewrite the word, not remove an accent")
+    void nonLatinNamesAreUntouched() {
+        for (String name : java.util.List.of(
+                "ミドリ",                       // katakana + dakuten -- would become ミトリ
+                "キバオブアキバ",                 // three voiced marks -- would become キハオフアキハ
+                "機動戦士Ζガンダム",              // would become 機動戦士ζカンタム
+                "サイプレス上野とロベルト吉野",      // handakuten too
+                "김지현",                       // Hangul: decomposes to jamo, must recompose
+                "방탄소년단",
+                "אסף רייז",                    // Hebrew
+                "גיא בראונשטיין",
+                "J.S. 巴赫",                    // CJK
+                "پرویز یاحقی")) {              // Persian
+            assertThat(ArtistNameNormalizer.normalize(name))
+                    .as("%s must survive normalization unchanged", name)
+                    .isEqualTo(name.toLowerCase(java.util.Locale.ROOT));
+        }
+    }
+
+    @Test
+    @DisplayName("issue #268: Greek and Cyrillic diacritics survive -- their base letters are not "
+            + "ASCII, so the fold does not reach them")
+    void greekAndCyrillicDiacriticsSurvive() {
+        assertThat(ArtistNameNormalizer.normalize("Μαρία")).isEqualTo("μαρία");
+        assertThat(ArtistNameNormalizer.normalize("Дмитрий")).isEqualTo("дмитрий");
+    }
+
+    @Test
+    @DisplayName("issue #268: no name normalizes to empty -- #118's ASCII strip collapsed every "
+            + "all-Hebrew and all-Japanese name to one colliding key")
+    void noNonLatinNameNormalizesToEmpty() {
+        for (String name : java.util.List.of("ミドリ", "김지현", "אסף רייז", "J.S. 巴赫", "پرویز یاحقی")) {
+            assertThat(ArtistNameNormalizer.normalize(name))
+                    .as("%s must not be emptied", name)
+                    .isNotBlank();
+        }
+    }
+
+    @Test
+    @DisplayName("issue #268: Vietnamese tone marks fold, because their bases ARE ASCII letters")
+    void vietnameseToneMarksFold() {
+        assertThat(ArtistNameNormalizer.normalize("Ai Mà Biết Được")).isEqualTo("ai ma biet duoc");
+    }
+
+    @Test
+    @DisplayName("issue #268: a name already stored DECOMPOSED reaches the same key as the "
+            + "precomposed spelling -- the fold recomposes, so both forms match")
+    void decomposedAndPrecomposedInputAgree() {
+        assertThat(ArtistNameNormalizer.normalize("Ce\u0301line Dion"))   // e + combining acute
+                .isEqualTo(ArtistNameNormalizer.normalize("C\u00e9line Dion"));
+        assertThat(ArtistNameNormalizer.normalize("\u30c6\u3099\u30e9"))  // te + dakuten + ra
+                .isEqualTo(ArtistNameNormalizer.normalize("\u30c7\u30e9")); // de + ra
+    }
+
+    @Test
+    @DisplayName("issue #268: sharp-s and the ae/oe ligatures are deliberately NOT folded -- none "
+            + "forms a duplicate pair in the catalog, so this stays conservative")
+    void ligaturesAndSharpSAreNotFolded() {
+        assertThat(ArtistNameNormalizer.normalize("Andreas Kißling")).isEqualTo("andreas kißling");
+        assertThat(ArtistNameNormalizer.normalize("Andreas Ihlebæk")).isEqualTo("andreas ihlebæk");
+        assertThat(ArtistNameNormalizer.normalize("Lou Pascal Et Ses Chœurs"))
+                .isEqualTo("lou pascal et ses chœurs");
+    }
 }

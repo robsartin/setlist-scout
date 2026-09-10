@@ -6,10 +6,12 @@ package com.robsartin.setlistscout.catalog;
  *
  * <p>Matching goes through {@link ArtistNameNormalizer}, not through {@code lower()} or a raw
  * {@code ILIKE} on {@code name}. That class is this app's one definition of name equality, and it
- * folds more than case: unicode dashes, curly quotes, and whitespace touching a hyphen (#157), so
- * {@code "Foo - Bar"} finds {@code Foo-Bar}. Approximating it in SQL is exactly the drift that
- * turned 3 real duplicate pairs into a false 13 in #118 -- there is one definition of "same name"
- * and this is it.
+ * folds more than case: unicode dashes, curly quotes, a hyphen and a space as the same separator
+ * (#266, so {@code "Foo - Bar"} finds {@code Foo-Bar}), a leading definite article (#267), and a
+ * Latin diacritic (#268, so {@code beyonce} finds {@code Beyoncé} -- which it could not before,
+ * leaving the artist unreachable to anyone without an accented keyboard). Approximating any of that
+ * in SQL is exactly the drift that turned 3 real duplicate pairs into a false 13 in #118 -- there is
+ * one definition of "same name" and this is it.
  *
  * <p>Wildcards are escaped because {@code normalize} deliberately preserves {@code %} and
  * {@code _}: it only folds case, whitespace and specific punctuation. Without escaping, a search
