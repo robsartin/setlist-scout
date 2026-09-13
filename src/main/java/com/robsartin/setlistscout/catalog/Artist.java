@@ -100,6 +100,14 @@ public class Artist {
     public ArtistStatus getStatus() { return status; }
     public void setStatus(ArtistStatus status) { this.status = status; }
     public String getDiscoveredVia() { return discoveredVia; }
+
+    /**
+     * This artist's provenance as one readable phrase -- "Member of Tom Petty" rather than
+     * {@code MEMBER_EXPANSION} (issue #279). A derived getter, not a mapped column: {@code @Id} is
+     * on a field, so Hibernate uses FIELD access and never looks at this. The vocabulary itself
+     * lives in {@link ArtistProvenance}, which is where it is tested.
+     */
+    public String getProvenance() { return ArtistProvenance.describe(source, discoveredVia); }
     public String getNote() { return note; }
     public String getOfficialSiteUrl() { return officialSiteUrl; }
     public void setOfficialSiteUrl(String officialSiteUrl) { this.officialSiteUrl = officialSiteUrl; }

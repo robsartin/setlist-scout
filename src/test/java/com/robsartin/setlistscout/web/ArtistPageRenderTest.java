@@ -430,4 +430,57 @@ class ArtistPageRenderTest extends AbstractPostgresIntegrationTest {
         assertThat(body).contains(">Next page<");
         assertThat(body).as("this IS the first page").doesNotContain("Previous page");
     }
+
+    // ---- #279: provenance on the active row ----
+
+    private void saveWithProvenance(String owner, String name, ArtistSource source, String via) {
+        Artist artist = new Artist(name, source, ArtistStatus.APPROVED, via, null);
+        artist.setOwner(owner);
+        artistRepository.save(artist);
+    }
+
+    /**
+     * The whole of issue #279: an active row said {@code MEMBER_EXPANSION} and stopped. Driven
+     * through the real template, because a Thymeleaf expression error compiles cleanly and 500s at
+     * runtime -- and {@code ${a.provenance}} is a derived getter, so a mapping mistake would only
+     * ever show up here.
+     */
+    @Test
+    @DisplayName("issue #279: an expansion-derived active row names the artist it came from, not the enum")
+    void activeRowNamesTheParentArtist() throws Exception {
+        String owner = "provenance-parent@example.com";
+        saveWithProvenance(owner, "Benmont Tench", ArtistSource.MEMBER_EXPANSION, "Tom Petty");
+        saveWithProvenance(owner, "Warren Zevon", ArtistSource.SIMILAR_EXPANSION, "Jackson Browne");
+
+        String body = mockMvc.perform(get("/artists")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Member of Tom Petty");
+        assertThat(body).contains("Similar to Jackson Browne");
+        assertThat(body).doesNotContain("MEMBER_EXPANSION");
+        assertThat(body).doesNotContain("SIMILAR_EXPANSION");
+    }
+
+    /**
+     * The assertion that stops a dangling phrase on 1,054 rows. A seed-list artist was not
+     * discovered via anything, and must not grow a "found via" or a bare "Member of".
+     */
+    @Test
+    @DisplayName("issue #279: a SEED_LIST active row says so and names no parent")
+    void seedRowNamesNoParent() throws Exception {
+        String owner = "provenance-seed@example.com";
+        saveWithProvenance(owner, "Tom Petty", ArtistSource.SEED_LIST, null);
+
+        String body = mockMvc.perform(get("/artists")
+                        .with(oidcLogin().idToken(t -> t.claim("email", owner))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("Seed list");
+        assertThat(body).doesNotContain("SEED_LIST");
+        assertThat(body).doesNotContain("found via");
+        assertThat(body).doesNotContain("Member of");
+    }
 }
