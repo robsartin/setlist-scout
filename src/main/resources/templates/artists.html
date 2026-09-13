@@ -109,7 +109,14 @@
                     <span th:if="${a.source.name() == 'TRIBUTE_EXPANSION'}" class="chip tribute">Tribute</span>
                 </h3>
                 <p class="row-sub">
-                    <span th:text="${a.source}">Source</span>
+                    <!--/* #279: the provenance phrase, not the raw enum. 71% of this list came from
+                           expansion, and "MEMBER_EXPANSION" answers how a name got here without
+                           answering why it is worth keeping -- for 1,162 rows, WHOSE member is the
+                           whole of the answer. The parent was already stored and already rendered
+                           on the rejected block below; only this list went without. The vocabulary
+                           lives in catalog.ArtistProvenance, which is where it is tested, so a
+                           SEED_LIST row cannot grow a dangling "found via". */-->
+                    <span th:text="${a.provenance}">Member of Tom Petty</span>
                     <span class="sep">·</span>
                     <a th:href="@{'/artists/' + ${a.id} + '/graph'}">graph</a>
                     <th:block th:if="${a.officialSiteUrl}">
