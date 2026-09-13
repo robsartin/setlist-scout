@@ -558,18 +558,52 @@ class CandidatesPageRenderTest extends AbstractPostgresIntegrationTest {
         return artist;
     }
     /**
-     * #240: only the listing pages (shows/artists/shared) take the wider measure. Candidates has its
-     * own two-column .candidates-layout (sidebar + focused group) tuned to the standard width, so
-     * widening it would work against that layout rather than help it.
-     * <p>
-     * The negative half of the assertion matters as much as the positive one: the modifier is
-     * applied by a condition on navActive in the shared layout fragment, so a broadened condition
-     * would silently widen every page in the app, and nothing else in the suite would notice.
+     * Issue #275: the candidates page now DOES take the wider measure. This inverts #240's
+     * deliberate choice, so the reasoning it replaces is worth keeping visible rather than deleted:
+     *
+     * <blockquote>#240: "Candidates has its own two-column .candidates-layout (sidebar + focused
+     * group) tuned to the standard width, so widening it would work against that layout rather than
+     * help it."</blockquote>
+     *
+     * That concern is real, not obsolete. A {@code .cand} row is name + note + Approve/Reject, and
+     * {@code .note} carries {@code flex:1 1 auto}, so it absorbs every extra pixel and pushes the
+     * buttons further from the name they belong to. The tradeoff was put to the owner with that
+     * consequence spelled out and the call was to widen anyway -- the extra room for names and notes
+     * is worth more than the shorter reach.
+     *
+     * <p>BOTH halves are asserted. The modifier is applied twice from one condition, on
+     * {@code .topbar-inner} and on {@code main.wrap}, and widening only one leaves the brand and nav
+     * visibly inset against content running wider beneath them -- the specific misalignment #240
+     * warned about.
+     *
+     * @see #rejectedPageStillUsesTheNarrowMeasure() for the guard this test used to carry
      */
     @Test
-    @DisplayName("#240: the candidates page does NOT take the wide measure")
-    void candidatesPageDoesNotUseTheWideMeasure() throws Exception {
+    @DisplayName("#275: the candidates page takes the wide measure, header and main together")
+    void candidatesPageUsesTheWideMeasure() throws Exception {
         String body = mockMvc.perform(get("/artists/candidates")
+                        .with(oidcLogin().idToken(t -> t.claim("email", "wide-positive@example.com"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("wrap wide");
+        assertThat(body).contains("topbar-inner wide");
+    }
+
+    /**
+     * The half of #240's guard that is still load-bearing, moved here because candidates can no
+     * longer carry it.
+     *
+     * <p>The {@code wide} modifier comes from ONE condition on {@code navActive} in the shared
+     * layout fragment. A condition broadened one page too far would silently widen every page in the
+     * app, and without a page asserting it stays narrow, nothing in the suite would notice. The
+     * rejected page is that page now: it is a plain list at the standard measure and is not in the
+     * wide set.
+     */
+    @Test
+    @DisplayName("#275: a page outside the wide set still renders at the narrow measure")
+    void rejectedPageStillUsesTheNarrowMeasure() throws Exception {
+        String body = mockMvc.perform(get("/artists/rejected")
                         .with(oidcLogin().idToken(t -> t.claim("email", "wide-negative@example.com"))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();

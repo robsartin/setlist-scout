@@ -40,7 +40,10 @@ body { margin:0; background:var(--bg); color:var(--text); font-family:var(--font
    header too (.topbar-inner.wide, below) so the brand and nav stay aligned with the rows -- the two
    carry independent max-widths, so widening only one visibly misaligns them. No @media breakpoint:
    a max-width bump needs none, and this file's .candidates-layout comment records why breakpoints
-   are avoided here. */
+   are avoided here.
+
+   #275 added the candidates page to this set, reversing #240's explicit exclusion of it. See
+   .candidates-layout below for what that costs and why it was chosen anyway. */
 .wrap.wide { max-width:1240px; }
 
 /* Top nav */
@@ -158,6 +161,23 @@ form.inline { display:inline; }
    .globalbar, .cand) reflows fluidly via flex-wrap instead, so this follows the same
    convention: fixed flex-basis on both children plus flex-wrap does the collapsing without a
    new breakpoint concept. */
+/* #275: this layout now runs at .wrap.wide (1240px) rather than the standard 940px, reversing
+   #240's deliberate exclusion of candidates.
+
+   The reason is not "more room" -- it is that at 940px the row BREAKS. .cand is flex-wrap:wrap and
+   .note carries flex:1 1 auto (below), so on a row whose note runs long the Reject button drops
+   onto a second line, 40px under Approve, and the row grows from 48px to 88px. Measured in a
+   browser against this stylesheet at 1500px viewport: at 940px two of six representative rows split
+   that way; at 1240px all six are a uniform 48px with both buttons side by side and nothing
+   wrapping. Which rows split depends purely on note length, so the two actions that must be
+   adjacent and predictable were neither.
+
+   The cost, stated honestly: the note absorbs the extra width, so the gap from the end of the name
+   to the Approve button grows from ~298px to ~598px. That was put to the owner before the change.
+   A button that is always in the same place beats a shorter reach to one that moves.
+
+   Left as flex with flex-wrap rather than a grid, so the sidebar still drops above the group on a
+   narrow viewport with no breakpoint. */
 .candidates-layout { display:flex; gap:1.25rem; align-items:flex-start; flex-wrap:wrap; }
 .candidates-layout .group-sidebar { flex:0 1 240px; min-width:0; }
 .candidates-layout .artist-group { flex:1 1 420px; min-width:0; }
