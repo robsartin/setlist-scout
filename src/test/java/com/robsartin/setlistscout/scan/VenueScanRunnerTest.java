@@ -250,4 +250,119 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
         // otherwise a transient failure would wait as long as a normal recheck.
         assertThat(reloaded.getNextDueAt()).isBefore(Instant.now().plus(Duration.ofHours(1)));
     }
+
+    // ---- #277: a performer the owner has explicitly said no to ----
+
+    private Long saveArtist(String name, ArtistStatus status) {
+        Artist artist = new Artist(name, ArtistSource.VENUE_EXPANSION, status, null, null);
+        artist.setOwner(OWNER);
+        return artistRepository.save(artist).getId();
+    }
+
+    /**
+     * The defect measured on issue #277: 134 of the owner's 218 upcoming show rows were venue
+     * scrapes for performers they had REJECTED. {@code ShowController#visibleToOwner} filters them
+     * off the page, so they were written, rescanned and never seen -- and every count over
+     * {@code show_event} was wrong by that factor unless it re-implemented the display filter.
+     */
+    @Test
+    @DisplayName("issue #277: a REJECTED performer's show is not persisted at all")
+    void doesNotPersistAShowForARejectedPerformer() {
+        saveArtist("Matt Braunger", ArtistStatus.REJECTED);
+
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY),
+                new Show("Nick Mullen", DATE_2, "Cap City Comedy Club", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+
+        runner.run(job);
+
+        assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER))
+                .extracting(Show::getArtistName)
+                .containsExactly("Nick Mullen");
+    }
+
+    @Test
+    @DisplayName("issue #277: a REMOVED performer's show is not persisted either -- REMOVED is the "
+            + "owner taking someone off their list, the same explicit no")
+    void doesNotPersistAShowForARemovedPerformer() {
+        saveArtist("Matt Braunger", ArtistStatus.REMOVED);
+
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+
+        runner.run(job);
+
+        assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER)).isEmpty();
+    }
+
+    /**
+     * The assertion that stops this borrowing {@code ArtistActivationService#isActive}, which is
+     * true only for SEED/APPROVED. A PENDING_REVIEW performer is a candidate awaiting a decision,
+     * not a decision -- skipping them would mean approving someone leaves them show-less until the
+     * venue's next scrape.
+     */
+    @Test
+    @DisplayName("issue #277: a PENDING_REVIEW performer's show IS persisted -- awaiting a decision "
+            + "is not the same as having been rejected")
+    void stillPersistsAShowForAPendingPerformer() {
+        Long pendingId = saveArtist("Matt Braunger", ArtistStatus.PENDING_REVIEW);
+
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+
+        runner.run(job);
+
+        assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER))
+                .singleElement()
+                .satisfies(s -> assertThat(s.getArtistId()).isEqualTo(pendingId));
+    }
+
+    @Test
+    @DisplayName("issue #277: an UNKNOWN performer's show is still persisted -- no catalog row yet "
+            + "is not a rejection, and is the normal first-scan case")
+    void stillPersistsAShowForAnUnknownPerformer() {
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Nobody In The Catalog", DATE_1, "Cap City Comedy Club", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+
+        runner.run(job);
+
+        assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER))
+                .singleElement()
+                .satisfies(s -> assertThat(s.getArtistId()).isNull());
+    }
+
+    /**
+     * The owner's ruling on #277 was "keep the show, stop producing more" -- a rejected artist's
+     * show is hidden, not worthless, because the unreject flow exists. Skipping at write time has
+     * to leave that flow working: once the rejection is lifted, the next scrape writes the show.
+     */
+    @Test
+    @DisplayName("issue #277: un-rejecting a performer brings their shows back on the next scrape")
+    void unrejectingAPerformerRestoresTheirShowsOnTheNextScrape() {
+        Long artistId = saveArtist("Matt Braunger", ArtistStatus.REJECTED);
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+
+        runner.run(job);
+        assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER)).isEmpty();
+
+        Artist unrejected = artistRepository.findById(artistId).orElseThrow();
+        unrejected.setStatus(ArtistStatus.APPROVED);
+        artistRepository.save(unrejected);
+
+        job.setClaimedAt(Instant.now());
+        job.setNextDueAt(Instant.now().minusSeconds(60));
+        job = venueScanJobRepository.save(job);
+        runner.run(job);
+
+        assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER))
+                .singleElement()
+                .satisfies(s -> assertThat(s.getArtistId()).isEqualTo(artistId));
+    }
 }

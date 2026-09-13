@@ -2,6 +2,7 @@ package com.robsartin.setlistscout.scan;
 
 import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
 import com.robsartin.setlistscout.catalog.ArtistNameStatusView;
+import com.robsartin.setlistscout.catalog.ArtistStatus;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.settings.SearchSettings;
 import com.robsartin.setlistscout.settings.SettingsService;
@@ -142,7 +143,17 @@ public class VenueScanRunner {
         int saved = 0;
         for (Show show : shows) {
             if (show.getEventDateTime() == null) continue; // defense in depth, mirrors ScanUnitRunner#persistNew
-            Long artistId = resolveArtistId(owner, show.getArtistName());
+            ArtistNameStatusView performer = resolvePerformer(owner, show.getArtistName());
+            // #277: a performer the owner has explicitly said no to. Writing these was the whole of
+            // that issue -- 134 of the owner's 218 upcoming rows were venue scrapes for REJECTED
+            // performers, which ShowController#visibleToOwner filters off the page, so they were
+            // written, rescanned and never seen. Skipping here stops the growth; nothing deletes
+            // what is already stored, because a rejected artist's show is hidden rather than
+            // worthless and the unreject flow can bring it back (see declined()).
+            if (performer != null && declined(performer.getStatus())) {
+                continue;
+            }
+            Long artistId = performer == null ? null : performer.getId();
             saved += showRepository.insertIfAbsent(owner, show.getArtistName(), show.getEventDateTime(),
                     show.getVenueName(), show.getVenueCity(), show.getPrice(), source, show.getTicketUrl(),
                     show.getKind().name(), discoveredAt, artistId);
@@ -165,14 +176,36 @@ public class VenueScanRunner {
      * that specific row will not be revisited by a later scan (it already exists by natural key),
      * so a venue show born null here stays null -- the same permanently-nullable state as any other
      * genuinely unresolved row.
+     * <p>
+     * #277: returns the whole {@link ArtistNameStatusView} rather than just the id, because
+     * {@link #persist} now needs the status too and the projection already carries it -- one lookup,
+     * not two. The lookup itself stays status-unfiltered, as its own contract says: even a REJECTED
+     * artist is still factually the performer this show is for, so resolving them is right and it is
+     * the persisting decision that changes.
      */
-    private Long resolveArtistId(String owner, String performerName) {
+    private ArtistNameStatusView resolvePerformer(String owner, String performerName) {
         if (performerName == null || performerName.isBlank()) {
             return null;
         }
         return artistRepository.findByOwnerAndNormalizedName(owner, ArtistNameNormalizer.normalize(performerName))
-                .map(ArtistNameStatusView::getId)
                 .orElse(null);
+    }
+
+    /**
+     * Has the owner explicitly said no to this performer (issue #277)?
+     *
+     * <p>Deliberately NOT {@code catalog.ArtistActivationService#isActive}, which is true only for
+     * {@code SEED}/{@code APPROVED}. Borrowing it would also skip {@code PENDING_REVIEW} performers,
+     * and a candidate awaiting a decision is not a decision: approving one would then leave them
+     * show-less until the venue's next scrape. The question here is narrower than "is this artist
+     * active" and must not share that answer.
+     *
+     * <p>{@code REMOVED} counts alongside {@code REJECTED}: it is the owner taking a seed off their
+     * list (see {@link ArtistStatus#REMOVED}), which is the same explicit no arrived at by a
+     * different route.
+     */
+    private static boolean declined(ArtistStatus status) {
+        return status == ArtistStatus.REJECTED || status == ArtistStatus.REMOVED;
     }
 
     /**
