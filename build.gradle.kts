@@ -14,6 +14,19 @@ version = "0.1.0"
 // flyway-database-postgresql (see #46).
 extra["flyway.version"] = "11.20.3"
 
+// Issue #282: JUnit 6. Boot 3.5.16's BOM still manages JUnit 5.12.x; overriding this property
+// re-imports org.junit:junit-bom at 6.x, which aligns Jupiter AND Platform on one version --
+// JUnit 6 unified the two lines, so junit-platform-* is no longer versioned 1.x. Set here rather
+// than in the version catalog for the same reason flyway.version is: the catalog pins plugins,
+// and a dependency version has to be overridden where it actually beats the BOM.
+extra["junit-jupiter.version"] = "6.1.3"
+
+// Testcontainers 2.x is required by the JUnit 6 move: the 1.x junit-jupiter module is built
+// against JUnit 5's extension API. A mismatch there does not error -- it silently discovers no
+// tests -- which is why #282's acceptance criterion is the TEST COUNT and not a green build.
+// 2.0 also renamed every artifact (`postgresql` -> `testcontainers-postgresql`), see below.
+extra["testcontainers.version"] = "2.0.5"
+
 java {
     // JDK pinned via the toolchain so the build uses the same Java version everywhere,
     // independent of whatever JDK happens to be on PATH. Gradle 8.14.3 itself can't launch on
@@ -89,8 +102,11 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     // Full-context smoke test boots the app against a throwaway Postgres.
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:postgresql")
+    // #282: Testcontainers 2.0 renamed its artifacts -- every module is now prefixed
+    // `testcontainers-`. The old coordinates still resolve at 1.x, so getting this wrong is not a
+    // build failure, it is a 1.x jar quietly sitting beside a 2.x core.
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.springframework.security:spring-security-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
