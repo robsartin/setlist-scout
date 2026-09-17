@@ -110,4 +110,50 @@ class MusicBrainzServiceTest {
 
         assertThat(service.findOfficialHomepage("Dawes")).isEmpty();
     }
+
+    @Test
+    @DisplayName("findWikidataQid returns the QID from MusicBrainz's curated wikidata url-rel")
+    void shouldReturnWikidataQid() {
+        server.enqueue(json("""
+                {"artists": [{"id": "mbid-123", "name": "Willie Nelson"}]}
+                """));
+        server.enqueue(json("""
+                {"relations": [
+                  {"type": "official homepage", "url": {"resource": "http://willienelson.com/"}},
+                  {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q206112"}}
+                ]}
+                """));
+
+        assertThat(service.findWikidataQid("Willie Nelson")).contains("Q206112");
+    }
+
+    @Test
+    @DisplayName("findWikidataQid is empty when MusicBrainz records no wikidata relation")
+    void shouldReturnEmptyQidWhenNoWikidataRelation() {
+        server.enqueue(json("""
+                {"artists": [{"id": "mbid-123", "name": "Dawes"}]}
+                """));
+        server.enqueue(json("""
+                {"relations": [
+                  {"type": "official homepage", "url": {"resource": "https://dawestheband.com"}}
+                ]}
+                """));
+
+        assertThat(service.findWikidataQid("Dawes")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("findWikidataQid is empty when the wikidata url is not an entity URL")
+    void shouldReturnEmptyQidWhenUrlIsNotAnEntityUrl() {
+        server.enqueue(json("""
+                {"artists": [{"id": "mbid-123", "name": "Dawes"}]}
+                """));
+        server.enqueue(json("""
+                {"relations": [
+                  {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Special:Search"}}
+                ]}
+                """));
+
+        assertThat(service.findWikidataQid("Dawes")).isEmpty();
+    }
 }

@@ -119,6 +119,8 @@
                     <span th:text="${a.provenance}">Member of Tom Petty</span>
                     <span class="sep">·</span>
                     <a th:href="@{'/artists/' + ${a.id} + '/graph'}">graph</a>
+                    <span class="sep">·</span>
+                    <a th:href="@{'/artists/' + ${a.id} + '/films'}">films</a>
                     <th:block th:if="${a.officialSiteUrl}">
                         <span class="sep">·</span>
                         <a th:href="${a.officialSiteUrl}" th:text="${a.officialSiteUrl}"

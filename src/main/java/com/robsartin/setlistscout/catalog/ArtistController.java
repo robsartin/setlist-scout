@@ -50,13 +50,15 @@ public class ArtistController {
     private final ArtistImportService importService;
     private final ArtistImportRepository artistImportRepository;
     private final ArtistPager artistPager;
+    private final ArtistFilmographyService filmographyService;
 
     public ArtistController(ArtistRepository artistRepository, ArtistEdgeRepository artistEdgeRepository,
                            CurrentUser currentUser, ArtistSeedService seedService,
                            ArtistActivationService activationService, ArtistSiteUrlService siteUrlService,
                            ArtistConnectionsService connectionsService,
                            ArtistImportService importService, ArtistImportRepository artistImportRepository,
-                           ArtistPager artistPager) {
+                           ArtistPager artistPager, ArtistFilmographyService filmographyService) {
+        this.filmographyService = filmographyService;
         this.artistRepository = artistRepository;
         this.artistEdgeRepository = artistEdgeRepository;
         this.currentUser = currentUser;
@@ -284,6 +286,42 @@ public class ArtistController {
         model.addAttribute("incoming", incoming);
         model.addAttribute("reachable", reachable);
         return "artist-graph";
+    }
+
+    /**
+     * The Films page (#286): which films this artist made, and which Wikidata entity they were
+     * matched to. Read-only; the refresh below is the only write.
+     *
+     * <p>The matched label and description are shown, not just the QID, because they are the only
+     * way an owner can tell that Q206112 is the country musician rather than the boxer of the same
+     * name. A wrong match is silent everywhere else.
+     */
+    @GetMapping("/{id}/films")
+    public String films(@PathVariable Long id, Model model) {
+        String owner = currentUser.email();
+        Artist artist = artistRepository.findByIdAndOwner(id, owner)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+
+        model.addAttribute("artist", artist);
+        model.addAttribute("credits", filmographyService.creditsFor(owner, id));
+        return "artist-films";
+    }
+
+    /**
+     * Resolve this artist against Wikidata if needed and record what they made.
+     *
+     * <p>On demand rather than on a poller: most of an owner's catalog is musicians who never
+     * appear in a film, and resolving every one of them would spend two network calls each to
+     * learn nothing. An owner asking about a particular person is the signal that the lookup is
+     * worth making.
+     */
+    @PostMapping("/{id}/films/refresh")
+    public String refreshFilms(@PathVariable Long id) {
+        String owner = currentUser.email();
+        artistRepository.findByIdAndOwner(id, owner)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        filmographyService.refresh(owner, id);
+        return "redirect:/artists/" + id + "/films";
     }
 
     private static String nameOf(Map<Long, String> namesById, Long id) {

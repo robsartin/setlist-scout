@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: page('Films', 'artists', ~{::content})}">
+<body>
+<div th:fragment="content">
+    <p class="note"><a th:href="@{/artists}">&larr; Back to artists</a></p>
+    <h1 th:text="${artist.name}">Artist</h1>
+
+    <div class="card">
+        <h2>Wikidata match</h2>
+        <p th:if="${artist.wikidataQid == null}">
+            <span class="chip">Not yet matched to Wikidata</span>
+        </p>
+        <p class="note" th:if="${artist.wikidataQid == null}">
+            Nothing is guessed here. A name that matches more than one person is left unmatched
+            rather than resolved to the wrong one.
+        </p>
+        <p th:unless="${artist.wikidataQid == null}">
+            <span th:text="${artist.wikidataLabel}">Label</span>
+            <span class="note" th:if="${artist.wikidataDescription != null}"
+                  th:text="'-- ' + ${artist.wikidataDescription}">description</span>
+            <a class="note" th:href="'https://www.wikidata.org/wiki/' + ${artist.wikidataQid}"
+               th:text="${artist.wikidataQid}" rel="noopener noreferrer" target="_blank">Q0</a>
+        </p>
+        <form th:action="@{'/artists/' + ${artist.id} + '/films/refresh'}" method="post">
+            <button type="submit">Find films</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Films</h2>
+        <p class="note" th:if="${#lists.isEmpty(credits)}">No films recorded.</p>
+        <div class="table-scroll" th:unless="${#lists.isEmpty(credits)}">
+            <table>
+                <thead><tr><th>Film</th><th>Role</th></tr></thead>
+                <tbody>
+                <tr th:each="c : ${credits}">
+                    <td th:text="${c.titleWithYear()}">Film (year)</td>
+                    <td>
+                        <span class="chip" th:each="role : ${c.roles()}" th:text="${role}">ROLE</span>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</body>
+</html>

@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Looks up "member of band" / "collaborator" relationships via the MusicBrainz API.
@@ -24,6 +25,8 @@ import java.util.Map;
 public class MusicBrainzService {
 
     private static final Logger log = LoggerFactory.getLogger(MusicBrainzService.class);
+
+    private static final Pattern QID = Pattern.compile("Q[0-9]+");
 
     private final RestClient restClient;
     private final long rateLimitMillis;
@@ -50,30 +53,9 @@ public class MusicBrainzService {
     public List<String> findRelatedArtists(String artistName) {
         List<String> related = new ArrayList<>();
 
-        Map<String, Object> searchResult;
-        try {
-            searchResult = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/artist/")
-                            .queryParam("query", "artist:\"" + artistName + "\"")
-                            .queryParam("fmt", "json")
-                            .queryParam("limit", 1)
-                            .build())
-                    .retrieve()
-                    .body(Map.class);
-        } catch (Exception e) {
-            log.atWarn().setCause(e)
-                    .addKeyValue("source", "musicbrainz")
-                    .addKeyValue("artist", artistName)
-                    .log("artist search failed");
-            searchResult = Map.of();
-        }
-
-        if (searchResult == null) return related;
-        List<Map<String, Object>> artists = (List<Map<String, Object>>) searchResult.get("artists");
-        if (artists == null || artists.isEmpty()) return related;
-
-        String mbid = (String) artists.get(0).get("id");
+        java.util.Optional<String> found = findMbid(artistName);
+        if (found.isEmpty()) return related;
+        String mbid = found.get();
         sleepForRateLimit();
 
         Map<String, Object> detail;
@@ -113,8 +95,92 @@ public class MusicBrainzService {
     }
 
     /** The artist's official homepage URL from MusicBrainz's url-rels, if one is recorded. */
-    @SuppressWarnings("unchecked")
     public java.util.Optional<String> findOfficialHomepage(String artistName) {
+        java.util.Optional<String> result =
+                urlRelationResource(artistName, "official homepage", "official homepage lookup");
+        log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
+                .addKeyValue("found", result.isPresent()).log("official homepage lookup");
+        return result;
+    }
+
+    /**
+     * The artist's Wikidata QID from MusicBrainz's curated {@code wikidata} url-rel (#286).
+     *
+     * <p>Preferred over searching Wikidata by name, and the reason is disambiguation rather than
+     * convenience: {@code wbsearchentities} for "Martin Scorsese" returns the filmmaker first and a
+     * 1993 King Missile <em>song</em> second, and nothing in the response says which one the caller
+     * meant. MusicBrainz's link is a human-curated assertion about <em>this</em> artist, so a hit
+     * here needs no guard. It rides the same {@code inc=url-rels} request
+     * {@link #findOfficialHomepage} already makes, so it costs one call, not a new integration.
+     *
+     * <p>Empty for anyone MusicBrainz does not carry -- a film director who never recorded -- which
+     * is what the name-search fallback in {@code catalog.WikidataIdentityService} exists for.
+     */
+    public java.util.Optional<String> findWikidataQid(String artistName) {
+        java.util.Optional<String> result = urlRelationResource(artistName, "wikidata", "wikidata QID lookup")
+                .flatMap(MusicBrainzService::qidFromEntityUrl);
+        log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
+                .addKeyValue("found", result.isPresent()).log("wikidata QID lookup");
+        return result;
+    }
+
+    /**
+     * {@code https://www.wikidata.org/wiki/Q206112} -> {@code Q206112}.
+     *
+     * <p>Shape-checked rather than taken as given: the last path segment must be {@code Q} followed
+     * by digits. MusicBrainz's data is user-edited, and a {@code wikidata} relation pointing at
+     * {@code Special:Search} or a property would otherwise be stored as this artist's identity and
+     * used to attach a filmography -- the failure mode that no later step can detect, because a
+     * well-formed wrong QID and a right one are indistinguishable downstream.
+     */
+    private static java.util.Optional<String> qidFromEntityUrl(String resource) {
+        String segment = resource.substring(resource.lastIndexOf('/') + 1);
+        return QID.matcher(segment).matches() ? java.util.Optional.of(segment) : java.util.Optional.empty();
+    }
+
+    /** The {@code resource} of the first url-rel of the given type, if the artist and relation exist. */
+    @SuppressWarnings("unchecked")
+    private java.util.Optional<String> urlRelationResource(String artistName, String relationType, String what) {
+        java.util.Optional<String> mbid = findMbid(artistName);
+        if (mbid.isEmpty()) return java.util.Optional.empty();
+        sleepForRateLimit();
+
+        Map<String, Object> detail;
+        try {
+            detail = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/artist/" + mbid.get())
+                            .queryParam("inc", "url-rels")
+                            .queryParam("fmt", "json")
+                            .build())
+                    .retrieve()
+                    .body(Map.class);
+        } catch (Exception e) {
+            log.atWarn().setCause(e)
+                    .addKeyValue("source", "musicbrainz")
+                    .addKeyValue("artist", artistName)
+                    .log(what + " failed");
+            return java.util.Optional.empty();
+        }
+
+        if (detail == null) return java.util.Optional.empty();
+        List<Map<String, Object>> relations = (List<Map<String, Object>>) detail.get("relations");
+        if (relations == null) return java.util.Optional.empty();
+
+        for (Map<String, Object> rel : relations) {
+            if (relationType.equals(rel.get("type"))) {
+                Map<String, Object> url = (Map<String, Object>) rel.get("url");
+                if (url != null && url.get("resource") instanceof String resource) {
+                    return java.util.Optional.of(resource);
+                }
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    /** The MBID of the best search hit for this name, if MusicBrainz knows the artist at all. */
+    @SuppressWarnings("unchecked")
+    private java.util.Optional<String> findMbid(String artistName) {
         Map<String, Object> searchResult;
         try {
             searchResult = restClient.get()
@@ -131,53 +197,13 @@ public class MusicBrainzService {
                     .addKeyValue("source", "musicbrainz")
                     .addKeyValue("artist", artistName)
                     .log("artist search failed");
-            searchResult = Map.of();
+            return java.util.Optional.empty();
         }
 
         if (searchResult == null) return java.util.Optional.empty();
         List<Map<String, Object>> artists = (List<Map<String, Object>>) searchResult.get("artists");
         if (artists == null || artists.isEmpty()) return java.util.Optional.empty();
-
-        String mbid = (String) artists.get(0).get("id");
-        sleepForRateLimit();
-
-        Map<String, Object> detail;
-        try {
-            detail = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/artist/" + mbid)
-                            .queryParam("inc", "url-rels")
-                            .queryParam("fmt", "json")
-                            .build())
-                    .retrieve()
-                    .body(Map.class);
-        } catch (Exception e) {
-            log.atWarn().setCause(e)
-                    .addKeyValue("source", "musicbrainz")
-                    .addKeyValue("artist", artistName)
-                    .log("official homepage lookup failed");
-            detail = Map.of();
-        }
-
-        if (detail == null) return java.util.Optional.empty();
-        List<Map<String, Object>> relations = (List<Map<String, Object>>) detail.get("relations");
-        if (relations == null) return java.util.Optional.empty();
-
-        for (Map<String, Object> rel : relations) {
-            if ("official homepage".equals(rel.get("type"))) {
-                Map<String, Object> url = (Map<String, Object>) rel.get("url");
-                if (url != null && url.get("resource") instanceof String resource) {
-                    java.util.Optional<String> result = java.util.Optional.of(resource);
-                    log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
-                            .addKeyValue("found", result.isPresent()).log("official homepage lookup");
-                    return result;
-                }
-            }
-        }
-        java.util.Optional<String> result = java.util.Optional.empty();
-        log.atDebug().addKeyValue("source", "musicbrainz").addKeyValue("artist", artistName)
-                .addKeyValue("found", result.isPresent()).log("official homepage lookup");
-        return result;
+        return java.util.Optional.ofNullable((String) artists.get(0).get("id"));
     }
 
     private void sleepForRateLimit() {
