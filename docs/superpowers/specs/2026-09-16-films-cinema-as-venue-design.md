@@ -101,7 +101,11 @@ fragments). Films become catalog entities in #2, as WORKs, or not at all.
 `ShowController#visibleToOwner` keeps a `venue:` show only when its performer is an ACTIVE artist.
 With no catalog row for films (§4), that rule hides **every** screening. It becomes:
 
-> visible if `kind = FILM`, **or** the performer is an active artist
+> a `venue:` show is visible if `kind = FILM`, **or** the performer is an active artist
+
+The rule stays scoped to `venue:` sources exactly as today — it is the `venue:` branch that changes,
+not the filter as a whole. A Ticketmaster or band-site row is unaffected whatever its kind, which
+matters because nothing prevents a future non-venue source emitting `FILM`.
 
 **This is deliberately the opposite of the cross-filter #206 gave live venues**, and the owner's
 explicit decision. The reason it is defensible here and was not there: the cross-filter matches
