@@ -227,6 +227,30 @@ class WikidataServiceTest {
         assertThat(service.filmography("Q41148")).isEmpty();
     }
 
+    // ---- describe -----------------------------------------------------------
+
+    @Test
+    @DisplayName("describe returns the label and description for a QID")
+    void shouldDescribeAQid() {
+        server.enqueue(sparql("""
+                {"head": {"vars": ["entLabel", "entDescription"]},
+                 "results": {"bindings": [
+                   {"entLabel": {"type": "literal", "value": "Willie Nelson"},
+                    "entDescription": {"type": "literal", "value": "American country musician (born 1933)"}}
+                 ]}}
+                """));
+
+        assertThat(service.describe("Q206112")).contains(
+                new WikidataEntity("Q206112", "Willie Nelson", "American country musician (born 1933)"));
+    }
+
+    @Test
+    @DisplayName("describe refuses a QID that is not shaped like one")
+    void shouldRefuseToDescribeAMalformedQid() {
+        assertThat(service.describe("Special:Search")).isEmpty();
+        assertThat(server.getRequestCount()).isZero();
+    }
+
     @Test
     @DisplayName("filmography refuses a QID that is not shaped like one")
     void shouldRefuseAMalformedQid() {

@@ -118,6 +118,32 @@ public class WikidataService {
     }
 
     /**
+     * The English label and description of one known QID.
+     *
+     * <p>Exists so a resolved identity is legible. A QID that came from MusicBrainz's curated link
+     * arrives as a bare number, and "Q206112" on an artist page tells nobody whether the right
+     * Willie Nelson was matched. "American country musician (born 1933)" does.
+     */
+    public Optional<WikidataEntity> describe(String qid) {
+        if (qid == null || !QID.matcher(qid).matches()) {
+            log.atWarn().addKeyValue("source", "wikidata").addKeyValue("qid", qid)
+                    .log("refusing a malformed QID");
+            return Optional.empty();
+        }
+
+        String query = """
+                SELECT ?entLabel ?entDescription WHERE {
+                  BIND(wd:%s AS ?ent)
+                  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+                }
+                """.formatted(qid);
+
+        return select(query, "entity description").stream()
+                .findFirst()
+                .map(row -> new WikidataEntity(qid, row.get("entLabel"), row.get("entDescription")));
+    }
+
+    /**
      * Every film this entity is credited on, one credit per (film, role) pair.
      *
      * <h2>The earliest release year, and why the choice matters</h2>
