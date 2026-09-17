@@ -125,11 +125,14 @@ class HideAndCancelFlowTest extends AbstractPostgresIntegrationTest {
         when(currentUser.email()).thenReturn(OWNER);
     }
 
+    @Autowired
+    private com.robsartin.setlistscout.catalog.ScreeningCreditService screeningCreditService;
+
     private ShowController controller() {
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         return new ShowController(showRepository, artistRepository, scanJobRepository,
                 settingsService, currentUser, adminGuard, artistActivationService,
-                mock(SourceHealthService.class));
+                mock(SourceHealthService.class), screeningCreditService);
     }
 
     private Long seedArtist(String name) {

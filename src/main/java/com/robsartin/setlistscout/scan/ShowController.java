@@ -3,6 +3,9 @@ package com.robsartin.setlistscout.scan;
 import com.robsartin.setlistscout.catalog.Artist;
 import com.robsartin.setlistscout.catalog.ArtistActivationService;
 import com.robsartin.setlistscout.catalog.ArtistNameNormalizer;
+import com.robsartin.setlistscout.catalog.ScreeningCredit;
+import com.robsartin.setlistscout.catalog.ScreeningCreditService;
+import com.robsartin.setlistscout.catalog.ScreeningKey;
 import com.robsartin.setlistscout.catalog.ArtistRepository;
 import com.robsartin.setlistscout.catalog.ArtistSource;
 import com.robsartin.setlistscout.catalog.ArtistStatus;
@@ -19,11 +22,15 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -48,6 +55,7 @@ public class ShowController {
 
     private final ShowRepository showRepository;
     private final ArtistRepository artistRepository;
+    private final ScreeningCreditService screeningCreditService;
     private final ScanJobRepository scanJobRepository;
     private final SettingsService settingsService;
     private final CurrentUser currentUser;
@@ -62,8 +70,10 @@ public class ShowController {
                            CurrentUser currentUser,
                            AdminGuard adminGuard,
                            ArtistActivationService activationService,
-                           SourceHealthService sourceHealth) {
+                           SourceHealthService sourceHealth,
+                           ScreeningCreditService screeningCreditService) {
         this.showRepository = showRepository;
+        this.screeningCreditService = screeningCreditService;
         this.artistRepository = artistRepository;
         this.scanJobRepository = scanJobRepository;
         this.settingsService = settingsService;
@@ -136,6 +146,14 @@ public class ShowController {
 
         Set<String> activeArtistNames = activeArtistNames(owner);
         shows = visibleToOwner(shows, activeArtistNames);
+
+        // #289 (Films 3/3): why each screening is worth seeing, and screenings that have a reason
+        // ranked above ones that do not. Applied here AND in resolveVisibleShows, for the reason
+        // visibleToOwner's Javadoc gives: the displayed order and the focus-successor order have to
+        // be the same list, or hiding a row moves focus somewhere the owner is not looking.
+        Map<Long, List<ScreeningCredit>> screeningReasons = screeningReasons(owner, shows);
+        shows = rankMatchedScreeningsFirst(shows, screeningReasons);
+        model.addAttribute("screeningReasons", screeningReasons);
 
         // #220 (owner decision recorded in the brief): hiddenCount means "shows you hid that you
         // could still see" -- the same venue-follow filter as `shows` above, applied to the hidden
@@ -218,6 +236,78 @@ public class ShowController {
                         || s.getKind() == Show.Kind.FILM
                         || activeArtistNames.contains(ArtistNameNormalizer.normalize(s.getArtistName())))
                 .toList();
+    }
+
+    /**
+     * Why each screening in this list is worth seeing (#289), keyed by show id: the people the
+     * owner follows who are credited on the film it is showing.
+     *
+     * <p>Screenings with no confident match are absent from the map rather than present with an
+     * empty list. The matching rule is deliberately strict -- see
+     * {@link ScreeningCreditService} for why a title alone and a year-either-side both name the
+     * wrong film often enough to matter.
+     */
+    private Map<Long, List<ScreeningCredit>> screeningReasons(String owner, List<Show> shows) {
+        List<Show> screenings = shows.stream().filter(s -> s.getKind() == Show.Kind.FILM).toList();
+        if (screenings.isEmpty()) return Map.of();
+
+        Map<ScreeningKey, List<ScreeningCredit>> byFilm = screeningCreditService.creditsFor(owner,
+                screenings.stream().map(ShowController::screeningKey).toList());
+        if (byFilm.isEmpty()) return Map.of();
+
+        Map<Long, List<ScreeningCredit>> byShow = new LinkedHashMap<>();
+        for (Show screening : screenings) {
+            List<ScreeningCredit> credits = byFilm.get(screeningKey(screening));
+            // A null id only happens for a hand-built Show in a controller unit test, but a null
+            // key here would make containsKey(null) true for every such row at once.
+            if (credits != null && screening.getId() != null) byShow.put(screening.getId(), credits);
+        }
+        return byShow;
+    }
+
+    /** What a screening offers as evidence of which film it is: a normalized title and a year. */
+    private static ScreeningKey screeningKey(Show screening) {
+        return new ScreeningKey(ArtistNameNormalizer.normalize(screening.getArtistName()),
+                screening.getReleaseYear());
+    }
+
+    /**
+     * Moves screenings that have a reason above screenings that do not, within the same calendar
+     * day.
+     *
+     * <p>Reorders {@code FILM} rows <em>among themselves</em>, writing them back into the slots
+     * they already occupied, so every other row -- a concert, a comedy night -- stays exactly where
+     * the owner's chosen sort put it. This is a reordering among screenings, not a re-sort of the
+     * page: a Wilco show has nothing to do with this feature and must not move because of it.
+     *
+     * <p>{@code sorted} is stable, so within the matched group and within the unmatched group the
+     * incoming order (whatever {@link #comparatorFor} produced) is preserved.
+     */
+    static List<Show> rankMatchedScreeningsFirst(List<Show> shows, Map<Long, List<ScreeningCredit>> reasons) {
+        if (reasons.isEmpty()) return shows;
+
+        Map<LocalDate, List<Integer>> screeningSlotsByDay = new LinkedHashMap<>();
+        for (int i = 0; i < shows.size(); i++) {
+            Show show = shows.get(i);
+            if (show.getKind() == Show.Kind.FILM) {
+                screeningSlotsByDay
+                        .computeIfAbsent(show.getEventDateTime().toLocalDate(), k -> new ArrayList<>())
+                        .add(i);
+            }
+        }
+        if (screeningSlotsByDay.isEmpty()) return shows;
+
+        List<Show> ranked = new ArrayList<>(shows);
+        screeningSlotsByDay.forEach((day, slots) -> {
+            List<Show> reordered = slots.stream()
+                    .map(shows::get)
+                    .sorted(Comparator.comparingInt(s -> reasons.containsKey(s.getId()) ? 0 : 1))
+                    .toList();
+            for (int i = 0; i < slots.size(); i++) {
+                ranked.set(slots.get(i), reordered.get(i));
+            }
+        });
+        return ranked;
     }
 
     private static Comparator<Show> comparatorFor(String sort) {
@@ -454,7 +544,8 @@ public class ShowController {
         LocalDateTime end = start.plusMonths(settings.getMonthsAhead());
         List<Show> shows = showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(owner, start, end);
         shows.sort(comparatorFor(sort));
-        return visibleToOwner(shows, activeArtistNames(owner));
+        List<Show> visible = visibleToOwner(shows, activeArtistNames(owner));
+        return rankMatchedScreeningsFirst(visible, screeningReasons(owner, visible));
     }
 
     private static String describeShow(Show show) {

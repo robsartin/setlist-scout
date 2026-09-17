@@ -67,7 +67,8 @@ class ShowControllerTest {
         when(artistRepository.findByOwnerAndSource(OWNER, ArtistSource.TRIBUTE_EXPANSION)).thenReturn(List.of());
         AdminGuard adminGuard = new AdminGuard(currentUser, TestAppProperties.withKeys());
         controller = new ShowController(showRepository, artistRepository, scanJobRepository,
-                settingsService, currentUser, adminGuard, activationService, sourceHealth);
+                settingsService, currentUser, adminGuard, activationService, sourceHealth,
+                mock(com.robsartin.setlistscout.catalog.ScreeningCreditService.class));
     }
 
     // No id is set here (Show's id is JPA-generated, no setter) -- these controller-unit tests

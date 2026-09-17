@@ -199,6 +199,20 @@
                         <th:block th:if="${show.ticketUrl}"><span class="sep">·</span> <a th:href="${show.ticketUrl}" target="_blank"
                                 th:aria-label="'Tickets for ' + ${show.artistName} + ' at ' + ${show.venueName}">tickets</a></th:block>
                     </p>
+                    <!--/* #289 (Films 3/3): the reason this screening is worth seeing. Present only
+                           when the film could be matched to a work CONFIDENTLY -- see
+                           catalog.ScreeningCreditService for why an ambiguous title with no stated
+                           year is left unexplained rather than guessed at. A screening with no
+                           reason still shows; #284's owner decision is that a followed cinema shows
+                           everything screening there. */-->
+                    <p class="note" th:if="${screeningReasons != null and screeningReasons.containsKey(show.id)}">
+                        because you follow
+                        <th:block th:each="credit, creditStat : ${screeningReasons.get(show.id)}">
+                            <span th:text="${credit.artistName()}">Martin Scorsese</span><span
+                                  th:text="' (' + ${#strings.listJoin(credit.roles(), ', ')} + ')'"> (DIRECTED)</span><th:block
+                                  th:if="${not creditStat.last}">, </th:block>
+                        </th:block>
+                    </p>
                 </div>
                 <div class="meta">
                     <span th:if="${tributeArtistNames.contains(#strings.toLowerCase(show.artistName))}"
