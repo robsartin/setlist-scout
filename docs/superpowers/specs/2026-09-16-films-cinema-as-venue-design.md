@@ -87,6 +87,14 @@ nearly free; backfilling it later means re-scraping calendars whose screenings h
 
 Nullable because a listing may not state it, and a missing year must not drop a screening.
 
+> **Addendum, 2026-09-17 (#286).** "A film's identity is title+year" holds for the screening side,
+> which is all this sub-project touches, but not for the Wikidata side #2 reads from: `P577`
+> (publication date) is multi-valued — one per country release — and 38 of Martin Scorsese's 112
+> films come back with more than one distinct year, 4 with none. #286 therefore makes a WORK's
+> identity its QID and demotes title+year to the *match key* between a screening and a work. The
+> reason for capturing the year here is unchanged: it is still what the screening side must match
+> on, and still unbackfillable once a showtime has passed.
+
 ### 4. A cinema creates no catalog candidates
 
 `VenueScanRunner` suppresses the `VenuePerformerSeen` publish when the venue is a `CINEMA`.
