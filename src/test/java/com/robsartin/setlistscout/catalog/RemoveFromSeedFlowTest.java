@@ -103,10 +103,13 @@ class RemoveFromSeedFlowTest extends AbstractPostgresIntegrationTest {
         currentUser = mock(CurrentUser.class);
     }
 
+    @Autowired
+    private ArtistFilmographyService filmographyService;
+
     private ArtistController controller() {
         return new ArtistController(artistRepository, artistEdgeRepository, currentUser, artistSeedService,
                 artistActivationService, artistSiteUrlService, artistConnectionsService, artistImportService,
-                artistImportRepository, artistPager);
+                artistImportRepository, artistPager, filmographyService);
     }
 
     private Long seedArtist(String owner, String name) {

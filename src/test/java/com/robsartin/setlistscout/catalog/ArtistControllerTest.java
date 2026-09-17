@@ -68,7 +68,8 @@ class ArtistControllerTest {
         ArtistPager artistPager = new ArtistPager(artistRepository, PAGE_SIZE);
         controller = new ArtistController(artistRepository, mock(ArtistEdgeRepository.class), currentUser, seedService,
                 activationService, siteUrlService, mock(ArtistConnectionsService.class), importService,
-                mock(ArtistImportRepository.class), artistPager);
+                mock(ArtistImportRepository.class), artistPager,
+                mock(ArtistFilmographyService.class));
     }
 
     private static Artist pending(String name, ArtistSource source) {
