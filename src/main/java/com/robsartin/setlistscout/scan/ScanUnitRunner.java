@@ -216,7 +216,7 @@ public class ScanUnitRunner {
             show.setArtistId(artistId);
             int inserted = showRepository.insertIfAbsent(owner, show.getArtistName(), show.getEventDateTime(),
                     show.getVenueName(), show.getVenueCity(), show.getPrice(), show.getSource(),
-                    show.getTicketUrl(), show.getKind().name(), show.getDiscoveredAt(), artistId);
+                    show.getTicketUrl(), show.getKind().name(), show.getDiscoveredAt(), artistId, show.getReleaseYear());
             if (inserted == 1) {
                 saved++;
             } else {

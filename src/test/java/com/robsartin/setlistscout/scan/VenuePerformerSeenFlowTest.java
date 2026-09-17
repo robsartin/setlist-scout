@@ -104,7 +104,7 @@ class VenuePerformerSeenFlowTest extends AbstractPostgresIntegrationTest {
     @DisplayName("a real venue scan publishes VenuePerformerSeen, and the real listener creates a "
             + "PENDING_REVIEW/VENUE_EXPANSION candidate")
     void venueScanCreatesRealCandidate() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Nick Mullen", DATE_1, "Cap City Comedy Club", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
 
@@ -139,7 +139,7 @@ class VenuePerformerSeenFlowTest extends AbstractPostgresIntegrationTest {
         rejected.setOwner(OWNER);
         artistRepository.save(rejected);
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Nick Mullen", DATE_1, "Cap City Comedy Club", "Austin",
                         null, "x", "u", Show.Kind.COMEDY),
                 new Show("Control Comedian", DATE_1, "Cap City Comedy Club", "Austin",
@@ -209,7 +209,7 @@ class VenuePerformerSeenFlowTest extends AbstractPostgresIntegrationTest {
         VenueScanJob cinemaJob = venueScanJobRepository.save(new VenueScanJob(
                 OWNER, cinema.getId(), JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(60)));
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Goodfellas", DATE_1, "AFS Cinema", "Austin",
                         null, "x", "u", Show.Kind.FILM)));
         venueScanRunner.run(cinemaJob);
@@ -224,7 +224,7 @@ class VenuePerformerSeenFlowTest extends AbstractPostgresIntegrationTest {
         assertThat(ranCinema.getAttempts()).isZero();
 
         // The control: the SAME scrape result through the LIVE venue from setUp.
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Control Comedian", DATE_1, "Cap City Comedy Club", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
         venueScanRunner.run(job);

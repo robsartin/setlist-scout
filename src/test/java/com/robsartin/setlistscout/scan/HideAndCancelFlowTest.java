@@ -272,7 +272,7 @@ class HideAndCancelFlowTest extends AbstractPostgresIntegrationTest {
                 JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(60)));
         LocalDateTime when = LocalDateTime.now().plusDays(12).truncatedTo(ChronoUnit.SECONDS);
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Flow Comedian", when, "Flow Comedy Club", "Austin", null, "x", "u", Show.Kind.COMEDY)));
         venueScanRunner.run(job);
 
@@ -290,7 +290,7 @@ class HideAndCancelFlowTest extends AbstractPostgresIntegrationTest {
 
         // The next real venue scan re-lists the exact same performer AND a fresh, never-seen-before
         // "Control Comedian" -- the positive control this test's own doc explains.
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Flow Comedian", when, "Flow Comedy Club", "Austin", null, "x", "u", Show.Kind.COMEDY),
                 new Show("Control Comedian", when, "Flow Comedy Club", "Austin", null, "x", "u", Show.Kind.COMEDY)));
         venueScanRunner.run(job);

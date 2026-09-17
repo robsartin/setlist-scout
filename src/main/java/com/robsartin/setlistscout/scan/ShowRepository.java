@@ -114,9 +114,9 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     @Transactional
     @Query(value = """
             INSERT INTO show_event
-                (owner, artist_name, event_date_time, venue_name, venue_city, price, source, ticket_url, kind, discovered_at, artist_id)
+                (owner, artist_name, event_date_time, venue_name, venue_city, price, source, ticket_url, kind, discovered_at, artist_id, release_year)
             VALUES
-                (:owner, :artistName, :eventDateTime, :venueName, :venueCity, :price, :source, :ticketUrl, :kind, :discoveredAt, :artistId)
+                (:owner, :artistName, :eventDateTime, :venueName, :venueCity, :price, :source, :ticketUrl, :kind, :discoveredAt, :artistId, :releaseYear)
             ON CONFLICT (owner, artist_name, event_date_time, venue_name) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("owner") String owner,
@@ -129,5 +129,7 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
                         @Param("ticketUrl") String ticketUrl,
                         @Param("kind") String kind,
                         @Param("discoveredAt") Instant discoveredAt,
-                        @Param("artistId") Long artistId);
+                        @Param("artistId") Long artistId,
+                        // #284: null for every concert; a film's year for a screening.
+                        @Param("releaseYear") Integer releaseYear);
 }

@@ -133,7 +133,7 @@ class BandSiteScraperServiceTest {
         String html = "<html><body><h1>Tour dates</h1><p>Jul 4 - The Fillmore</p></body></html>";
         Document doc = Jsoup.parse(html, "https://band.com");
         when(tourPageLlm.extractShows(eq("Dawes"), anyString())).thenReturn(List.of(
-                new TourPageLlmService.ExtractedShow(
+                TourPageLlmService.ExtractedShow.live(
                         LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco", null, Show.Kind.MUSIC)));
 
         List<Show> shows = service.extractShows("Dawes", doc, "https://band.com", START, END);
@@ -150,7 +150,7 @@ class BandSiteScraperServiceTest {
         String html = "<html><body><h1>Shows</h1><p>Jul 4 - Some Comedian</p></body></html>";
         Document doc = Jsoup.parse(html, "https://capcitycomedy.com");
         when(tourPageLlm.extractShows(eq("Cap City Comedy Club"), anyString())).thenReturn(List.of(
-                new TourPageLlmService.ExtractedShow(
+                TourPageLlmService.ExtractedShow.live(
                         LocalDate.of(2026, 7, 4), "Cap City Comedy Club", "Austin", "Some Comedian", Show.Kind.COMEDY)));
 
         List<Show> shows = service.extractShows(
@@ -171,7 +171,7 @@ class BandSiteScraperServiceTest {
         String html = "<html><body><h1>Calendar</h1><p>Jul 4 - Indie Rock Trio</p></body></html>";
         Document doc = Jsoup.parse(html, "https://thevenuedowntown.com");
         when(tourPageLlm.extractShows(eq("The Venue Downtown"), anyString())).thenReturn(List.of(
-                new TourPageLlmService.ExtractedShow(LocalDate.of(2026, 7, 4), "The Venue Downtown",
+                TourPageLlmService.ExtractedShow.live(LocalDate.of(2026, 7, 4), "The Venue Downtown",
                         "Austin", "Indie Rock Trio", Show.Kind.MUSIC)));
 
         List<Show> shows = service.extractShows(
@@ -189,7 +189,7 @@ class BandSiteScraperServiceTest {
         String html = "<html><body><h1>Tour dates</h1><p>Jul 4 - The Fillmore</p></body></html>";
         Document doc = Jsoup.parse(html, "https://band.com");
         when(tourPageLlm.extractShows(eq("Dawes"), anyString())).thenReturn(List.of(
-                new TourPageLlmService.ExtractedShow(
+                TourPageLlmService.ExtractedShow.live(
                         LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco", null, Show.Kind.MUSIC)));
 
         List<Show> shows = service.extractShows("Dawes", doc, "https://band.com", START, END);
@@ -205,7 +205,7 @@ class BandSiteScraperServiceTest {
         String html = "<html><body><h1>Tour dates</h1><p>Jul 4 - The Fillmore</p></body></html>";
         Document doc = Jsoup.parse(html, "https://band.com");
         when(tourPageLlm.extractShows(eq("Dawes"), anyString())).thenReturn(List.of(
-                new TourPageLlmService.ExtractedShow(
+                TourPageLlmService.ExtractedShow.live(
                         LocalDate.of(2026, 7, 4), "The Fillmore", "San Francisco", "   ", Show.Kind.MUSIC)));
 
         List<Show> shows = service.extractShows("Dawes", doc, "https://band.com", START, END);

@@ -293,4 +293,23 @@ class VenuePageRenderTest extends AbstractPostgresIntegrationTest {
         show.setOwner(owner);
         showRepository.save(show);
     }
+
+    /**
+     * Issue #284 (Films 1/3). The kind is DECLARED, not inferred, so the form has to offer it --
+     * and a native {@code <select>} because this app ships no custom JavaScript. LIVE is
+     * preselected so adding a music venue is unchanged.
+     */
+    @Test
+    @DisplayName("issue #284: the add-venue form offers LIVE/CINEMA, with LIVE preselected")
+    void addFormOffersVenueKind() throws Exception {
+        String html = mvc.perform(get("/venues").with(oidcLogin().idToken(t -> t.claim("email", OWNER))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(html).contains("name=\"kind\"");
+        assertThat(html).contains("value=\"LIVE\" selected");
+        assertThat(html).contains("value=\"CINEMA\"");
+        assertThat(html).as("a native select -- this app ships no custom JavaScript")
+                .contains("<select id=\"venue-kind\"");
+    }
 }

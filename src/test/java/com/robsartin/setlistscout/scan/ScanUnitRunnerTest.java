@@ -93,7 +93,7 @@ class ScanUnitRunnerTest {
         // NOTHING, never existsBy/findBy + save -- see ScanUnitRunner#persistNew's javadoc.
         when(showRepository.insertIfAbsent(eq(OWNER), eq("ZZ Top"), eq(show.getEventDateTime()),
                 eq("Moody Center"), eq("Austin"), eq(BigDecimal.TEN), eq(SOURCE_ID),
-                eq("https://tickets.example/1"), eq("MUSIC"), eq(show.getDiscoveredAt()), eq(ARTIST_ID)))
+                eq("https://tickets.example/1"), eq("MUSIC"), eq(show.getDiscoveredAt()), eq(ARTIST_ID), any()))
                 .thenReturn(1);
 
         int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
@@ -127,7 +127,7 @@ class ScanUnitRunnerTest {
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(show));
         when(showRepository.insertIfAbsent(eq(OWNER), eq(eventTitle), any(), eq("Moody Center"),
-                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID))).thenReturn(1);
+                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID), any())).thenReturn(1);
 
         int saved = runner.run(OWNER, ARTIST_ID, SOURCE_ID);
 
@@ -149,7 +149,7 @@ class ScanUnitRunnerTest {
         // insertIfAbsent's ON CONFLICT DO NOTHING suppresses the collision and returns 0 -- it
         // already existed (issue #230).
         when(showRepository.insertIfAbsent(eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"),
-                any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
+                any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
         Show existing = new Show("ZZ Top", show.getEventDateTime(), "Moody Center", "Austin",
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         existing.setArtistId(ARTIST_ID);
@@ -172,7 +172,7 @@ class ScanUnitRunnerTest {
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(rediscovered));
         when(showRepository.insertIfAbsent(eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"),
-                any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
+                any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
 
         // The existing row was written before artist_id existed (or otherwise left unresolved) --
         // artistId is left null here to model that.
@@ -199,7 +199,7 @@ class ScanUnitRunnerTest {
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
         when(showSource.search(any())).thenReturn(List.of(rediscovered));
         when(showRepository.insertIfAbsent(eq(OWNER), eq("ZZ Top"), any(), eq("Moody Center"),
-                any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
+                any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
 
         Show existing = new Show("ZZ Top", rediscovered.getEventDateTime(), "Moody Center", "Austin",
                 BigDecimal.TEN, SOURCE_ID, "https://tickets.example/1", Show.Kind.MUSIC);
@@ -314,21 +314,21 @@ class ScanUnitRunnerTest {
 
         when(showRepository.save(showB)).thenThrow(new DataIntegrityViolationException("duplicate key"));
         when(showRepository.insertIfAbsent(eq(OWNER), eq("Artist A"), any(), eq("Venue A"),
-                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID))).thenReturn(1);
+                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID), any())).thenReturn(1);
         when(showRepository.insertIfAbsent(eq(OWNER), eq("Artist B"), any(), eq("Venue B"),
-                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID))).thenReturn(0);
+                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID), any())).thenReturn(0);
         when(showRepository.insertIfAbsent(eq(OWNER), eq("Artist C"), any(), eq("Venue C"),
-                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID))).thenReturn(1);
+                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID), any())).thenReturn(1);
 
         int saved = runner.persistNew(OWNER, ARTIST_ID, List.of(showA, showB, showC));
 
         assertThat(saved).as("only the two genuinely-new shows are counted, not the colliding one").isEqualTo(2);
         verify(showRepository).insertIfAbsent(eq(OWNER), eq("Artist A"), any(), eq("Venue A"),
-                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID));
+                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID), any());
         // issue #230: showC, AFTER the colliding show in the list, must still be attempted -- the
         // whole point of moving off the throwing existsBy/findBy + save pattern.
         verify(showRepository).insertIfAbsent(eq(OWNER), eq("Artist C"), any(), eq("Venue C"),
-                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID));
+                any(), any(), any(), any(), any(), any(), eq(ARTIST_ID), any());
         verify(showRepository, never()).save(any());
     }
 

@@ -37,19 +37,26 @@ public class BandSiteScraperService {
         this.tourPageLlm = tourPageLlm;
     }
 
+    /** Live mode -- band sites and live venues, unchanged. */
     public List<Show> scrapeShows(String artistName, String siteUrl, LocalDateTime start, LocalDateTime end) {
+        return scrapeShows(artistName, siteUrl, start, end, VenueKind.LIVE);
+    }
+
+    /** #284: {@code venueKind} selects the extraction prompt -- see {@link TourPageLlmService}. */
+    public List<Show> scrapeShows(String artistName, String siteUrl, LocalDateTime start, LocalDateTime end,
+                                   VenueKind venueKind) {
         // Tracks whichever URL is currently being fetched, so a failure on the (optional) second
         // fetch is attributed to the tour page, not misreported as the front page below.
         String currentUrl = siteUrl;
         try {
             Document doc = Jsoup.connect(currentUrl).userAgent(USER_AGENT).timeout(TIMEOUT_MS).get();
-            List<Show> shows = extractShows(artistName, doc, siteUrl, start, end);
+            List<Show> shows = extractShows(artistName, doc, siteUrl, start, end, venueKind);
             if (shows.isEmpty()) {
                 String tourUrl = findTourPageUrl(doc);
                 if (tourUrl != null && !tourUrl.equals(siteUrl)) {
                     currentUrl = tourUrl;
                     Document tourDoc = Jsoup.connect(currentUrl).userAgent(USER_AGENT).timeout(TIMEOUT_MS).get();
-                    shows = extractShows(artistName, tourDoc, tourUrl, start, end);
+                    shows = extractShows(artistName, tourDoc, tourUrl, start, end, venueKind);
                 }
             }
             log.atDebug().addKeyValue("source", "band-site").addKeyValue("url", siteUrl)
@@ -66,6 +73,11 @@ public class BandSiteScraperService {
 
     /** Extract shows from an already-fetched page: JSON-LD events first, LLM fallback otherwise. */
     List<Show> extractShows(String artistName, Document doc, String pageUrl, LocalDateTime start, LocalDateTime end) {
+        return extractShows(artistName, doc, pageUrl, start, end, VenueKind.LIVE);
+    }
+
+    List<Show> extractShows(String artistName, Document doc, String pageUrl, LocalDateTime start, LocalDateTime end,
+                             VenueKind venueKind) {
         String source = "band-site:" + domainOf(pageUrl);
         List<Show> shows = new ArrayList<>();
 
@@ -77,8 +89,11 @@ public class BandSiteScraperService {
         }
 
         if (shows.isEmpty()) {
-            for (TourPageLlmService.ExtractedShow es : tourPageLlm.extractShows(artistName, doc.text())) {
-                LocalDateTime dt = es.date().atStartOfDay();
+            for (TourPageLlmService.ExtractedShow es : tourPageLlm.extractShows(artistName, doc.text(), venueKind)) {
+                // #284: a screening carries its own showtime; a live page is day-granular, so
+                // atStartOfDay stays the behaviour there. Two screenings of one film on one day
+                // differ by nothing but this, and show_event's natural key includes it.
+                LocalDateTime dt = es.time() == null ? es.date().atStartOfDay() : es.date().atTime(es.time());
                 if (!dt.isBefore(start) && !dt.isAfter(end)) {
                     // #208: the page may be a venue calendar listing other acts, not the tracked
                     // artist's own tour page -- use the LLM's per-show performer and kind when it
@@ -86,7 +101,9 @@ public class BandSiteScraperService {
                     // partially-compliant response (see ExtractedShow's javadoc).
                     String performer = (es.performer() != null && !es.performer().isBlank())
                             ? es.performer() : artistName;
-                    shows.add(new Show(performer, dt, es.venue(), es.city(), null, source, pageUrl, es.kind()));
+                    Show show = new Show(performer, dt, es.venue(), es.city(), null, source, pageUrl, es.kind());
+                    show.setReleaseYear(es.releaseYear());
+                    shows.add(show);
                 }
             }
         }

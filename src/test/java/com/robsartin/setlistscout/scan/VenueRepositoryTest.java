@@ -45,10 +45,10 @@ class VenueRepositoryTest extends AbstractPostgresIntegrationTest {
     void rejectsCaseVariantDuplicateForSameOwner() {
         venueRepository.insertIfAbsent("rob@example.com", "Cap City Comedy Club",
                 ArtistNameNormalizer.normalize("Cap City Comedy Club"),
-                "https://www.capcitycomedy.com/events", Instant.now());
+                "https://www.capcitycomedy.com/events", Instant.now(), "LIVE");
         int second = venueRepository.insertIfAbsent("rob@example.com", "cap city COMEDY club",
                 ArtistNameNormalizer.normalize("cap city COMEDY club"),
-                "https://example.com/other", Instant.now());
+                "https://example.com/other", Instant.now(), "LIVE");
         assertThat(second).isZero();
         assertThat(venueRepository.findByOwnerOrderByNameAsc("rob@example.com")).hasSize(1);
     }
@@ -58,9 +58,9 @@ class VenueRepositoryTest extends AbstractPostgresIntegrationTest {
     @DisplayName("the same venue name under two different owners is allowed")
     void allowsSameNameForDifferentOwners() {
         venueRepository.insertIfAbsent("a@example.com", "Cap City Comedy Club",
-                ArtistNameNormalizer.normalize("Cap City Comedy Club"), "https://x/events", Instant.now());
+                ArtistNameNormalizer.normalize("Cap City Comedy Club"), "https://x/events", Instant.now(), "LIVE");
         venueRepository.insertIfAbsent("b@example.com", "Cap City Comedy Club",
-                ArtistNameNormalizer.normalize("Cap City Comedy Club"), "https://x/events", Instant.now());
+                ArtistNameNormalizer.normalize("Cap City Comedy Club"), "https://x/events", Instant.now(), "LIVE");
         assertThat(venueRepository.findByOwnerOrderByNameAsc("a@example.com")).hasSize(1);
         assertThat(venueRepository.findByOwnerOrderByNameAsc("b@example.com")).hasSize(1);
     }
