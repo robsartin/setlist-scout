@@ -12,6 +12,9 @@ public interface PersonWorkEdgeRepository extends JpaRepository<PersonWorkEdge, 
 
     List<PersonWorkEdge> findByOwnerAndArtistId(String owner, Long artistId);
 
+    /** Every credit on any of these works -- the batched lookup behind the screening match (#289). */
+    List<PersonWorkEdge> findByOwnerAndWorkIdIn(String owner, java.util.Collection<Long> workIds);
+
     /**
      * DB-level idempotent upsert on {@code person_work_edge_unique}, mirroring
      * {@code ArtistEdgeRepository#insertIfAbsent}.

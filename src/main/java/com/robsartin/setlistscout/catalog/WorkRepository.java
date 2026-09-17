@@ -17,6 +17,14 @@ public interface WorkRepository extends JpaRepository<Work, Long> {
     List<Work> findByOwnerAndIdIn(String owner, Collection<Long> ids);
 
     /**
+     * Every work whose normalized title is one of these -- the screening-match lookup (#289),
+     * served by {@code work_match_idx}. Returns ALL films sharing a title rather than one, because
+     * the caller has to see the ambiguity to refuse it: seven different films are called
+     * "Titanic", and a query that silently returned the first would be the bug.
+     */
+    List<Work> findByOwnerAndNormalizedTitleIn(String owner, Collection<String> normalizedTitles);
+
+    /**
      * DB-level idempotent upsert on {@code work_unique (owner, wikidata_qid)}, the same
      * durable-write guard (ADR-0024) as {@code ArtistRepository#insertIfAbsent}.
      *
