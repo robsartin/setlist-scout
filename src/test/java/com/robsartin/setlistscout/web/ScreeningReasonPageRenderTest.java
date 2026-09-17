@@ -131,6 +131,52 @@ class ScreeningReasonPageRenderTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    @DisplayName("every screening at a followed cinema still appears, matched or not")
+    void shouldHideNoScreenings() throws Exception {
+        String owner = "reason-nothing-hidden@example.com";
+        Long goodfellas = work(owner, "Q101540", "Goodfellas", 1990);
+        artist(owner, "Martin Scorsese", ArtistStatus.SEED, goodfellas, "DIRECTED");
+        screening(owner, "Goodfellas", 1990, soon);
+        screening(owner, "Some Obscure Film", 1974, soon.plusHours(1));
+        screening(owner, "Another Unmatched Film", 2011, soon.plusHours(3));
+
+        String body = showsPage(owner);
+
+        // #284's decision stands: a followed cinema shows everything screening there. The match is
+        // a reason and a sort key, never a filter.
+        assertThat(body).contains("Goodfellas")
+                .contains("Some Obscure Film")
+                .contains("Another Unmatched Film");
+    }
+
+    @Test
+    @DisplayName("a LIVE venue's cross-filter is untouched by any of this")
+    void shouldLeaveTheLiveVenueCrossFilterAlone() throws Exception {
+        String owner = "reason-live-venue@example.com";
+        // A venue-sourced LIVE show whose performer the owner does not follow stays hidden, exactly
+        // as #206/#277 decided. The shared ShowController path is the regression risk here.
+        //
+        // Two-sided on purpose: a bare absence assertion passes just as well when the row was
+        // never rendered for an unrelated reason -- a bad insert, a date outside the window, a
+        // page that 500s. The followed band is the positive control that proves this page, this
+        // venue and this date window all work, so the absence below means what it claims.
+        jdbc.update("INSERT INTO show_event (owner, artist_name, event_date_time, venue_name, source,"
+                        + " kind, discovered_at) VALUES (?, 'Some Unfollowed Band', ?, 'Cap City',"
+                        + " 'venue:capcitycomedy.com', 'MUSIC', now())",
+                owner, soon);
+        jdbc.update("INSERT INTO show_event (owner, artist_name, event_date_time, venue_name, source,"
+                        + " kind, discovered_at) VALUES (?, 'Wilco', ?, 'Cap City',"
+                        + " 'venue:capcitycomedy.com', 'MUSIC', now())",
+                owner, soon.plusHours(1));
+        artist(owner, "Wilco", ArtistStatus.SEED, null, null);
+
+        String body = showsPage(owner);
+
+        assertThat(body).contains("Wilco");
+        assertThat(body).doesNotContain("Some Unfollowed Band");
+    }
+
+    @Test
     @DisplayName("ranking screenings leaves a concert on the same day exactly where it was")
     void shouldNotDisturbNonFilmShows() throws Exception {
         String owner = "reason-concert@example.com";
