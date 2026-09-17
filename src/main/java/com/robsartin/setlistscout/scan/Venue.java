@@ -36,6 +36,14 @@ public class Venue {
     @Column(name = "calendar_url", nullable = false)
     private String calendarUrl;
 
+    /**
+     * #284: LIVE or CINEMA -- see {@link VenueKind} for why this is declared rather than inferred.
+     * Defaults to LIVE so an existing row and any caller that does not care keep today's behaviour.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private VenueKind kind = VenueKind.LIVE;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -62,4 +70,8 @@ public class Venue {
     public String getCalendarUrl() { return calendarUrl; }
     public void setCalendarUrl(String calendarUrl) { this.calendarUrl = calendarUrl; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public VenueKind getKind() { return kind; }
+
+    void setKind(VenueKind kind) { this.kind = kind; }
 }

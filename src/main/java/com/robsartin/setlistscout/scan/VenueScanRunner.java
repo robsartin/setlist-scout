@@ -121,7 +121,15 @@ public class VenueScanRunner {
             // here, just persist what it returns.
             List<Show> shows = scraper.scrapeShows(venue.getName(), venue.getCalendarUrl(), start, end);
             int saved = persist(job.getOwner(), venue.getCalendarUrl(), shows);
-            publishPerformersSeen(job.getOwner(), shows);
+            // #284: a CINEMA publishes nothing. VenuePerformerSeen turns every performer at a
+            // followed venue into a PENDING_REVIEW artist, which is right for a music/comedy room
+            // and catastrophic for a cinema -- hundreds of film titles a year filed beside the
+            // musicians, the pollution class of #253 and #255. A screening in this sub-project is
+            // not connected to anybody; sub-project 3 connects it via a WORK, not via the artist
+            // catalog.
+            if (venue.getKind() != VenueKind.CINEMA) {
+                publishPerformersSeen(job.getOwner(), shows);
+            }
 
             log.atDebug().addKeyValue("owner", job.getOwner()).addKeyValue("venueId", venue.getId())
                     .addKeyValue("found", shows.size()).addKeyValue("saved", saved).log("venue scan");

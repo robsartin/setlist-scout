@@ -182,4 +182,68 @@ class VenuePerformerSeenFlowTest extends AbstractPostgresIntegrationTest {
                 .as("stays REJECTED across repeated real scans -- not resurrected to PENDING_REVIEW")
                 .isEqualTo(ArtistStatus.REJECTED);
     }
+
+    /**
+     * Issue #284 (Films 1/3): the assertion that keeps films out of the artist catalog.
+     *
+     * <p>{@code VenuePerformerSeen} turns every performer at a followed venue into a
+     * {@code PENDING_REVIEW} artist. Pointed at a cinema that files hundreds of film titles a year
+     * beside the musicians -- the pollution class of #253 (LLM prose stored as artists) and #255
+     * (comma-split seed fragments). A CINEMA must publish nothing.
+     *
+     * <p><b>Why this is a differential and not a bare negative.</b> The listener is
+     * {@code @ApplicationModuleListener}, i.e. AFTER_COMMIT and asynchronous, so asserting "no
+     * artists" straight after {@code run()} passes whether the event was suppressed or merely had
+     * not landed yet -- the false green this class's other test already documents at length. There
+     * is no in-run positive control available here either, because a correct CINEMA run publishes
+     * NOTHING at all. So the control is a second venue: a LIVE one, scanned in the same test with
+     * the same scraper result. Its performer becoming an artist proves the publish -> listener path
+     * is genuinely alive in THIS run; the cinema's film not becoming one is then a real suppression
+     * rather than a race. {@link #awaitQuiescence} then proves no listener was left mid-flight.
+     */
+    @Test
+    @DisplayName("issue #284: a CINEMA venue creates ZERO artist rows, while a LIVE venue in the "
+            + "same run still creates its candidate")
+    void aCinemaCreatesNoArtistsWhileALiveVenueStillDoes() {
+        Venue cinema = venueRepository.save(cinemaVenue());
+        VenueScanJob cinemaJob = venueScanJobRepository.save(new VenueScanJob(
+                OWNER, cinema.getId(), JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(60)));
+
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Goodfellas", DATE_1, "AFS Cinema", "Austin",
+                        null, "x", "u", Show.Kind.FILM)));
+        venueScanRunner.run(cinemaJob);
+
+        // The cinema run must have SUCCEEDED. run() catches RuntimeException and records a job
+        // failure, so "published nothing" and "blew up before publishing" are indistinguishable
+        // from the outside -- and the first version of this test passed for exactly that wrong
+        // reason, because show_event's V23 CHECK did not yet allow FILM and every insert threw.
+        VenueScanJob ranCinema = venueScanJobRepository.findById(cinemaJob.getId()).orElseThrow();
+        assertThat(ranCinema.getLastError())
+                .as("the cinema scan completed; suppression must not be a swallowed crash").isNull();
+        assertThat(ranCinema.getAttempts()).isZero();
+
+        // The control: the SAME scrape result through the LIVE venue from setUp.
+        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+                new Show("Control Comedian", DATE_1, "Cap City Comedy Club", "Austin",
+                        null, "x", "u", Show.Kind.COMEDY)));
+        venueScanRunner.run(job);
+
+        awaitUntil(() -> artistRepository.findByOwnerAndName(OWNER, "Control Comedian").orElse(null),
+                a -> a != null);
+        Long incomplete = awaitQuiescence(jdbcTemplate);
+        assertThat(incomplete).as("no listener left mid-flight -- the cinema run published nothing "
+                + "rather than publishing something that failed").isZero();
+
+        assertThat(artistRepository.findByOwner(OWNER)).extracting(Artist::getName)
+                .as("the control landed; the film did not become an artist")
+                .containsExactly("Control Comedian");
+    }
+
+    private Venue cinemaVenue() {
+        Venue cinema = new Venue(OWNER, "AFS Cinema",
+                ArtistNameNormalizer.normalize("AFS Cinema"), "https://www.austinfilm.org/calendar");
+        cinema.setKind(VenueKind.CINEMA);
+        return cinema;
+    }
 }
