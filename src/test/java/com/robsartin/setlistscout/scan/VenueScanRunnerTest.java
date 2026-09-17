@@ -102,7 +102,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("persists every extracted show with the performer as artist_name and a venue: source")
     void persistsEveryExtractedShow() {
-        when(scraper.scrapeShows(eq("Cap City Comedy Club"), eq(CALENDAR_URL), any(), any()))
+        when(scraper.scrapeShows(eq("Cap City Comedy Club"), eq(CALENDAR_URL), any(), any(), any()))
                 .thenReturn(List.of(
                         new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
                                 null, "x", "u", Show.Kind.COMEDY),
@@ -127,7 +127,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
         mattBraunger.setOwner(OWNER);
         Long mattBraungerId = artistRepository.save(mattBraunger).getId();
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 // A case variant of the stored name -- proves the real ArtistNameNormalizer lookup,
                 // not a raw exact-string match.
                 new Show("MATT BRAUNGER", DATE_1, "The Red Room at Cap City", "Austin",
@@ -150,7 +150,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("keeps the room name the extractor reported, not the venue's own name")
     void keepsExtractedRoomName() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
         runner.run(job);
@@ -162,7 +162,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("a scraper failure marks the job failed and does not break the run")
     void recordsScraperFailure() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenThrow(new RuntimeException("boom"));
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenThrow(new RuntimeException("boom"));
         runner.run(job);
         VenueScanJob reloaded = venueScanJobRepository.findById(job.getId()).orElseThrow();
         assertThat(reloaded.getLastError()).contains("boom");
@@ -172,7 +172,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("rescanning the same calendar does not duplicate shows")
     void rescanIsIdempotent() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "Cap City Comedy Club", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
         runner.run(job);
@@ -192,7 +192,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("rescanning the same calendar succeeds cleanly -- it does not silently record a failure")
     void rescanSucceedsCleanlyNotViaCaughtFailure() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "Cap City Comedy Club", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
         runner.run(job);
@@ -212,7 +212,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     void successReschedulesJob() {
         job.setAttempts(3);
         job = venueScanJobRepository.save(job);
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of());
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of());
 
         Instant before = Instant.now();
         runner.run(job);
@@ -239,7 +239,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("a scraper failure leaves the job SCHEDULED so claimDue can reclaim it")
     void failureKeepsJobReclaimable() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenThrow(new RuntimeException("boom"));
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenThrow(new RuntimeException("boom"));
 
         runner.run(job);
 
@@ -270,7 +270,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     void doesNotPersistAShowForARejectedPerformer() {
         saveArtist("Matt Braunger", ArtistStatus.REJECTED);
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
                         null, "x", "u", Show.Kind.COMEDY),
                 new Show("Nick Mullen", DATE_2, "Cap City Comedy Club", "Austin",
@@ -289,7 +289,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     void doesNotPersistAShowForARemovedPerformer() {
         saveArtist("Matt Braunger", ArtistStatus.REMOVED);
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
 
@@ -310,7 +310,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     void stillPersistsAShowForAPendingPerformer() {
         Long pendingId = saveArtist("Matt Braunger", ArtistStatus.PENDING_REVIEW);
 
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
 
@@ -325,7 +325,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @DisplayName("issue #277: an UNKNOWN performer's show is still persisted -- no catalog row yet "
             + "is not a rejection, and is the normal first-scan case")
     void stillPersistsAShowForAnUnknownPerformer() {
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Nobody In The Catalog", DATE_1, "Cap City Comedy Club", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
 
@@ -345,7 +345,7 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
     @DisplayName("issue #277: un-rejecting a performer brings their shows back on the next scrape")
     void unrejectingAPerformerRestoresTheirShowsOnTheNextScrape() {
         Long artistId = saveArtist("Matt Braunger", ArtistStatus.REJECTED);
-        when(scraper.scrapeShows(any(), any(), any(), any())).thenReturn(List.of(
+        when(scraper.scrapeShows(any(), any(), any(), any(), any())).thenReturn(List.of(
                 new Show("Matt Braunger", DATE_1, "The Red Room at Cap City", "Austin",
                         null, "x", "u", Show.Kind.COMEDY)));
 
@@ -364,5 +364,44 @@ class VenueScanRunnerTest extends AbstractPostgresIntegrationTest {
         assertThat(showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER))
                 .singleElement()
                 .satisfies(s -> assertThat(s.getArtistId()).isEqualTo(artistId));
+    }
+
+    /**
+     * Issue #284: a screening persists with {@code kind = FILM} and its release year, and the
+     * cinema's kind is what selects the film extraction prompt upstream.
+     */
+    @Test
+    @DisplayName("issue #284: a CINEMA scan persists screenings with FILM kind and a release year")
+    void cinemaScanPersistsFilmsWithTheirYear() {
+        Venue cinema = venueRepository.save(cinemaVenue());
+        VenueScanJob cinemaJob = venueScanJobRepository.save(new VenueScanJob(
+                OWNER, cinema.getId(), JobStatus.SCHEDULED, 0, Instant.now().minusSeconds(60)));
+
+        Show earlyShowing = new Show("Goodfellas", DATE_1.withHour(19).withMinute(30),
+                "AFS Cinema", "Austin", null, "x", "u", Show.Kind.FILM);
+        earlyShowing.setReleaseYear(1990);
+        Show lateShowing = new Show("Goodfellas", DATE_1.withHour(21).withMinute(45),
+                "AFS Cinema", "Austin", null, "x", "u", Show.Kind.FILM);
+        lateShowing.setReleaseYear(1990);
+        when(scraper.scrapeShows(any(), any(), any(), any(), eq(VenueKind.CINEMA)))
+                .thenReturn(List.of(earlyShowing, lateShowing));
+
+        runner.run(cinemaJob);
+
+        List<Show> stored = showRepository.findByOwnerOrderByEventDateTimeAsc(OWNER);
+        // Two showings of ONE film on ONE day. They differ only by event_date_time, which is part
+        // of the natural key -- without the showtime they would collapse to a single midnight row
+        // and ON CONFLICT DO NOTHING would silently drop the second.
+        assertThat(stored).hasSize(2);
+        assertThat(stored).extracting(Show::getKind).containsOnly(Show.Kind.FILM);
+        assertThat(stored).extracting(Show::getReleaseYear).containsOnly(1990);
+        assertThat(stored).extracting(Show::getArtistName).containsOnly("Goodfellas");
+    }
+
+    private Venue cinemaVenue() {
+        Venue cinema = new Venue(OWNER, "AFS Cinema",
+                ArtistNameNormalizer.normalize("AFS Cinema"), "https://www.austinfilm.org/calendar");
+        cinema.setKind(VenueKind.CINEMA);
+        return cinema;
     }
 }

@@ -23,15 +23,17 @@ public interface VenueRepository extends JpaRepository<Venue, Long> {
      */
     @Modifying
     @Query(value = """
-            INSERT INTO venue (owner, name, normalized_name, calendar_url, created_at)
-            VALUES (:owner, :name, :normalizedName, :calendarUrl, :createdAt)
+            INSERT INTO venue (owner, name, normalized_name, calendar_url, created_at, kind)
+            VALUES (:owner, :name, :normalizedName, :calendarUrl, :createdAt, :kind)
             ON CONFLICT (owner, normalized_name) DO NOTHING
             """, nativeQuery = true)
     int insertIfAbsent(@Param("owner") String owner,
                         @Param("name") String name,
                         @Param("normalizedName") String normalizedName,
                         @Param("calendarUrl") String calendarUrl,
-                        @Param("createdAt") Instant createdAt);
+                        @Param("createdAt") Instant createdAt,
+                        // #284: LIVE or CINEMA, declared by the owner on the add form.
+                        @Param("kind") String kind);
 
     List<Venue> findByOwnerOrderByNameAsc(String owner);
 

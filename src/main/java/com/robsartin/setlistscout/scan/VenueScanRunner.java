@@ -119,9 +119,17 @@ public class VenueScanRunner {
             // scrapeShows already carries each show's own performer name (falling back to the
             // venue name passed in) and MUSIC/COMEDY kind (#208, PR #216) -- nothing to re-derive
             // here, just persist what it returns.
-            List<Show> shows = scraper.scrapeShows(venue.getName(), venue.getCalendarUrl(), start, end);
+            List<Show> shows = scraper.scrapeShows(venue.getName(), venue.getCalendarUrl(), start, end, venue.getKind());
             int saved = persist(job.getOwner(), venue.getCalendarUrl(), shows);
-            publishPerformersSeen(job.getOwner(), shows);
+            // #284: a CINEMA publishes nothing. VenuePerformerSeen turns every performer at a
+            // followed venue into a PENDING_REVIEW artist, which is right for a music/comedy room
+            // and catastrophic for a cinema -- hundreds of film titles a year filed beside the
+            // musicians, the pollution class of #253 and #255. A screening in this sub-project is
+            // not connected to anybody; sub-project 3 connects it via a WORK, not via the artist
+            // catalog.
+            if (venue.getKind() != VenueKind.CINEMA) {
+                publishPerformersSeen(job.getOwner(), shows);
+            }
 
             log.atDebug().addKeyValue("owner", job.getOwner()).addKeyValue("venueId", venue.getId())
                     .addKeyValue("found", shows.size()).addKeyValue("saved", saved).log("venue scan");
@@ -156,7 +164,7 @@ public class VenueScanRunner {
             Long artistId = performer == null ? null : performer.getId();
             saved += showRepository.insertIfAbsent(owner, show.getArtistName(), show.getEventDateTime(),
                     show.getVenueName(), show.getVenueCity(), show.getPrice(), source, show.getTicketUrl(),
-                    show.getKind().name(), discoveredAt, artistId);
+                    show.getKind().name(), discoveredAt, artistId, show.getReleaseYear());
         }
         return saved;
     }

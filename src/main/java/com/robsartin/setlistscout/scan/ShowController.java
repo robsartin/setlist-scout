@@ -206,6 +206,16 @@ public class ShowController {
     private static List<Show> visibleToOwner(List<Show> shows, Set<String> activeArtistNames) {
         return shows.stream()
                 .filter(s -> !s.getSource().startsWith("venue:")
+                        // #284 (Films 1/3): a followed CINEMA shows everything screening there.
+                        // The venue-follow cross-filter below asks "is this performer an artist you
+                        // follow", and a film has no catalog row at all -- #284 deliberately files
+                        // no artist for a screening -- so that rule alone hides EVERY screening and
+                        // following a cinema shows nothing. Deliberately the OPPOSITE of the rule
+                        // #206 gave live venues, and only until sub-project 3 can narrow it back to
+                        // "because you follow Scorsese"; volume is controlled by which cinemas get
+                        // followed. Live venues keep the cross-filter untouched, which is what
+                        // keeps #277's rejected-performer decision intact.
+                        || s.getKind() == Show.Kind.FILM
                         || activeArtistNames.contains(ArtistNameNormalizer.normalize(s.getArtistName())))
                 .toList();
     }

@@ -69,6 +69,23 @@ public class VenueService {
      */
     @Transactional
     public AddVenueOutcome addVenue(String owner, String rawName, String rawUrl) {
+        return addVenue(owner, rawName, rawUrl, VenueKind.LIVE);
+    }
+
+    /**
+     * #284: {@code kind} is declared by the owner, never inferred -- see {@link VenueKind} for the
+     * three behaviours it drives and why guessing is the wrong shape of mistake to risk.
+     *
+     * <p><b>BOTH overloads carry {@code @Transactional}, deliberately.</b> The three-arg one
+     * delegates here with a self-call, and Spring's proxy-based AOP only intercepts EXTERNAL calls,
+     * so the annotation cannot be on just one of them: on the delegate alone, a caller of this
+     * four-arg method (the controller) gets no transaction; on this one alone, a caller of the
+     * delegate (every existing caller) gets none. Either way the {@code @Modifying} insert fails
+     * with "Executing an update/delete query" -- and splitting this method produced both halves of
+     * that failure in turn before both annotations were in place.
+     */
+    @Transactional
+    public AddVenueOutcome addVenue(String owner, String rawName, String rawUrl, VenueKind kind) {
         String name = rawName == null ? "" : rawName.trim();
         String url = rawUrl == null ? "" : rawUrl.trim();
         if (name.isEmpty() || url.isEmpty()) {
@@ -79,7 +96,7 @@ public class VenueService {
         }
         String normalizedName = ArtistNameNormalizer.normalize(name);
         Instant now = Instant.now();
-        venueRepository.insertIfAbsent(owner, name, normalizedName, url, now);
+        venueRepository.insertIfAbsent(owner, name, normalizedName, url, now, kind.name());
         venueRepository.findByOwnerAndNormalizedName(owner, normalizedName)
                 .ifPresent(venue -> venueScanJobRepository.insertIfAbsent(owner, venue.getId(), now));
         return AddVenueOutcome.ADDED;

@@ -28,6 +28,18 @@
             <label for="venue-url">Calendar URL</label>
             <input type="url" id="venue-url" name="url" placeholder="https://venue.example.com/events" size="28"/>
         </div>
+        <!--/* #284: declared, never inferred. This one value picks the extraction prompt, decides
+               whether performers become review candidates, and decides whether what is found is
+               visible at all -- so a URL heuristic would be wrong silently and at scale (hundreds
+               of film titles filed as artists, the #253/#255 class). A native <select>, no
+               JavaScript, LIVE preselected so the common case is unchanged. */-->
+        <div class="field">
+            <label for="venue-kind">Kind</label>
+            <select id="venue-kind" name="kind">
+                <option value="LIVE" selected>Live venue (music, comedy)</option>
+                <option value="CINEMA">Cinema (films)</option>
+            </select>
+        </div>
         <button type="submit" class="btn-primary">Add</button>
     </form>
 

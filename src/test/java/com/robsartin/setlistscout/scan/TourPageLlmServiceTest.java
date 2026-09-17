@@ -323,4 +323,82 @@ class TourPageLlmServiceTest {
         assertThat(show.venue()).isBlank();
         assertThat(show.city()).isBlank();
     }
+
+    // ---- #284 (Films 1/3): cinema calendars ----
+
+    /**
+     * A cinema calendar told it is "a tour/shows page belonging to AFS Cinema" and asked for "the
+     * act performing" yields nonsense. Film mode asks a different question, and the answer carries
+     * two fields a concert line does not: the showtime and the release year.
+     */
+    @Test
+    @DisplayName("issue #284: CINEMA mode parses showtime and release year")
+    void cinemaModeParsesShowtimeAndYear() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": "2026-10-04 19:30 | AFS Cinema | Austin | Goodfellas | 1990\\n2026-10-04 21:45 | AFS Cinema | Austin | Goodfellas | 1990"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("AFS Cinema", "irrelevant page text", VenueKind.CINEMA);
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(TourPageLlmService.ExtractedShow::performer)
+                .containsExactly("Goodfellas", "Goodfellas");
+        assertThat(result).extracting(TourPageLlmService.ExtractedShow::releaseYear)
+                .containsExactly(1990, 1990);
+        assertThat(result).extracting(TourPageLlmService.ExtractedShow::kind)
+                .containsOnly(Show.Kind.FILM);
+        // The two showings differ ONLY by time. Without it they collapse to one midnight row and
+        // ON CONFLICT DO NOTHING silently drops the second -- the natural key is
+        // (owner, artist_name, event_date_time, venue_name).
+        assertThat(result).extracting(TourPageLlmService.ExtractedShow::time)
+                .containsExactly(java.time.LocalTime.of(19, 30), java.time.LocalTime.of(21, 45));
+    }
+
+    @Test
+    @DisplayName("issue #284: a cinema line with no time still parses, rather than being dropped")
+    void cinemaLineWithoutATimeStillParses() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": "2026-10-04 | AFS Cinema | Austin | Dune | 2021"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("AFS Cinema", "irrelevant page text", VenueKind.CINEMA);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).time()).isNull();
+        assertThat(result.get(0).releaseYear()).isEqualTo(2021);
+    }
+
+    @Test
+    @DisplayName("issue #284: a cinema line with an unparseable year keeps the screening, without a year")
+    void cinemaLineWithBadYearKeepsTheScreening() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": "2026-10-04 19:30 | AFS Cinema | Austin | Goodfellas | unknown"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("AFS Cinema", "irrelevant page text", VenueKind.CINEMA);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).performer()).isEqualTo("Goodfellas");
+        assertThat(result.get(0).releaseYear())
+                .as("a missing year is not worth discarding a real screening over").isNull();
+    }
+
+    @Test
+    @DisplayName("issue #284: LIVE mode is unchanged -- field 5 is still MUSIC/COMEDY, not a year")
+    void liveModeIsUnchanged() {
+        server.enqueue(json("""
+                {"content": [{"type": "text", "text": "2026-07-04 | Cap City | Austin | Nick Mullen | COMEDY"}]}
+                """));
+
+        List<TourPageLlmService.ExtractedShow> result =
+                service.extractShows("Cap City", "irrelevant page text", VenueKind.LIVE);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).kind()).isEqualTo(Show.Kind.COMEDY);
+        assertThat(result.get(0).releaseYear()).isNull();
+        assertThat(result.get(0).time()).isNull();
+    }
 }

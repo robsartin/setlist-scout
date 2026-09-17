@@ -64,8 +64,11 @@ public class VenueController {
      * matching the pre-existing empty-submission behavior.
      */
     @PostMapping
-    public String add(@RequestParam String name, @RequestParam String url, RedirectAttributes redirect) {
-        VenueService.AddVenueOutcome outcome = venueService.addVenue(currentUser.email(), name, url);
+    public String add(@RequestParam String name, @RequestParam String url,
+                      @RequestParam(defaultValue = "LIVE") VenueKind kind, RedirectAttributes redirect) {
+        // #284: defaulted rather than required, so an older bookmarked form post still adds a live
+        // venue instead of 400-ing -- the form itself always submits an explicit value.
+        VenueService.AddVenueOutcome outcome = venueService.addVenue(currentUser.email(), name, url, kind);
         if (outcome == VenueService.AddVenueOutcome.INVALID_URL) {
             redirect.addFlashAttribute("venueMessage",
                     "Could not add that venue: the calendar URL needs a scheme (e.g. \"https://\") "

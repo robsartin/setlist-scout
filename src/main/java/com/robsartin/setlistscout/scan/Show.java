@@ -48,6 +48,15 @@ public class Show {
     @Column(nullable = false)
     private Kind kind;
 
+    /**
+     * #284: a film's release year, null for a concert. Disambiguates the page (repertory cinemas
+     * screen {@code Dune (1984)} and {@code Dune (2021)} in one season) and is the identity half
+     * that {@code UNIQUE (owner, normalized_name)} cannot express when sub-project 2 needs a WORK.
+     * Deliberately NOT in the natural key -- see V38.
+     */
+    @Column(name = "release_year")
+    private Integer releaseYear;
+
     @Column(nullable = false)
     private Instant discoveredAt = Instant.now();
 
@@ -106,5 +115,9 @@ public class Show {
     public void setArtistId(Long artistId) { this.artistId = artistId; }
 
     /** #202: what kind of event this is. Comedy is the only non-music case in scope -- film (#204) is deliberately excluded. */
-    public enum Kind { MUSIC, COMEDY }
+    public enum Kind { MUSIC, COMEDY, FILM }
+
+    public Integer getReleaseYear() { return releaseYear; }
+
+    public void setReleaseYear(Integer releaseYear) { this.releaseYear = releaseYear; }
 }

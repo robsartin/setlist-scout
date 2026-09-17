@@ -773,4 +773,54 @@ class ShowControllerTest {
         verify(sourceHealth).unhealthyDetail();
         verify(sourceHealth, never()).isHealthy(anyString());
     }
+
+    // ---- #284 (Films 1/3): a screening is visible on venue-follow alone ----
+
+    private static Show screening(String title) {
+        Show show = new Show(title, LocalDateTime.now().plusDays(5), "AFS Cinema", "Austin",
+                null, "venue:www.austinfilm.org", null, Show.Kind.FILM);
+        show.setOwner(OWNER);
+        return show;
+    }
+
+    private void showsPageWith(Show... shows) {
+        when(settingsService.getOrCreateSettings(OWNER))
+                .thenReturn(new SearchSettings(OWNER, "Austin", "TX", 50, 6));
+        when(showRepository.findByOwnerAndEventDateTimeBetweenAndHiddenAtIsNullOrderByEventDateTimeAsc(
+                anyString(), any(), any())).thenReturn(new java.util.ArrayList<>(List.of(shows)));
+    }
+
+    /**
+     * {@code visibleToOwner} keeps a {@code venue:} show only when its performer is an ACTIVE
+     * artist (#220). A film has no catalog row -- #284 deliberately files no artist for a screening
+     * -- so that rule alone would hide EVERY screening, and following a cinema would show nothing.
+     */
+    @Test
+    @DisplayName("issue #284: a FILM from a followed venue is visible with no matching artist")
+    void aScreeningIsVisibleOnVenueFollowAlone() {
+        Show goodfellas = screening("Goodfellas");
+        showsPageWith(goodfellas);
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        List<?> visible = (List<?>) model.getAttribute("shows");
+        assertThat(visible).hasSize(1);
+        assertThat(visible.get(0)).isSameAs(goodfellas);
+    }
+
+    /**
+     * The other half, and the one that keeps #277's decision intact: widening the rule for films
+     * must not widen it for live venues. A comedian the owner rejected stays hidden.
+     */
+    @Test
+    @DisplayName("issue #284: a non-FILM venue show for a non-active performer is still hidden")
+    void aLiveVenueShowForANonActivePerformerStaysHidden() {
+        showsPageWith(show("Some Rejected Comedian", "venue:www.capcitycomedy.com"));
+        Model model = new ExtendedModelMap();
+
+        controller.shows("eventDate", false, model);
+
+        assertThat((List<?>) model.getAttribute("shows")).isEmpty();
+    }
 }
