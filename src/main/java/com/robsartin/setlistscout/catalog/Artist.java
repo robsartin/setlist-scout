@@ -70,6 +70,26 @@ public class Artist {
     private String defaultVenueName;
     private String defaultVenueCity;
 
+    /**
+     * Which Wikidata entity this artist IS (#286), once something has resolved it, plus the label
+     * and description that were matched.
+     *
+     * <p>All three nullable, and most artists never carry them. An artist whose name is ambiguous
+     * stays unresolved on purpose: live Wikidata matches "Willie Nelson" to the musician AND an
+     * American boxer, and a wrong QID here is well-formed, resolves cleanly, and quietly attaches
+     * somebody else's filmography -- the one error no later step can catch. The label and
+     * description are stored so a human can see that Q206112 is the country musician; without them
+     * a wrong match is a number nobody can check.
+     */
+    @Column(name = "wikidata_qid")
+    private String wikidataQid;
+
+    @Column(name = "wikidata_label")
+    private String wikidataLabel;
+
+    @Column(name = "wikidata_description")
+    private String wikidataDescription;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -116,4 +136,15 @@ public class Artist {
     public String getDefaultVenueCity() { return defaultVenueCity; }
     public void setDefaultVenueCity(String defaultVenueCity) { this.defaultVenueCity = defaultVenueCity; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public String getWikidataQid() { return wikidataQid; }
+    public String getWikidataLabel() { return wikidataLabel; }
+    public String getWikidataDescription() { return wikidataDescription; }
+
+    /** Set together, by {@code WikidataIdentityService}, or not at all. */
+    public void setWikidataIdentity(String qid, String label, String description) {
+        this.wikidataQid = qid;
+        this.wikidataLabel = label;
+        this.wikidataDescription = description;
+    }
 }
