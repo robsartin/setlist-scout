@@ -64,7 +64,7 @@ services:
       # This is not a secret, so Blueprint sync will overwrite the live value with
       # whatever's here -- verify it matches the live env var before adopting.
       - key: ALLOWED_EMAILS
-        value: rob.sartin@gmail.com,davidbuley01@gmail.com
+        value: rob.sartin@gmail.com,davidbuley01@gmail.com,rio.bravo.norte@gmail.com
       # Secrets -- Render prompts for these on first Blueprint apply (never committed).
       - key: GOOGLE_CLIENT_ID
         sync: false
